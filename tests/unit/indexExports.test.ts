@@ -15,6 +15,7 @@ describe('src/index exports', () => {
     vi.stubGlobal('window', dom.window);
     vi.stubGlobal('document', dom.window.document);
     vi.stubGlobal('sessionStorage', dom.window.sessionStorage);
+    vi.stubGlobal('GM_getTab', (callback: (tab: Record<string, unknown>) => void) => callback({}));
   });
 
   afterEach(() => {

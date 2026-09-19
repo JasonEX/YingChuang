@@ -381,6 +381,10 @@ export function createGmMockScript(): string {
   return `
 (() => {
   const store = new Map();
+  // Same-origin fixture persistence; cross-origin tests supply a tab-scoped mock.
+  window.GM_getTab = callback => queueMicrotask(() =>
+    callback(JSON.parse(sessionStorage.getItem('__mnr_test_tab') || '{}')));
+  window.GM_saveTab = tab => sessionStorage.setItem('__mnr_test_tab', JSON.stringify(tab));
   window.unsafeWindow = window;
   window.GM_info = {
     script: {

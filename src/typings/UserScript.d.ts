@@ -9,6 +9,8 @@ declare function GM_getValue<T = unknown>(name: string, defaultValue?: T): T;
 declare function GM_setValue<T = unknown>(name: string, value: T): void;
 declare function GM_deleteValue(name: string): void;
 declare function GM_listValues(): string[];
+declare function GM_getTab(callback: (tab: Record<string, unknown>) => void): void;
+declare function GM_saveTab(tab: Record<string, unknown>): void;
 
 declare function GM_getResourceText(resourceName: string): string;
 declare function GM_getResourceURL(resourceName: string): string;

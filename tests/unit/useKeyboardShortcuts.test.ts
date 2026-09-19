@@ -318,4 +318,62 @@ describe('useKeyboardShortcuts', () => {
     app.unmount();
     mountEl.remove();
   });
+
+  it('leaves Enter/Space on a focused control to native activation', async () => {
+    const onEnter = vi.fn();
+    const onSpace = vi.fn();
+    const onNext = vi.fn();
+
+    const Comp = defineComponent({
+      setup() {
+        useKeyboardShortcuts([
+          { key: 'enter', handler: onEnter, preventDefault: true },
+          { key: ' ', handler: onSpace, preventDefault: true },
+          { key: 'n', handler: onNext, preventDefault: true },
+        ]);
+        return () => null;
+      },
+    });
+
+    const mountEl = document.createElement('div');
+    document.body.appendChild(mountEl);
+    const app = createApp(Comp);
+    app.mount(mountEl);
+    await nextTick();
+
+    const button = document.createElement('button');
+    document.body.appendChild(button);
+    const press = (target: EventTarget, key: string) => {
+      const e = new dom.window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+      target.dispatchEvent(e);
+      return e;
+    };
+
+    expect(press(button, 'Enter').defaultPrevented).toBe(false);
+    expect(press(button, ' ').defaultPrevented).toBe(false);
+    expect(onEnter).not.toHaveBeenCalled();
+    expect(onSpace).not.toHaveBeenCalled();
+
+    const link = document.createElement('a');
+    link.href = '/contents';
+    document.body.appendChild(link);
+    expect(press(link, 'Enter').defaultPrevented).toBe(false);
+    expect(onEnter).not.toHaveBeenCalled();
+    expect(press(link, ' ').defaultPrevented).toBe(true);
+    expect(onSpace).toHaveBeenCalledTimes(1);
+    onSpace.mockClear();
+    link.remove();
+
+    press(button, 'n');
+    expect(onNext).toHaveBeenCalledTimes(1);
+
+    press(document.body, 'Enter');
+    press(document.body, ' ');
+    expect(onEnter).toHaveBeenCalledTimes(1);
+    expect(onSpace).toHaveBeenCalledTimes(1);
+
+    app.unmount();
+    mountEl.remove();
+    button.remove();
+  });
 });

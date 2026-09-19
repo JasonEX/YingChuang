@@ -37,10 +37,10 @@ export function isInvalidChapterUrl(url: string, currentChapterUrl?: string): bo
     const invalidPatterns = [
       /^https?:\/\/[^/]+\/?$/i, // Root domain
       /^https?:\/\/[^/]+\/(?:index|home|main)?\.?(?:html?|php)?$/i, // Homepage variants
-      /\/(?:user|login|register|search|rank|category|tag|author|help|about|contact|faq)\/?/i,
       /\/(?:book|novel|xiaoshuo|info)\/?\d*\/?$/i, // Book index without chapter
       /\/(?:list|catalog|toc|contents?)\.?(?:html?)?$/i,
       /\/(?:index|list|last|LastPage|end)\.(?:html?|php|aspx)/i,
+      /\/(?:user|login|register|search|rank|category|tag|author|help|about|contact|faq)\.(?:html?|php|aspx)$/i,
       // Ciweimao: non-chapter endpoints under /chapter/
       /\/chapter\/get_par_tsu_list(?:$|[/?#])/i,
       /\/chapter\/ajax_get_session_code(?:$|[/?#])/i,
@@ -51,6 +51,17 @@ export function isInvalidChapterUrl(url: string, currentChapterUrl?: string): bo
       if (pattern.test(normalizedUrl) || pattern.test(pathname)) {
         return true;
       }
+    }
+
+    // Non-chapter sections must be whole path segments: hostnames (author.example.com) and
+    // slugs (/helpful-hero/, /about.time/) are not site sections. File endpoints such as
+    // /search.php are handled separately above.
+    if (
+      /\/(?:user|login|register|search|rank|category|tag|author|help|about|contact|faq)(?:\/|$)/i.test(
+        pathname
+      )
+    ) {
+      return true;
     }
 
     // If current chapter URL is provided, check URL structure similarity
@@ -176,20 +187,20 @@ export function detectTocPage(
   }
 
   // Heuristic 5: Title/content contains TOC-related keywords
+  // English keywords need word boundaries: prose like "protocol" or "photocopy" is not a TOC.
   const tocKeywords = [
-    '目录',
-    '章节列表',
-    '章节目录',
-    '全部章节',
-    '最新章节',
-    '小说目录',
-    'table of contents',
-    'toc',
-    'catalog',
-    'index',
+    /目录/,
+    /章节列表/,
+    /章节目录/,
+    /全部章节/,
+    /最新章节/,
+    /小说目录/,
+    /\btable of contents\b/i,
+    /\btoc\b/i,
+    /\bcatalog\b/i,
+    /\bindex\b/i,
   ];
-  const pageText = textContent.toLowerCase();
-  const keywordMatches = tocKeywords.filter(kw => pageText.includes(kw.toLowerCase()));
+  const keywordMatches = tocKeywords.filter(kw => kw.test(textContent));
   if (keywordMatches.length >= 2 || (keywordMatches.length >= 1 && linkCount > 15)) {
     return true;
   }

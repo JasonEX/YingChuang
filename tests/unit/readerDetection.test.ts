@@ -27,6 +27,44 @@ describe('Reader detection utilities', () => {
     expect(isInvalidChapterUrl('https://example.com/412421_1.html')).toBe(false);
   });
 
+  it('isInvalidChapterUrl matches non-chapter sections only as whole path segments', () => {
+    expect(isInvalidChapterUrl('https://example.com/search.php')).toBe(true);
+    expect(isInvalidChapterUrl('https://example.com/author/12')).toBe(true);
+    expect(
+      isInvalidChapterUrl(
+        'https://author.example.com/12/345.html',
+        'https://author.example.com/12/344.html'
+      )
+    ).toBe(false);
+    expect(
+      isInvalidChapterUrl(
+        'https://example.com/novel/helpful-hero/chapter-12',
+        'https://example.com/novel/helpful-hero/chapter-11'
+      )
+    ).toBe(false);
+    expect(
+      isInvalidChapterUrl(
+        'https://example.com/novel/about.time/chapter-12',
+        'https://example.com/novel/about.time/chapter-11'
+      )
+    ).toBe(false);
+    expect(isInvalidChapterUrl('https://example.com/b/12/tagline-3.html')).toBe(false);
+  });
+
+  it('detectTocPage ignores English TOC keywords embedded in ordinary words', () => {
+    const prose = `<p>${'He checked the protocol and the photocopy in the catalogue. '.repeat(20)}</p>`;
+    expect(detectTocPage(prose, 'https://e.com/n/1/2.html', 'https://e.com/n/1/1.html')).toBe(
+      false
+    );
+    expect(
+      detectTocPage(
+        '<p>Table of Contents</p> <p>Index</p>',
+        'https://e.com/n/1/2.html',
+        'https://e.com/n/1/1.html'
+      )
+    ).toBe(true);
+  });
+
   it('isInvalidChapterUrl rejects cross-host URLs when currentChapterUrl is provided', () => {
     expect(
       isInvalidChapterUrl('https://other.example.com/chapter/1', 'https://example.com/chapter/2')

@@ -352,7 +352,7 @@ describe('AutoEnableManager', () => {
     await manager.execute(doc);
 
     expect(mockedProtection.activate).toHaveBeenCalledTimes(1);
-    expect(mockedProtection.removeOverlays).toHaveBeenCalledTimes(1);
+    expect(mockedProtection.removeOverlays).not.toHaveBeenCalled();
     expect(mockedSectionMerger.merge).toHaveBeenCalledTimes(1);
     expect(launchCallback).toHaveBeenCalledTimes(1);
   });
@@ -502,9 +502,22 @@ describe('AutoEnableManager', () => {
     await manager.manualEnable(doc);
 
     expect(mockedProtection.activate).toHaveBeenCalledTimes(1);
-    expect(mockedProtection.removeOverlays).toHaveBeenCalledTimes(1);
+    expect(mockedProtection.removeOverlays).not.toHaveBeenCalled();
     expect(mockedSectionMerger.merge).toHaveBeenCalledTimes(1);
     expect(launchCallback).toHaveBeenCalledTimes(1);
+  });
+
+  it('removes page overlays only in aggressive (cleanupScripts) mode', async () => {
+    const { AutoEnableManager } = await import('@/core/AutoEnableManager');
+    const manager = new AutoEnableManager({
+      enableProtection: true,
+      protectionOptions: { cleanupScripts: true },
+    });
+    manager.setLaunchCallback(vi.fn());
+
+    await manager.manualEnable(createDoc('https://example.com/chapter/1'));
+
+    expect(mockedProtection.removeOverlays).toHaveBeenCalledTimes(1);
   });
 
   it('manualEnable remembers an unset site preference', async () => {

@@ -1189,10 +1189,71 @@ test('shows the first Goboo section before rate-limited background merging compl
   expect(logs.some(line => line.includes('pageerror'))).toBe(false);
 });
 
-test('treats Space as one locked page-turn command while the key is held', async ({
-  context,
-  page,
-}) => {
+for (const focusTarget of ['pane', 'link'] as const) {
+  test(`treats Space as one locked page-turn command with focused ${focusTarget}`, async ({
+    context,
+    page,
+  }) => {
+    await context.route(targetUrl, route =>
+      route.fulfill({
+        body: fixtureHtml,
+        contentType: 'text/html; charset=utf-8',
+        status: 200,
+      })
+    );
+    await addYingChuangUserscript(context);
+
+    await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
+    assertMnrSmokeState(await waitForMnrReader(page));
+
+    const readerMain = page.locator('#mnr-reader-root').locator('.mnr-reader-main');
+    const initial = await readerMain.evaluate(main => {
+      const instrumented = main as HTMLElement & { mnrScrollByCalls: number };
+      const originalScrollBy = instrumented.scrollBy.bind(instrumented);
+      instrumented.mnrScrollByCalls = 0;
+      instrumented.scrollBy = (arg1?: number | ScrollToOptions, arg2?: number) => {
+        instrumented.mnrScrollByCalls += 1;
+        if (typeof arg1 === 'number') {
+          originalScrollBy(arg1, arg2 ?? 0);
+        } else {
+          originalScrollBy(arg1);
+        }
+      };
+      instrumented.focus();
+      return { clientHeight: instrumented.clientHeight, scrollTop: instrumented.scrollTop };
+    });
+
+    if (focusTarget === 'link') {
+      await readerMain.evaluate(main => {
+        const link = document.createElement('a');
+        link.href = '#reading-note';
+        link.textContent = '正文注释';
+        main.prepend(link);
+        link.focus({ preventScroll: true });
+      });
+    }
+
+    await page.keyboard.down('Space');
+    for (let index = 0; index < 12; index += 1) await page.keyboard.down('Space');
+    await page.keyboard.up('Space');
+    await page.waitForTimeout(750);
+
+    const afterHold = await readerMain.evaluate(main => ({
+      calls: (main as HTMLElement & { mnrScrollByCalls: number }).mnrScrollByCalls,
+      scrollTop: main.scrollTop,
+    }));
+    expect(afterHold.calls).toBe(1);
+    expect(
+      Math.abs(afterHold.scrollTop - initial.scrollTop - initial.clientHeight * 0.9)
+    ).toBeLessThan(3);
+
+    await page.keyboard.press('Shift+Space');
+    await page.waitForTimeout(750);
+    await expect.poll(() => readerMain.evaluate(main => main.scrollTop)).toBeLessThan(3);
+  });
+}
+
+test('leaves Enter on a focused toolbar button to native activation', async ({ context, page }) => {
   await context.route(targetUrl, route =>
     route.fulfill({
       body: fixtureHtml,
@@ -1205,41 +1266,177 @@ test('treats Space as one locked page-turn command while the key is held', async
   await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
   assertMnrSmokeState(await waitForMnrReader(page));
 
-  const readerMain = page.locator('#mnr-reader-root').locator('.mnr-reader-main');
-  const initial = await readerMain.evaluate(main => {
-    const instrumented = main as HTMLElement & { mnrScrollByCalls: number };
-    const originalScrollBy = instrumented.scrollBy.bind(instrumented);
-    instrumented.mnrScrollByCalls = 0;
-    instrumented.scrollBy = (arg1?: number | ScrollToOptions, arg2?: number) => {
-      instrumented.mnrScrollByCalls += 1;
-      if (typeof arg1 === 'number') {
-        originalScrollBy(arg1, arg2 ?? 0);
-      } else {
-        originalScrollBy(arg1);
-      }
-    };
-    instrumented.focus();
-    return { clientHeight: instrumented.clientHeight, scrollTop: instrumented.scrollTop };
-  });
+  const reader = page.locator('#mnr-reader-root');
+  const settingsButton = reader.getByRole('button', { name: '打开设置' });
+  const settingsPanel = reader.locator('.mnr-settings-panel');
 
-  await page.keyboard.down('Space');
-  for (let index = 0; index < 12; index += 1) await page.keyboard.down('Space');
-  await page.keyboard.up('Space');
-  await page.waitForTimeout(750);
+  // Closing the panel restores focus to the toolbar button that opened it.
+  await settingsButton.click();
+  await expect(settingsPanel).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(settingsPanel).toHaveCount(0);
+  await expect(settingsButton).toBeFocused();
 
-  const afterHold = await readerMain.evaluate(main => ({
-    calls: (main as HTMLElement & { mnrScrollByCalls: number }).mnrScrollByCalls,
-    scrollTop: main.scrollTop,
-  }));
-  expect(afterHold.calls).toBe(1);
-  expect(
-    Math.abs(afterHold.scrollTop - initial.scrollTop - initial.clientHeight * 0.9)
-  ).toBeLessThan(3);
-
-  await page.keyboard.press('Shift+Space');
-  await page.waitForTimeout(750);
-  await expect.poll(() => readerMain.evaluate(main => main.scrollTop)).toBeLessThan(3);
+  // Enter must activate the focused button, not the "open index page" reader shortcut.
+  await page.keyboard.press('Enter');
+  await expect(settingsPanel).toBeVisible();
+  expect(page.url()).toBe(targetUrl);
 });
+
+for (const switchBack of [false, true]) {
+  test(`applies deferred overlay cleanup only while aggressive remains selected (${switchBack})`, async ({
+    context,
+    page,
+  }) => {
+    const fixtureWithOverlay = fixtureHtml.replace(
+      '</body>',
+      `<a id="host-overlay" class="host-overlay" href="https://ads.example/"
+      style="position: fixed; inset: 0; z-index: 2001; background: transparent"></a></body>`
+    );
+    await context.route(targetUrl, route =>
+      route.fulfill({
+        body: fixtureWithOverlay,
+        contentType: 'text/html; charset=utf-8',
+        status: 200,
+      })
+    );
+    await addYingChuangUserscript(context);
+
+    await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
+    assertMnrSmokeState(await waitForMnrReader(page));
+
+    const reader = page.locator('#mnr-reader-root');
+    const overlay = page.locator('#host-overlay');
+    await expect
+      .poll(() => overlay.evaluate(element => (element as HTMLElement).style.display))
+      .toBe('');
+
+    await reader.getByRole('button', { name: '打开设置' }).click();
+    await reader.locator('summary').filter({ hasText: '本站与高级' }).click();
+    const aggressiveButton = reader.getByRole('button', { name: '强力', exact: true });
+    await aggressiveButton.click();
+    await expect(aggressiveButton).toHaveAttribute('aria-pressed', 'true');
+
+    // The host is display:none while reading, so the geometry-dependent pass is deferred to exit.
+    expect(await overlay.evaluate(element => (element as HTMLElement).style.display)).toBe('');
+    if (switchBack) {
+      await reader.getByRole('button', { name: '标准', exact: true }).click();
+    }
+    await reader.getByRole('button', { name: '退出阅读模式' }).click();
+
+    await expect(reader).toHaveCount(0);
+    await expect
+      .poll(() => overlay.evaluate(element => (element as HTMLElement).style.display))
+      .toBe(switchBack ? '' : 'none');
+    if (switchBack) await expect(overlay).toBeVisible();
+    else await expect(overlay).toBeHidden();
+  });
+}
+
+for (const tabApis of [true, false]) {
+  test(`carries deferred overlay cleanup across a slow canonical exit (tab APIs: ${tabApis})`, async ({
+    context,
+    page,
+  }) => {
+    const nextUrl = 'http://mnr.test/chapter/101.html';
+    const canonicalNextUrl = `http://${tabApis ? 'www.' : ''}mnr.test/chapter/101.html/`;
+    const withOverlay = (html: string) =>
+      html.replace(
+        '</body>',
+        `<a id="host-overlay" href="https://ads.example/"
+        style="position: fixed; inset: 0; z-index: 2001; background: transparent"></a></body>`
+      );
+    let destinationNavigations = 0;
+
+    await context.route(/^http:\/\/(?:www\.)?mnr\.test\/chapter\/.*$/, async route => {
+      const request = route.request();
+      if (request.url() === canonicalNextUrl) {
+        return route.fulfill({
+          body: withOverlay(nextFixtureHtml),
+          contentType: 'text/html; charset=utf-8',
+          status: 200,
+        });
+      }
+      const isDestination = request.url() === nextUrl;
+      if (isDestination && request.isNavigationRequest() && request.frame() === page.mainFrame()) {
+        destinationNavigations++;
+        await new Promise(resolve => setTimeout(resolve, 5_250));
+        return route.fulfill({
+          body: `<!doctype html><script>location.replace(${JSON.stringify(
+            canonicalNextUrl
+          )})</script>`,
+          contentType: 'text/html; charset=utf-8',
+          status: 200,
+        });
+      }
+      return route.fulfill({
+        body: withOverlay(isDestination ? nextFixtureHtml : fixtureHtml),
+        contentType: 'text/html; charset=utf-8',
+        status: 200,
+      });
+    });
+
+    const userScript = fs.readFileSync(getMnrE2eConfig().userScriptPath, 'utf8');
+    await context.addInitScript({
+      content: `${createGmMockScript()}
+      (() => {
+        // This one-page fixture uses a domain cookie to emulate Tampermonkey's cross-origin
+        // tab object; production uses GM_getTab/GM_saveTab rather than cookie storage.
+        const cookieName = '__mnr_e2e_tab_state';
+        const readTab = () => {
+          const row = document.cookie
+            .split('; ')
+            .find(value => value.startsWith(cookieName + '='));
+          if (!row) return {};
+          try {
+            return JSON.parse(decodeURIComponent(row.slice(cookieName.length + 1)));
+          } catch {
+            return {};
+          }
+        };
+        window.GM_getTab = callback => queueMicrotask(() => callback(readTab()));
+        window.GM_saveTab = tab => {
+          document.cookie = cookieName + '=' + encodeURIComponent(JSON.stringify(tab))
+            + '; Domain=mnr.test; Path=/; SameSite=Lax';
+        };
+      })();
+      ${tabApis ? '' : 'delete window.GM_getTab; delete window.GM_saveTab;'}
+      ${userScript}`,
+    });
+
+    await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
+    assertMnrSmokeState(await waitForMnrReader(page));
+    const reader = page.locator('#mnr-reader-root');
+    await expect(reader.locator(`article[data-chapter-url="${nextUrl}"]`)).toContainText(
+      '第101章 手势续读'
+    );
+    await reader.getByRole('button', { name: '打开设置' }).click();
+    await reader.locator('summary').filter({ hasText: '本站与高级' }).click();
+    await reader.getByRole('button', { name: '强力', exact: true }).click();
+    await page.keyboard.press('Escape');
+
+    await page.waitForTimeout(800);
+    await page.keyboard.press('ArrowRight');
+    await expect(page).toHaveURL(nextUrl);
+    await expect(reader).toHaveCount(1);
+    await reader.getByRole('button', { name: '打开设置' }).click();
+    await reader.getByRole('button', { name: '退出阅读模式' }).click();
+
+    await expect(page).toHaveURL(canonicalNextUrl);
+    await expect(reader).toHaveCount(0);
+    await expect(page.locator('#mnr-entry-root')).toHaveCount(1);
+    await expect.poll(() => destinationNavigations).toBe(1);
+    const destinationOverlay = page.locator('#host-overlay');
+    await expect
+      .poll(() => destinationOverlay.evaluate(element => (element as HTMLElement).style.display))
+      .toBe('none');
+    await expect(destinationOverlay).toBeHidden();
+
+    // Only the exit navigation is suppressed; a subsequent load follows normal auto-enable.
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    assertMnrSmokeState(await waitForMnrReader(page));
+  });
+}
 
 test.describe('mobile gesture paging', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
@@ -1543,6 +1740,36 @@ test('keeps generic chapter extraction, template TOC and cached navigation in th
   await expect(root.locator('.mnr-reader')).toBeVisible();
   expect(documentNavigations).toBe(1);
   expect(requests.some(url => url.includes('?lang='))).toBe(false);
+});
+
+test('preloads chapters beneath a dotted section-like slug', async ({ context, page }) => {
+  const firstUrl = 'http://mnr.test/novel/about.time/chapter-11';
+  const nextUrl = 'http://mnr.test/novel/about.time/chapter-12';
+  let nextRequests = 0;
+
+  await context.route('http://mnr.test/novel/about.time/**', async route => {
+    const url = new URL(route.request().url());
+    const chapter = Number(url.pathname.match(/chapter-(\d+)$/)?.[1]);
+    if (url.href === nextUrl) nextRequests++;
+    await route.fulfill({
+      body: `<!doctype html><html><head><title>第${chapter}章 点号路径测试</title></head>
+        <body><article><h1>第${chapter}章 点号路径测试</h1>
+        <div id="content">${paragraphs}</div>
+        ${chapter > 11 ? '<a href="/novel/about.time/chapter-11">上一章</a>' : ''}
+        ${chapter < 12 ? '<a href="/novel/about.time/chapter-12">下一章</a>' : ''}
+        </article></body></html>`,
+      contentType: 'text/html; charset=utf-8',
+    });
+  });
+  await addYingChuangUserscript(context);
+  await page.goto(firstUrl);
+  await waitForMnrReader(page);
+
+  const nextChapter = page
+    .locator('#mnr-reader-root')
+    .locator(`article[data-chapter-url="${nextUrl}"]`);
+  await expect(nextChapter).toContainText('第12章 点号路径测试');
+  expect(nextRequests).toBeGreaterThan(0);
 });
 
 test('caches script-rendered rule chapters through an iframe and removes it afterward', async ({

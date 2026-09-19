@@ -108,7 +108,11 @@ export class AutoEnableManager {
 
     const protection = getSiteProtection();
     protection.activate(this.options.protectionOptions);
-    protection.removeOverlays();
+    // Overlay removal mutates the host page irreversibly, and the reader already hides the host
+    // page while open, so keep it to aggressive mode (the only mode that opts into cleanup).
+    if (this.options.protectionOptions?.cleanupScripts) {
+      protection.removeOverlays();
+    }
   }
 
   private deactivateProtection(): void {

@@ -335,7 +335,7 @@ export function createNavigation(ctx: NavigationContext) {
       if (parsed.indexUrl) parsed.indexUrl = normalizeUrlForFetch(parsed.indexUrl);
 
       current.chapter = parsed;
-      current.rule = parsed.rule;
+      current.rule = parsed.rule || current.rule;
       ctx.originalContents.value.set(current.id, parsed.content);
       ctx.originalTitles.value.set(current.id, {
         title: parsed.title,
@@ -344,7 +344,7 @@ export function createNavigation(ctx: NavigationContext) {
 
       ctx.cachedContents.value.set(parsed.url, {
         chapter: parsed,
-        rule: parsed.rule,
+        rule: current.rule,
         cachedAt: Date.now(),
       });
 
