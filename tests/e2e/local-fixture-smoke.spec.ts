@@ -1189,57 +1189,69 @@ test('shows the first Goboo section before rate-limited background merging compl
   expect(logs.some(line => line.includes('pageerror'))).toBe(false);
 });
 
-test('treats Space as one locked page-turn command while the key is held', async ({
-  context,
-  page,
-}) => {
-  await context.route(targetUrl, route =>
-    route.fulfill({
-      body: fixtureHtml,
-      contentType: 'text/html; charset=utf-8',
-      status: 200,
-    })
-  );
-  await addYingChuangUserscript(context);
+for (const focusTarget of ['pane', 'link'] as const) {
+  test(`treats Space as one locked page-turn command with focused ${focusTarget}`, async ({
+    context,
+    page,
+  }) => {
+    await context.route(targetUrl, route =>
+      route.fulfill({
+        body: fixtureHtml,
+        contentType: 'text/html; charset=utf-8',
+        status: 200,
+      })
+    );
+    await addYingChuangUserscript(context);
 
-  await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
-  assertMnrSmokeState(await waitForMnrReader(page));
+    await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
+    assertMnrSmokeState(await waitForMnrReader(page));
 
-  const readerMain = page.locator('#mnr-reader-root').locator('.mnr-reader-main');
-  const initial = await readerMain.evaluate(main => {
-    const instrumented = main as HTMLElement & { mnrScrollByCalls: number };
-    const originalScrollBy = instrumented.scrollBy.bind(instrumented);
-    instrumented.mnrScrollByCalls = 0;
-    instrumented.scrollBy = (arg1?: number | ScrollToOptions, arg2?: number) => {
-      instrumented.mnrScrollByCalls += 1;
-      if (typeof arg1 === 'number') {
-        originalScrollBy(arg1, arg2 ?? 0);
-      } else {
-        originalScrollBy(arg1);
-      }
-    };
-    instrumented.focus();
-    return { clientHeight: instrumented.clientHeight, scrollTop: instrumented.scrollTop };
+    const readerMain = page.locator('#mnr-reader-root').locator('.mnr-reader-main');
+    const initial = await readerMain.evaluate(main => {
+      const instrumented = main as HTMLElement & { mnrScrollByCalls: number };
+      const originalScrollBy = instrumented.scrollBy.bind(instrumented);
+      instrumented.mnrScrollByCalls = 0;
+      instrumented.scrollBy = (arg1?: number | ScrollToOptions, arg2?: number) => {
+        instrumented.mnrScrollByCalls += 1;
+        if (typeof arg1 === 'number') {
+          originalScrollBy(arg1, arg2 ?? 0);
+        } else {
+          originalScrollBy(arg1);
+        }
+      };
+      instrumented.focus();
+      return { clientHeight: instrumented.clientHeight, scrollTop: instrumented.scrollTop };
+    });
+
+    if (focusTarget === 'link') {
+      await readerMain.evaluate(main => {
+        const link = document.createElement('a');
+        link.href = '#reading-note';
+        link.textContent = '正文注释';
+        main.prepend(link);
+        link.focus({ preventScroll: true });
+      });
+    }
+
+    await page.keyboard.down('Space');
+    for (let index = 0; index < 12; index += 1) await page.keyboard.down('Space');
+    await page.keyboard.up('Space');
+    await page.waitForTimeout(750);
+
+    const afterHold = await readerMain.evaluate(main => ({
+      calls: (main as HTMLElement & { mnrScrollByCalls: number }).mnrScrollByCalls,
+      scrollTop: main.scrollTop,
+    }));
+    expect(afterHold.calls).toBe(1);
+    expect(
+      Math.abs(afterHold.scrollTop - initial.scrollTop - initial.clientHeight * 0.9)
+    ).toBeLessThan(3);
+
+    await page.keyboard.press('Shift+Space');
+    await page.waitForTimeout(750);
+    await expect.poll(() => readerMain.evaluate(main => main.scrollTop)).toBeLessThan(3);
   });
-
-  await page.keyboard.down('Space');
-  for (let index = 0; index < 12; index += 1) await page.keyboard.down('Space');
-  await page.keyboard.up('Space');
-  await page.waitForTimeout(750);
-
-  const afterHold = await readerMain.evaluate(main => ({
-    calls: (main as HTMLElement & { mnrScrollByCalls: number }).mnrScrollByCalls,
-    scrollTop: main.scrollTop,
-  }));
-  expect(afterHold.calls).toBe(1);
-  expect(
-    Math.abs(afterHold.scrollTop - initial.scrollTop - initial.clientHeight * 0.9)
-  ).toBeLessThan(3);
-
-  await page.keyboard.press('Shift+Space');
-  await page.waitForTimeout(750);
-  await expect.poll(() => readerMain.evaluate(main => main.scrollTop)).toBeLessThan(3);
-});
+}
 
 test('leaves Enter on a focused toolbar button to native activation', async ({ context, page }) => {
   await context.route(targetUrl, route =>
@@ -1271,49 +1283,55 @@ test('leaves Enter on a focused toolbar button to native activation', async ({ c
   expect(page.url()).toBe(targetUrl);
 });
 
-test('cleans host overlays before restoring a page after switching to aggressive mode', async ({
-  context,
-  page,
-}) => {
-  const fixtureWithOverlay = fixtureHtml.replace(
-    '</body>',
-    `<a id="host-overlay" class="host-overlay" href="https://ads.example/"
+for (const switchBack of [false, true]) {
+  test(`applies deferred overlay cleanup only while aggressive remains selected (${switchBack})`, async ({
+    context,
+    page,
+  }) => {
+    const fixtureWithOverlay = fixtureHtml.replace(
+      '</body>',
+      `<a id="host-overlay" class="host-overlay" href="https://ads.example/"
       style="position: fixed; inset: 0; z-index: 2001; background: transparent"></a></body>`
-  );
-  await context.route(targetUrl, route =>
-    route.fulfill({
-      body: fixtureWithOverlay,
-      contentType: 'text/html; charset=utf-8',
-      status: 200,
-    })
-  );
-  await addYingChuangUserscript(context);
+    );
+    await context.route(targetUrl, route =>
+      route.fulfill({
+        body: fixtureWithOverlay,
+        contentType: 'text/html; charset=utf-8',
+        status: 200,
+      })
+    );
+    await addYingChuangUserscript(context);
 
-  await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
-  assertMnrSmokeState(await waitForMnrReader(page));
+    await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
+    assertMnrSmokeState(await waitForMnrReader(page));
 
-  const reader = page.locator('#mnr-reader-root');
-  const overlay = page.locator('#host-overlay');
-  await expect
-    .poll(() => overlay.evaluate(element => (element as HTMLElement).style.display))
-    .toBe('');
+    const reader = page.locator('#mnr-reader-root');
+    const overlay = page.locator('#host-overlay');
+    await expect
+      .poll(() => overlay.evaluate(element => (element as HTMLElement).style.display))
+      .toBe('');
 
-  await reader.getByRole('button', { name: '打开设置' }).click();
-  await reader.locator('summary').filter({ hasText: '本站与高级' }).click();
-  const aggressiveButton = reader.getByRole('button', { name: '强力', exact: true });
-  await aggressiveButton.click();
-  await expect(aggressiveButton).toHaveAttribute('aria-pressed', 'true');
+    await reader.getByRole('button', { name: '打开设置' }).click();
+    await reader.locator('summary').filter({ hasText: '本站与高级' }).click();
+    const aggressiveButton = reader.getByRole('button', { name: '强力', exact: true });
+    await aggressiveButton.click();
+    await expect(aggressiveButton).toHaveAttribute('aria-pressed', 'true');
 
-  // The host is display:none while reading, so the geometry-dependent pass is deferred to exit.
-  expect(await overlay.evaluate(element => (element as HTMLElement).style.display)).toBe('');
-  await reader.getByRole('button', { name: '退出阅读模式' }).click();
+    // The host is display:none while reading, so the geometry-dependent pass is deferred to exit.
+    expect(await overlay.evaluate(element => (element as HTMLElement).style.display)).toBe('');
+    if (switchBack) {
+      await reader.getByRole('button', { name: '标准', exact: true }).click();
+    }
+    await reader.getByRole('button', { name: '退出阅读模式' }).click();
 
-  await expect(reader).toHaveCount(0);
-  await expect
-    .poll(() => overlay.evaluate(element => (element as HTMLElement).style.display))
-    .toBe('none');
-  await expect(overlay).toBeHidden();
-});
+    await expect(reader).toHaveCount(0);
+    await expect
+      .poll(() => overlay.evaluate(element => (element as HTMLElement).style.display))
+      .toBe(switchBack ? '' : 'none');
+    if (switchBack) await expect(overlay).toBeVisible();
+    else await expect(overlay).toBeHidden();
+  });
+}
 
 test('carries deferred overlay cleanup across a slow cross-origin canonical exit', async ({
   context,
@@ -1411,6 +1429,10 @@ test('carries deferred overlay cleanup across a slow cross-origin canonical exit
     .poll(() => destinationOverlay.evaluate(element => (element as HTMLElement).style.display))
     .toBe('none');
   await expect(destinationOverlay).toBeHidden();
+
+  // Only the exit navigation is suppressed; a subsequent load follows normal auto-enable.
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  assertMnrSmokeState(await waitForMnrReader(page));
 });
 
 test.describe('mobile gesture paging', () => {

@@ -40,7 +40,9 @@ interface ExitNavigation {
   cleanupHostOverlays: boolean;
 }
 
-type UserscriptTabState = Record<string, unknown>;
+type UserscriptTabState = Record<string, unknown> & {
+  [EXIT_NAVIGATION_KEY]?: ExitNavigation;
+};
 
 /** Application state */
 interface AppState {
@@ -70,7 +72,6 @@ let pinia: ReturnType<typeof createPinia> | null = null;
 let readerCleanup: (() => void) | null = null;
 let readerEntryApp: ReturnType<typeof createApp> | null = null;
 let readerEntryCleanup: (() => void) | null = null;
-let exitNavigationPromise: Promise<boolean> | null = null;
 
 function shouldEnableEarlyProtection(url: string): boolean {
   try {
@@ -168,8 +169,6 @@ async function runAutoEnable(): Promise<void> {
     enableProtection: true,
     protectionOptions,
   });
-
-  if (await consumeExitNavigation()) return;
 
   // First, check the decision to handle user-disabled case
   const decision = await manager.check(document);
@@ -375,85 +374,24 @@ function normalizeExitDestination(url: string): string {
   }
 }
 
-function getUserscriptTabState(): Promise<UserscriptTabState | null> {
-  if (typeof GM_getTab === 'undefined' || typeof GM_saveTab === 'undefined') {
-    return Promise.resolve(null);
-  }
-
-  return new Promise(resolve => {
-    try {
-      GM_getTab(tab => resolve(tab && typeof tab === 'object' ? tab : {}));
-    } catch (e) {
-      console.error('[MNR] Failed to read userscript tab state:', e);
-      resolve(null);
-    }
-  });
-}
-
-function saveUserscriptTabState(tab: UserscriptTabState): boolean {
-  try {
-    GM_saveTab(tab);
-    return true;
-  } catch (e) {
-    console.error('[MNR] Failed to save userscript tab state:', e);
-    return false;
-  }
-}
-
-function parseExitNavigation(value: unknown): ExitNavigation | null {
-  let transition = value;
-  if (typeof transition === 'string') {
-    try {
-      transition = JSON.parse(transition) as unknown;
-    } catch {
-      return null;
-    }
-  }
-
-  if (
-    !transition ||
-    typeof transition !== 'object' ||
-    typeof (transition as ExitNavigation).targetUrl !== 'string' ||
-    typeof (transition as ExitNavigation).cleanupHostOverlays !== 'boolean'
-  ) {
-    return null;
-  }
-
-  return transition as ExitNavigation;
-}
-
-async function takeExitNavigation(): Promise<ExitNavigation | null> {
-  const tab = await getUserscriptTabState();
-  if (tab) {
-    const transition = parseExitNavigation(tab[EXIT_NAVIGATION_KEY]);
-    if (!(EXIT_NAVIGATION_KEY in tab)) return null;
-
-    delete tab[EXIT_NAVIGATION_KEY];
-    saveUserscriptTabState(tab);
-    return transition;
-  }
-
-  const serialized = sessionStorage.getItem(EXIT_NAVIGATION_KEY);
-  if (!serialized) return null;
-  sessionStorage.removeItem(EXIT_NAVIGATION_KEY);
-  return parseExitNavigation(serialized);
+function getUserscriptTabState(): Promise<UserscriptTabState> {
+  return new Promise(resolve => GM_getTab(resolve));
 }
 
 async function persistExitNavigation(transition: ExitNavigation): Promise<void> {
   const tab = await getUserscriptTabState();
-  if (tab) {
-    tab[EXIT_NAVIGATION_KEY] = transition;
-    if (saveUserscriptTabState(tab)) return;
-  }
-
-  // Non-Tampermonkey/test fallback; same-origin navigation still retains the transition.
-  sessionStorage.setItem(EXIT_NAVIGATION_KEY, JSON.stringify(transition));
+  tab[EXIT_NAVIGATION_KEY] = transition;
+  GM_saveTab(tab);
 }
 
 /** Consume the one-shot transition created when the reader exits onto another chapter. */
-async function consumeExitNavigationOnce(): Promise<boolean> {
-  const transition = await takeExitNavigation();
+async function consumeExitNavigation(): Promise<boolean> {
+  const tab = await getUserscriptTabState();
+  const transition = tab[EXIT_NAVIGATION_KEY];
   if (!transition) return false;
+  // The next document owns this one-shot intent, even if navigation landed elsewhere.
+  delete tab[EXIT_NAVIGATION_KEY];
+  GM_saveTab(tab);
   if (
     normalizeExitDestination(transition.targetUrl) !==
     normalizeExitDestination(window.location.href)
@@ -466,12 +404,6 @@ async function consumeExitNavigationOnce(): Promise<boolean> {
   if (transition.cleanupHostOverlays) cleanupHostPageOverlays();
   showReaderEntry();
   return true;
-}
-
-function consumeExitNavigation(): Promise<boolean> {
-  // bootstrap() and initialize() share one check so normal pages pay for one tab-state read.
-  exitNavigationPromise ??= consumeExitNavigationOnce();
-  return exitNavigationPromise;
 }
 
 /**
@@ -505,9 +437,7 @@ export function closeReader(): void {
     normalizeUrlForFetch(targetUrl) !== normalizeUrlForFetch(originalUrl)
       ? targetUrl
       : null;
-  const shouldCleanupHostOverlays = appState.pendingHostOverlayCleanup && !navigationTarget;
-  const shouldCarryHostOverlayCleanup =
-    appState.pendingHostOverlayCleanup && navigationTarget !== null;
+  const cleanupHostOverlays = appState.pendingHostOverlayCleanup;
   appState.pendingHostOverlayCleanup = false;
 
   // Unmount app
@@ -532,7 +462,7 @@ export function closeReader(): void {
 
   // While the reader is open, the host page is display:none and overlay geometry is unavailable.
   // Run a newly selected aggressive-mode cleanup after revealing the host, before the next paint.
-  if (shouldCleanupHostOverlays) {
+  if (cleanupHostOverlays && !navigationTarget) {
     cleanupHostPageOverlays();
   }
 
@@ -556,10 +486,12 @@ export function closeReader(): void {
     // the one-shot transition even after a canonical redirect.
     void persistExitNavigation({
       targetUrl: normalizeExitDestination(navigationTarget),
-      cleanupHostOverlays: shouldCarryHostOverlayCleanup,
-    }).then(() => {
-      window.location.href = navigationTarget;
-    });
+      cleanupHostOverlays,
+    })
+      .catch(e => console.error('[MNR] Failed to save exit navigation:', e))
+      .finally(() => {
+        window.location.href = navigationTarget;
+      });
     return; // The next page load will decide whether to show the manual entry.
   }
 

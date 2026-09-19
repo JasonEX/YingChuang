@@ -64,7 +64,8 @@ function isEditableEvent(e: KeyboardEvent): boolean {
   return isInputElement(getDeepActiveElement());
 }
 
-const INTERACTIVE_CONTROL_SELECTOR = 'button, a[href], summary, [role="button"], [role="link"]';
+const SPACE_CONTROL_SELECTOR = 'button, summary, [role="button"]';
+const ENTER_CONTROL_SELECTOR = `${SPACE_CONTROL_SELECTOR}, a[href], [role="link"]`;
 
 /**
  * Enter/Space on a focused control is native activation (e.g. a toolbar button kept focus after
@@ -72,11 +73,12 @@ const INTERACTIVE_CONTROL_SELECTOR = 'button, a[href], summary, [role="button"],
  */
 function isControlActivationEvent(e: KeyboardEvent, key: string): boolean {
   if (key !== 'enter' && key !== ' ') return false;
+  const selector = key === 'enter' ? ENTER_CONTROL_SELECTOR : SPACE_CONTROL_SELECTOR;
   const path = typeof e.composedPath === 'function' ? e.composedPath() : [e.target];
   return path.some(
     node =>
       typeof (node as Partial<Element> | null)?.matches === 'function' &&
-      (node as Element).matches(INTERACTIVE_CONTROL_SELECTOR)
+      (node as Element).matches(selector)
   );
 }
 

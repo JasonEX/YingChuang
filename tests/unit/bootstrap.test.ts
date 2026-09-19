@@ -124,9 +124,23 @@ vi.mock('@/ui/components/entry', async () => {
 
 describe('bootstrap', () => {
   let dom: JSDOM;
+  let tabState: Record<string, unknown>;
+
+  async function loadExitDestination(): Promise<typeof import('@/bootstrap')> {
+    Object.defineProperty(document, 'readyState', { configurable: true, get: () => 'complete' });
+    const bootstrap = await import('@/bootstrap');
+    await vi.waitFor(() => expect(document.getElementById('mnr-entry-root')).not.toBeNull());
+    return bootstrap;
+  }
 
   beforeEach(() => {
     vi.resetModules();
+    tabState = {};
+    vi.stubGlobal(
+      'GM_getTab',
+      vi.fn(callback => queueMicrotask(() => callback(tabState)))
+    );
+    vi.stubGlobal('GM_saveTab', vi.fn());
     mockActivateProtection.mockReset();
     mockDeactivateProtection.mockReset();
     mockGetAutoEnableManager.mockReset();
@@ -213,12 +227,11 @@ describe('bootstrap', () => {
     };
     mockGetAutoEnableManager.mockReturnValue(manager);
 
-    sessionStorage.setItem(
-      'mnr_exit_navigation',
-      JSON.stringify({ targetUrl: window.location.href, cleanupHostOverlays: false })
-    );
-    const bootstrap = await import('@/bootstrap');
-    await bootstrap.initialize();
+    tabState.mnr_exit_navigation = {
+      targetUrl: window.location.href,
+      cleanupHostOverlays: false,
+    };
+    await loadExitDestination();
 
     const entryHost = document.getElementById('mnr-entry-root');
     expect(entryHost).not.toBeNull();
@@ -226,10 +239,10 @@ describe('bootstrap', () => {
     expect(entryHost?.shadowRoot?.querySelector('#mnr-entry-button')?.textContent).toBe(
       '进入阅读模式'
     );
-    expect(sessionStorage.getItem('mnr_exit_navigation')).toBeNull();
+    expect(tabState).not.toHaveProperty('mnr_exit_navigation');
     expect(manager.check).not.toHaveBeenCalled();
     expect(mockRemoveOverlays).not.toHaveBeenCalled();
-    expect(configStore.load).toHaveBeenCalledTimes(1);
+    expect(configStore.load).not.toHaveBeenCalled();
   });
 
   it('consumes matching deferred overlay cleanup on a skipped destination load', async () => {
@@ -247,25 +260,23 @@ describe('bootstrap', () => {
     });
     mockGetSitePreference.mockReturnValue({ enabled: false, timestamp: Date.now() });
 
-    sessionStorage.setItem(
-      'mnr_exit_navigation',
-      JSON.stringify({
-        targetUrl: 'https://example.com/chapter/2',
-        cleanupHostOverlays: true,
-      })
-    );
+    tabState.mnr_exit_navigation = {
+      targetUrl: 'https://example.com/chapter/2',
+      cleanupHostOverlays: true,
+    };
     await import('@/bootstrap');
 
     await vi.waitFor(() => expect(document.getElementById('mnr-entry-root')).not.toBeNull());
     expect(mockDeactivateProtection).toHaveBeenCalled();
     expect(mockRemoveOverlays).toHaveBeenCalledTimes(1);
-    expect(sessionStorage.getItem('mnr_exit_navigation')).toBeNull();
+    expect(tabState).not.toHaveProperty('mnr_exit_navigation');
     expect(mockDeactivateProtection.mock.invocationCallOrder.at(-1)).toBeLessThan(
       mockRemoveOverlays.mock.invocationCallOrder[0]
     );
     expect(configStore.load).not.toHaveBeenCalled();
     expect(mockGetSitePreference).not.toHaveBeenCalled();
     expect(mockGetAutoEnableManager).not.toHaveBeenCalled();
+    expect(GM_getTab).toHaveBeenCalledTimes(1);
   });
 
   it('consumes exit state after a canonical cross-origin redirect in the same tab', async () => {
@@ -306,6 +317,26 @@ describe('bootstrap', () => {
     expect(mockRemoveOverlays).toHaveBeenCalledTimes(1);
     expect(configStore.load).not.toHaveBeenCalled();
     expect(mockGetAutoEnableManager).not.toHaveBeenCalled();
+  });
+
+  it('discards an exit intent for another destination without cleaning or skipping detection', async () => {
+    dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
+      url: 'https://example.com/chapter/3',
+    });
+    vi.stubGlobal('window', dom.window);
+    vi.stubGlobal('document', dom.window.document);
+    Object.defineProperty(document, 'readyState', { configurable: true, get: () => 'complete' });
+    tabState.mnr_exit_navigation = {
+      targetUrl: 'https://example.com/chapter/2',
+      cleanupHostOverlays: true,
+    };
+    const manager = { check: vi.fn(async () => ({ shouldEnable: false })) };
+    mockGetAutoEnableManager.mockReturnValue(manager);
+    await import('@/bootstrap');
+    await vi.waitFor(() => expect(manager.check).toHaveBeenCalledTimes(1));
+    expect(tabState).not.toHaveProperty('mnr_exit_navigation');
+    expect(mockRemoveOverlays).not.toHaveBeenCalled();
+    expect(GM_getTab).toHaveBeenCalledTimes(1);
   });
 
   it('auto-bootstraps ambiguous section pages when an explicit rule matches', async () => {
@@ -353,6 +384,8 @@ describe('bootstrap', () => {
     expect(configStore.load).toHaveBeenCalledTimes(1);
     expect(manager.check).toHaveBeenCalledTimes(1);
     expect(manager.execute).toHaveBeenCalledTimes(1);
+    expect(GM_getTab).toHaveBeenCalledTimes(1);
+    expect(GM_saveTab).not.toHaveBeenCalled();
   });
 
   it('runs auto-enable prompt and mounts reader UI when accepted', async () => {
@@ -586,7 +619,7 @@ describe('bootstrap', () => {
 
     bootstrap.closeReader();
 
-    expect(sessionStorage.getItem('mnr_exit_navigation')).toBeNull();
+    expect(tabState).not.toHaveProperty('mnr_exit_navigation');
     expect(window.location.href).toBe('https://example.com/chapter/1#comments');
     expect(document.title).toBe('Original Chapter Title');
     expect(document.getElementById('mnr-entry-root')).not.toBeNull();
@@ -667,12 +700,11 @@ describe('bootstrap', () => {
     };
     mockGetAutoEnableManager.mockReturnValue(manager);
 
-    sessionStorage.setItem(
-      'mnr_exit_navigation',
-      JSON.stringify({ targetUrl: window.location.href, cleanupHostOverlays: false })
-    );
-    const bootstrap = await import('@/bootstrap');
-    await bootstrap.initialize();
+    tabState.mnr_exit_navigation = {
+      targetUrl: window.location.href,
+      cleanupHostOverlays: false,
+    };
+    await loadExitDestination();
 
     const entryHost = document.getElementById('mnr-entry-root');
     const entryButton = entryHost?.shadowRoot?.querySelector(
@@ -683,6 +715,7 @@ describe('bootstrap', () => {
 
     await vi.waitFor(() => expect(manager.manualEnable).toHaveBeenCalledTimes(1));
     expect(document.getElementById('mnr-entry-root')).toBeNull();
+    expect(GM_getTab).toHaveBeenCalledTimes(1);
   });
 
   it('restores manual entry when reader launch fails on a chapter page', async () => {
@@ -708,12 +741,11 @@ describe('bootstrap', () => {
     mockGetAutoEnableManager.mockReturnValue(manager);
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    sessionStorage.setItem(
-      'mnr_exit_navigation',
-      JSON.stringify({ targetUrl: window.location.href, cleanupHostOverlays: false })
-    );
-    const bootstrap = await import('@/bootstrap');
-    await bootstrap.initialize();
+    tabState.mnr_exit_navigation = {
+      targetUrl: window.location.href,
+      cleanupHostOverlays: false,
+    };
+    await loadExitDestination();
 
     const entryButton = document
       .getElementById('mnr-entry-root')

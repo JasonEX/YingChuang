@@ -20437,10 +20437,12 @@ ul, ol {
 		if (path.length === 0 && isInputElement(e.target)) return true;
 		return isInputElement(getDeepActiveElement());
 	}
-	var INTERACTIVE_CONTROL_SELECTOR = "button, a[href], summary, [role=\"button\"], [role=\"link\"]";
+	var SPACE_CONTROL_SELECTOR = "button, summary, [role=\"button\"]";
+	var ENTER_CONTROL_SELECTOR = `${SPACE_CONTROL_SELECTOR}, a[href], [role="link"]`;
 	function isControlActivationEvent(e, key) {
 		if (key !== "enter" && key !== " ") return false;
-		return (typeof e.composedPath === "function" ? e.composedPath() : [e.target]).some((node) => typeof node?.matches === "function" && node.matches(INTERACTIVE_CONTROL_SELECTOR));
+		const selector = key === "enter" ? ENTER_CONTROL_SELECTOR : SPACE_CONTROL_SELECTOR;
+		return (typeof e.composedPath === "function" ? e.composedPath() : [e.target]).some((node) => typeof node?.matches === "function" && node.matches(selector));
 	}
 	function hasModifiers(e) {
 		return e.ctrlKey || e.altKey || e.metaKey;
@@ -22969,7 +22971,6 @@ ul, ol {
 	var readerCleanup = null;
 	var readerEntryApp = null;
 	var readerEntryCleanup = null;
-	var exitNavigationPromise = null;
 	function shouldEnableEarlyProtection(url) {
 		try {
 			const u = new URL(url);
@@ -23027,7 +23028,6 @@ ul, ol {
 			enableProtection: true,
 			protectionOptions: toProtectionOptions(useConfigStore(pinia).protection)
 		});
-		if (await consumeExitNavigation()) return;
 		const decision = await manager.check(document);
 		appState.currentDecision = decision;
 		if (decision.method === "user-disabled" || decision.showManualEntry) {
@@ -23162,70 +23162,25 @@ ul, ol {
 		}
 	}
 	function getUserscriptTabState() {
-		if (typeof GM_getTab === "undefined" || typeof GM_saveTab === "undefined") return Promise.resolve(null);
-		return new Promise((resolve) => {
-			try {
-				GM_getTab((tab) => resolve(tab && typeof tab === "object" ? tab : {}));
-			} catch (e) {
-				console.error("[MNR] Failed to read userscript tab state:", e);
-				resolve(null);
-			}
-		});
-	}
-	function saveUserscriptTabState(tab) {
-		try {
-			GM_saveTab(tab);
-			return true;
-		} catch (e) {
-			console.error("[MNR] Failed to save userscript tab state:", e);
-			return false;
-		}
-	}
-	function parseExitNavigation(value) {
-		let transition = value;
-		if (typeof transition === "string") try {
-			transition = JSON.parse(transition);
-		} catch {
-			return null;
-		}
-		if (!transition || typeof transition !== "object" || typeof transition.targetUrl !== "string" || typeof transition.cleanupHostOverlays !== "boolean") return null;
-		return transition;
-	}
-	async function takeExitNavigation() {
-		const tab = await getUserscriptTabState();
-		if (tab) {
-			const transition = parseExitNavigation(tab[EXIT_NAVIGATION_KEY]);
-			if (!(EXIT_NAVIGATION_KEY in tab)) return null;
-			delete tab[EXIT_NAVIGATION_KEY];
-			saveUserscriptTabState(tab);
-			return transition;
-		}
-		const serialized = sessionStorage.getItem(EXIT_NAVIGATION_KEY);
-		if (!serialized) return null;
-		sessionStorage.removeItem(EXIT_NAVIGATION_KEY);
-		return parseExitNavigation(serialized);
+		return new Promise((resolve) => GM_getTab(resolve));
 	}
 	async function persistExitNavigation(transition) {
 		const tab = await getUserscriptTabState();
-		if (tab) {
-			tab[EXIT_NAVIGATION_KEY] = transition;
-			if (saveUserscriptTabState(tab)) return;
-		}
-		sessionStorage.setItem(EXIT_NAVIGATION_KEY, JSON.stringify(transition));
+		tab[EXIT_NAVIGATION_KEY] = transition;
+		GM_saveTab(tab);
 	}
-	async function consumeExitNavigationOnce() {
-		const transition = await takeExitNavigation();
+	async function consumeExitNavigation() {
+		const tab = await getUserscriptTabState();
+		const transition = tab[EXIT_NAVIGATION_KEY];
 		if (!transition) return false;
+		delete tab[EXIT_NAVIGATION_KEY];
+		GM_saveTab(tab);
 		if (normalizeExitDestination(transition.targetUrl) !== normalizeExitDestination(window.location.href)) return false;
 		appState.autoEnableDone = true;
 		getSiteProtection().deactivate();
 		if (transition.cleanupHostOverlays) cleanupHostPageOverlays();
 		showReaderEntry();
 		return true;
-	}
-	function consumeExitNavigation() {
-		exitNavigationPromise ??= consumeExitNavigationOnce();
-		return exitNavigationPromise;
 	}
 	function closeReader() {
 		if (!appState.isActive) return;
@@ -23241,8 +23196,7 @@ ul, ol {
 		const originalHostPage = appState.originalHostPage;
 		const originalUrl = originalHostPage?.url || null;
 		const navigationTarget = targetUrl && originalUrl && normalizeUrlForFetch$1(targetUrl) !== normalizeUrlForFetch$1(originalUrl) ? targetUrl : null;
-		const shouldCleanupHostOverlays = appState.pendingHostOverlayCleanup && !navigationTarget;
-		const shouldCarryHostOverlayCleanup = appState.pendingHostOverlayCleanup && navigationTarget !== null;
+		const cleanupHostOverlays = appState.pendingHostOverlayCleanup;
 		appState.pendingHostOverlayCleanup = false;
 		if (app) {
 			app.unmount();
@@ -23255,7 +23209,7 @@ ul, ol {
 		}
 		const hideStyle = document.getElementById("mnr-hide-original");
 		if (hideStyle) hideStyle.remove();
-		if (shouldCleanupHostOverlays) cleanupHostPageOverlays();
+		if (cleanupHostOverlays && !navigationTarget) cleanupHostPageOverlays();
 		if (pinia) useReaderStore(pinia).deactivate();
 		appState.isActive = false;
 		appState.originalHostPage = null;
@@ -23263,8 +23217,8 @@ ul, ol {
 		if (navigationTarget) {
 			persistExitNavigation({
 				targetUrl: normalizeExitDestination(navigationTarget),
-				cleanupHostOverlays: shouldCarryHostOverlayCleanup
-			}).then(() => {
+				cleanupHostOverlays
+			}).catch((e) => console.error("[MNR] Failed to save exit navigation:", e)).finally(() => {
 				window.location.href = navigationTarget;
 			});
 			return;

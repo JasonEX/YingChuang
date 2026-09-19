@@ -354,6 +354,16 @@ describe('useKeyboardShortcuts', () => {
     expect(onEnter).not.toHaveBeenCalled();
     expect(onSpace).not.toHaveBeenCalled();
 
+    const link = document.createElement('a');
+    link.href = '/contents';
+    document.body.appendChild(link);
+    expect(press(link, 'Enter').defaultPrevented).toBe(false);
+    expect(onEnter).not.toHaveBeenCalled();
+    expect(press(link, ' ').defaultPrevented).toBe(true);
+    expect(onSpace).toHaveBeenCalledTimes(1);
+    onSpace.mockClear();
+    link.remove();
+
     press(button, 'n');
     expect(onNext).toHaveBeenCalledTimes(1);
 
