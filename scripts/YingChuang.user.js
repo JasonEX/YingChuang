@@ -62,10 +62,12 @@
 // @exclude            *://www.tadu.com/book/*/toc/
 // @connect            *
 // @grant              GM_deleteValue
+// @grant              GM_getTab
 // @grant              GM_getValue
 // @grant              GM_info
 // @grant              GM_listValues
 // @grant              GM_registerMenuCommand
+// @grant              GM_saveTab
 // @grant              GM_setClipboard
 // @grant              GM_setValue
 // @grant              GM_xmlhttpRequest
@@ -22967,6 +22969,7 @@ ul, ol {
 	var readerCleanup = null;
 	var readerEntryApp = null;
 	var readerEntryCleanup = null;
+	var exitNavigationPromise = null;
 	function shouldEnableEarlyProtection(url) {
 		try {
 			const u = new URL(url);
@@ -23024,7 +23027,7 @@ ul, ol {
 			enableProtection: true,
 			protectionOptions: toProtectionOptions(useConfigStore(pinia).protection)
 		});
-		if (consumeExitNavigation()) return;
+		if (await consumeExitNavigation()) return;
 		const decision = await manager.check(document);
 		appState.currentDecision = decision;
 		if (decision.method === "user-disabled" || decision.showManualEntry) {
@@ -23148,28 +23151,82 @@ ul, ol {
 		const normalized = normalizeUrlForFetch$1(url);
 		try {
 			const parsed = new URL(normalized);
+			if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+				parsed.protocol = "https:";
+				parsed.hostname = parsed.hostname.replace(/^www\./i, "");
+			}
 			if (parsed.pathname.length > 1) parsed.pathname = parsed.pathname.replace(/\/+$/, "");
 			return parsed.toString();
 		} catch {
 			return normalized.replace(/\/+$/, "");
 		}
 	}
-	function consumeExitNavigation() {
-		const serialized = sessionStorage.getItem(EXIT_NAVIGATION_KEY);
-		if (!serialized) return false;
-		sessionStorage.removeItem(EXIT_NAVIGATION_KEY);
-		let transition;
-		try {
-			transition = JSON.parse(serialized);
+	function getUserscriptTabState() {
+		if (typeof GM_getTab === "undefined" || typeof GM_saveTab === "undefined") return Promise.resolve(null);
+		return new Promise((resolve) => {
+			try {
+				GM_getTab((tab) => resolve(tab && typeof tab === "object" ? tab : {}));
+			} catch (e) {
+				console.error("[MNR] Failed to read userscript tab state:", e);
+				resolve(null);
+			}
+		});
+	}
+	function saveUserscriptTabState(tab) {
+		return new Promise((resolve) => {
+			try {
+				GM_saveTab(tab, () => resolve(true));
+			} catch (e) {
+				console.error("[MNR] Failed to save userscript tab state:", e);
+				resolve(false);
+			}
+		});
+	}
+	function parseExitNavigation(value) {
+		let transition = value;
+		if (typeof transition === "string") try {
+			transition = JSON.parse(transition);
 		} catch {
-			return false;
+			return null;
 		}
-		if (typeof transition?.targetUrl !== "string" || typeof transition.cleanupHostOverlays !== "boolean" || normalizeExitDestination(transition.targetUrl) !== normalizeExitDestination(window.location.href)) return false;
+		if (!transition || typeof transition !== "object" || typeof transition.targetUrl !== "string" || typeof transition.cleanupHostOverlays !== "boolean") return null;
+		return transition;
+	}
+	async function takeExitNavigation() {
+		const tab = await getUserscriptTabState();
+		if (tab) {
+			const transition = parseExitNavigation(tab[EXIT_NAVIGATION_KEY]);
+			if (!(EXIT_NAVIGATION_KEY in tab)) return null;
+			delete tab[EXIT_NAVIGATION_KEY];
+			await saveUserscriptTabState(tab);
+			return transition;
+		}
+		const serialized = sessionStorage.getItem(EXIT_NAVIGATION_KEY);
+		if (!serialized) return null;
+		sessionStorage.removeItem(EXIT_NAVIGATION_KEY);
+		return parseExitNavigation(serialized);
+	}
+	async function persistExitNavigation(transition) {
+		const tab = await getUserscriptTabState();
+		if (tab) {
+			tab[EXIT_NAVIGATION_KEY] = transition;
+			if (await saveUserscriptTabState(tab)) return;
+		}
+		sessionStorage.setItem(EXIT_NAVIGATION_KEY, JSON.stringify(transition));
+	}
+	async function consumeExitNavigationOnce() {
+		const transition = await takeExitNavigation();
+		if (!transition) return false;
+		if (normalizeExitDestination(transition.targetUrl) !== normalizeExitDestination(window.location.href)) return false;
 		appState.autoEnableDone = true;
 		getSiteProtection().deactivate();
 		if (transition.cleanupHostOverlays) cleanupHostPageOverlays();
 		showReaderEntry();
 		return true;
+	}
+	function consumeExitNavigation() {
+		exitNavigationPromise ??= consumeExitNavigationOnce();
+		return exitNavigationPromise;
 	}
 	function closeReader() {
 		if (!appState.isActive) return;
@@ -23205,11 +23262,12 @@ ul, ol {
 		appState.originalHostPage = null;
 		appState.entryPageKind = null;
 		if (navigationTarget) {
-			sessionStorage.setItem(EXIT_NAVIGATION_KEY, JSON.stringify({
+			persistExitNavigation({
 				targetUrl: normalizeExitDestination(navigationTarget),
 				cleanupHostOverlays: shouldCarryHostOverlayCleanup
-			}));
-			window.location.href = navigationTarget;
+			}).then(() => {
+				window.location.href = navigationTarget;
+			});
 			return;
 		}
 		restoreHostPageSnapshot(originalHostPage);
@@ -23342,7 +23400,7 @@ ul, ol {
 		if (!isTopFrame()) return;
 		installGlobalDebugErrorListeners();
 		if (appState.isActive) return;
-		if (consumeExitNavigation()) return;
+		if (await consumeExitNavigation()) return;
 		const url = window.location.href;
 		if (!await shouldBootstrapForPage(url, document)) {
 			getSiteProtection().deactivate();

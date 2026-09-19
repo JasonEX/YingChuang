@@ -40,6 +40,8 @@ interface ExitNavigation {
   cleanupHostOverlays: boolean;
 }
 
+type UserscriptTabState = Record<string, unknown>;
+
 /** Application state */
 interface AppState {
   isInitialized: boolean;
@@ -68,6 +70,7 @@ let pinia: ReturnType<typeof createPinia> | null = null;
 let readerCleanup: (() => void) | null = null;
 let readerEntryApp: ReturnType<typeof createApp> | null = null;
 let readerEntryCleanup: (() => void) | null = null;
+let exitNavigationPromise: Promise<boolean> | null = null;
 
 function shouldEnableEarlyProtection(url: string): boolean {
   try {
@@ -166,7 +169,7 @@ async function runAutoEnable(): Promise<void> {
     protectionOptions,
   });
 
-  if (consumeExitNavigation()) return;
+  if (await consumeExitNavigation()) return;
 
   // First, check the decision to handle user-disabled case
   const decision = await manager.check(document);
@@ -359,6 +362,12 @@ function normalizeExitDestination(url: string): string {
   const normalized = normalizeUrlForFetch(url);
   try {
     const parsed = new URL(normalized);
+    // Canonical redirects commonly change only the HTTP scheme or add/remove www.
+    // Treat those as the same destination without accepting unrelated host aliases.
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      parsed.protocol = 'https:';
+      parsed.hostname = parsed.hostname.replace(/^www\./i, '');
+    }
     if (parsed.pathname.length > 1) parsed.pathname = parsed.pathname.replace(/\/+$/, '');
     return parsed.toString();
   } catch {
@@ -366,23 +375,89 @@ function normalizeExitDestination(url: string): string {
   }
 }
 
-/** Consume the one-shot transition created when the reader exits onto another chapter. */
-function consumeExitNavigation(): boolean {
-  const serialized = sessionStorage.getItem(EXIT_NAVIGATION_KEY);
-  if (!serialized) return false;
-  sessionStorage.removeItem(EXIT_NAVIGATION_KEY);
-
-  let transition: ExitNavigation;
-  try {
-    transition = JSON.parse(serialized) as ExitNavigation;
-  } catch {
-    return false;
+function getUserscriptTabState(): Promise<UserscriptTabState | null> {
+  if (typeof GM_getTab === 'undefined' || typeof GM_saveTab === 'undefined') {
+    return Promise.resolve(null);
   }
+
+  return new Promise(resolve => {
+    try {
+      GM_getTab(tab => resolve(tab && typeof tab === 'object' ? tab : {}));
+    } catch (e) {
+      console.error('[MNR] Failed to read userscript tab state:', e);
+      resolve(null);
+    }
+  });
+}
+
+function saveUserscriptTabState(tab: UserscriptTabState): Promise<boolean> {
+  return new Promise(resolve => {
+    try {
+      GM_saveTab(tab, () => resolve(true));
+    } catch (e) {
+      console.error('[MNR] Failed to save userscript tab state:', e);
+      resolve(false);
+    }
+  });
+}
+
+function parseExitNavigation(value: unknown): ExitNavigation | null {
+  let transition = value;
+  if (typeof transition === 'string') {
+    try {
+      transition = JSON.parse(transition) as unknown;
+    } catch {
+      return null;
+    }
+  }
+
   if (
-    typeof transition?.targetUrl !== 'string' ||
-    typeof transition.cleanupHostOverlays !== 'boolean' ||
+    !transition ||
+    typeof transition !== 'object' ||
+    typeof (transition as ExitNavigation).targetUrl !== 'string' ||
+    typeof (transition as ExitNavigation).cleanupHostOverlays !== 'boolean'
+  ) {
+    return null;
+  }
+
+  return transition as ExitNavigation;
+}
+
+async function takeExitNavigation(): Promise<ExitNavigation | null> {
+  const tab = await getUserscriptTabState();
+  if (tab) {
+    const transition = parseExitNavigation(tab[EXIT_NAVIGATION_KEY]);
+    if (!(EXIT_NAVIGATION_KEY in tab)) return null;
+
+    delete tab[EXIT_NAVIGATION_KEY];
+    await saveUserscriptTabState(tab);
+    return transition;
+  }
+
+  const serialized = sessionStorage.getItem(EXIT_NAVIGATION_KEY);
+  if (!serialized) return null;
+  sessionStorage.removeItem(EXIT_NAVIGATION_KEY);
+  return parseExitNavigation(serialized);
+}
+
+async function persistExitNavigation(transition: ExitNavigation): Promise<void> {
+  const tab = await getUserscriptTabState();
+  if (tab) {
+    tab[EXIT_NAVIGATION_KEY] = transition;
+    if (await saveUserscriptTabState(tab)) return;
+  }
+
+  // Non-Tampermonkey/test fallback; same-origin navigation still retains the transition.
+  sessionStorage.setItem(EXIT_NAVIGATION_KEY, JSON.stringify(transition));
+}
+
+/** Consume the one-shot transition created when the reader exits onto another chapter. */
+async function consumeExitNavigationOnce(): Promise<boolean> {
+  const transition = await takeExitNavigation();
+  if (!transition) return false;
+  if (
     normalizeExitDestination(transition.targetUrl) !==
-      normalizeExitDestination(window.location.href)
+    normalizeExitDestination(window.location.href)
   ) {
     return false;
   }
@@ -392,6 +467,12 @@ function consumeExitNavigation(): boolean {
   if (transition.cleanupHostOverlays) cleanupHostPageOverlays();
   showReaderEntry();
   return true;
+}
+
+function consumeExitNavigation(): Promise<boolean> {
+  // bootstrap() and initialize() share one check so normal pages pay for one tab-state read.
+  exitNavigationPromise ??= consumeExitNavigationOnce();
+  return exitNavigationPromise;
 }
 
 /**
@@ -471,16 +552,15 @@ export function closeReader(): void {
   // Chapter URLs are canonicalized (no hash, no redundant ?page=1); compare the same way so
   // closing on the entry chapter restores in place instead of reloading.
   if (navigationTarget) {
-    // Bind this one-shot exit state to its destination instead of a short wall-clock window:
-    // slow pages still consume it, while redirects or later unrelated visits cannot.
-    sessionStorage.setItem(
-      EXIT_NAVIGATION_KEY,
-      JSON.stringify({
-        targetUrl: normalizeExitDestination(navigationTarget),
-        cleanupHostOverlays: shouldCarryHostOverlayCleanup,
-      } satisfies ExitNavigation)
-    );
-    window.location.href = navigationTarget;
+    // Tampermonkey tab state follows this navigation across origins without leaking into other
+    // tabs or long-lived script storage. Save it before navigating so the destination can consume
+    // the one-shot transition even after a canonical redirect.
+    void persistExitNavigation({
+      targetUrl: normalizeExitDestination(navigationTarget),
+      cleanupHostOverlays: shouldCarryHostOverlayCleanup,
+    }).then(() => {
+      window.location.href = navigationTarget;
+    });
     return; // The next page load will decide whether to show the manual entry.
   }
 
@@ -681,7 +761,7 @@ async function bootstrap(): Promise<void> {
   if (!isTopFrame()) return;
   installGlobalDebugErrorListeners();
   if (appState.isActive) return;
-  if (consumeExitNavigation()) return;
+  if (await consumeExitNavigation()) return;
 
   const url = window.location.href;
   if (!(await shouldBootstrapForPage(url, document))) {

@@ -1315,12 +1315,12 @@ test('cleans host overlays before restoring a page after switching to aggressive
   await expect(overlay).toBeHidden();
 });
 
-test('carries deferred overlay cleanup across a slow canonical exit navigation', async ({
+test('carries deferred overlay cleanup across a slow cross-origin canonical exit', async ({
   context,
   page,
 }) => {
   const nextUrl = 'http://mnr.test/chapter/101.html';
-  const canonicalNextUrl = `${nextUrl}/`;
+  const canonicalNextUrl = 'http://www.mnr.test/chapter/101.html/';
   const withOverlay = (html: string) =>
     html.replace(
       '</body>',
@@ -1329,19 +1329,23 @@ test('carries deferred overlay cleanup across a slow canonical exit navigation',
     );
   let destinationNavigations = 0;
 
-  await context.route('http://mnr.test/chapter/**', async route => {
+  await context.route(/^http:\/\/(?:www\.)?mnr\.test\/chapter\/.*$/, async route => {
     const request = route.request();
+    if (request.url() === canonicalNextUrl) {
+      return route.fulfill({
+        body: withOverlay(nextFixtureHtml),
+        contentType: 'text/html; charset=utf-8',
+        status: 200,
+      });
+    }
     const isDestination = request.url() === nextUrl;
     if (isDestination && request.isNavigationRequest() && request.frame() === page.mainFrame()) {
       destinationNavigations++;
       await new Promise(resolve => setTimeout(resolve, 5_250));
       return route.fulfill({
-        body: withOverlay(nextFixtureHtml).replace(
-          '<head>',
-          `<head><script>history.replaceState(history.state, '', ${JSON.stringify(
-            canonicalNextUrl
-          )});</script>`
-        ),
+        body: `<!doctype html><script>location.replace(${JSON.stringify(
+          canonicalNextUrl
+        )})</script>`,
         contentType: 'text/html; charset=utf-8',
         status: 200,
       });
@@ -1352,7 +1356,34 @@ test('carries deferred overlay cleanup across a slow canonical exit navigation',
       status: 200,
     });
   });
-  await addYingChuangUserscript(context);
+
+  const userScript = fs.readFileSync(getMnrE2eConfig().userScriptPath, 'utf8');
+  await context.addInitScript({
+    content: `${createGmMockScript()}
+      (() => {
+        // This one-page fixture uses a domain cookie to emulate Tampermonkey's cross-origin
+        // tab object; production uses GM_getTab/GM_saveTab rather than cookie storage.
+        const cookieName = '__mnr_e2e_tab_state';
+        const readTab = () => {
+          const row = document.cookie
+            .split('; ')
+            .find(value => value.startsWith(cookieName + '='));
+          if (!row) return {};
+          try {
+            return JSON.parse(decodeURIComponent(row.slice(cookieName.length + 1)));
+          } catch {
+            return {};
+          }
+        };
+        window.GM_getTab = callback => queueMicrotask(() => callback(readTab()));
+        window.GM_saveTab = (tab, callback) => {
+          document.cookie = cookieName + '=' + encodeURIComponent(JSON.stringify(tab))
+            + '; Domain=mnr.test; Path=/; SameSite=Lax';
+          queueMicrotask(() => callback?.());
+        };
+      })();
+      ${userScript}`,
+  });
 
   await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
   assertMnrSmokeState(await waitForMnrReader(page));
