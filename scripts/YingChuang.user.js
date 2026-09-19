@@ -22957,6 +22957,7 @@ ul, ol {
 		}
 	}), [["__scopeId", "data-v-cb73e76a"]]);
 	var EXIT_NAVIGATION_KEY = "mnr_exit_navigation";
+	var hasTabStorage = typeof GM_getTab === "function" && typeof GM_saveTab === "function";
 	var appState = {
 		isInitialized: false,
 		autoEnableDone: false,
@@ -23165,20 +23166,37 @@ ul, ol {
 		return new Promise((resolve) => GM_getTab(resolve));
 	}
 	async function persistExitNavigation(transition) {
+		if (!hasTabStorage) {
+			sessionStorage.setItem(EXIT_NAVIGATION_KEY, JSON.stringify(transition));
+			return;
+		}
 		const tab = await getUserscriptTabState();
 		tab[EXIT_NAVIGATION_KEY] = transition;
 		GM_saveTab(tab);
 	}
 	async function consumeExitNavigation() {
-		const tab = await getUserscriptTabState();
-		const transition = tab[EXIT_NAVIGATION_KEY];
-		if (!transition) return false;
-		delete tab[EXIT_NAVIGATION_KEY];
-		GM_saveTab(tab);
+		let transition;
+		if (hasTabStorage) {
+			const tab = await getUserscriptTabState();
+			transition = tab[EXIT_NAVIGATION_KEY];
+			if (transition) {
+				delete tab[EXIT_NAVIGATION_KEY];
+				GM_saveTab(tab);
+			}
+		} else try {
+			const serialized = sessionStorage.getItem(EXIT_NAVIGATION_KEY);
+			if (serialized) {
+				sessionStorage.removeItem(EXIT_NAVIGATION_KEY);
+				transition = JSON.parse(serialized);
+			}
+		} catch (e) {
+			console.error("[MNR] Failed to read exit navigation:", e);
+		}
+		if (!transition || typeof transition.targetUrl !== "string") return false;
 		if (normalizeExitDestination(transition.targetUrl) !== normalizeExitDestination(window.location.href)) return false;
 		appState.autoEnableDone = true;
 		getSiteProtection().deactivate();
-		if (transition.cleanupHostOverlays) cleanupHostPageOverlays();
+		if (transition.cleanupHostOverlays === true) cleanupHostPageOverlays();
 		showReaderEntry();
 		return true;
 	}

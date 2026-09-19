@@ -34,6 +34,8 @@ import type { SiteRule } from '@/core/rules/types';
 import { useReaderStore } from '@/ui/stores/reader';
 
 const EXIT_NAVIGATION_KEY = 'mnr_exit_navigation';
+// Violentmonkey supports the script but does not expose Tampermonkey's per-tab APIs.
+const hasTabStorage = typeof GM_getTab === 'function' && typeof GM_saveTab === 'function';
 
 interface ExitNavigation {
   targetUrl: string;
@@ -379,6 +381,10 @@ function getUserscriptTabState(): Promise<UserscriptTabState> {
 }
 
 async function persistExitNavigation(transition: ExitNavigation): Promise<void> {
+  if (!hasTabStorage) {
+    sessionStorage.setItem(EXIT_NAVIGATION_KEY, JSON.stringify(transition));
+    return;
+  }
   const tab = await getUserscriptTabState();
   tab[EXIT_NAVIGATION_KEY] = transition;
   GM_saveTab(tab);
@@ -386,12 +392,28 @@ async function persistExitNavigation(transition: ExitNavigation): Promise<void> 
 
 /** Consume the one-shot transition created when the reader exits onto another chapter. */
 async function consumeExitNavigation(): Promise<boolean> {
-  const tab = await getUserscriptTabState();
-  const transition = tab[EXIT_NAVIGATION_KEY];
-  if (!transition) return false;
+  let transition: ExitNavigation | undefined;
+  if (hasTabStorage) {
+    const tab = await getUserscriptTabState();
+    transition = tab[EXIT_NAVIGATION_KEY];
+    if (transition) {
+      delete tab[EXIT_NAVIGATION_KEY];
+      GM_saveTab(tab);
+    }
+  } else {
+    // This path is tab-local and same-origin; it cannot follow cross-origin redirects.
+    try {
+      const serialized = sessionStorage.getItem(EXIT_NAVIGATION_KEY);
+      if (serialized) {
+        sessionStorage.removeItem(EXIT_NAVIGATION_KEY);
+        transition = JSON.parse(serialized) as ExitNavigation;
+      }
+    } catch (e) {
+      console.error('[MNR] Failed to read exit navigation:', e);
+    }
+  }
+  if (!transition || typeof transition.targetUrl !== 'string') return false;
   // The next document owns this one-shot intent, even if navigation landed elsewhere.
-  delete tab[EXIT_NAVIGATION_KEY];
-  GM_saveTab(tab);
   if (
     normalizeExitDestination(transition.targetUrl) !==
     normalizeExitDestination(window.location.href)
@@ -401,7 +423,7 @@ async function consumeExitNavigation(): Promise<boolean> {
 
   appState.autoEnableDone = true;
   getSiteProtection().deactivate();
-  if (transition.cleanupHostOverlays) cleanupHostPageOverlays();
+  if (transition.cleanupHostOverlays === true) cleanupHostPageOverlays();
   showReaderEntry();
   return true;
 }

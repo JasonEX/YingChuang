@@ -319,6 +319,35 @@ describe('bootstrap', () => {
     expect(mockGetAutoEnableManager).not.toHaveBeenCalled();
   });
 
+  it.each(['empty', 'invalid', 'blocked'])(
+    'boots without tab APIs when session storage is %s',
+    async state => {
+      dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
+        url: 'https://example.com/chapter/12345.html',
+      });
+      vi.stubGlobal('window', dom.window);
+      vi.stubGlobal('document', dom.window.document);
+      vi.stubGlobal('sessionStorage', dom.window.sessionStorage);
+      vi.stubGlobal('GM_getTab', undefined);
+      vi.stubGlobal('GM_saveTab', undefined);
+      Object.defineProperty(document, 'readyState', { configurable: true, get: () => 'complete' });
+      if (state === 'invalid') sessionStorage.setItem('mnr_exit_navigation', '{');
+      if (state === 'blocked') {
+        vi.spyOn(dom.window.Storage.prototype, 'getItem').mockImplementation(() => {
+          throw new Error('Storage unavailable');
+        });
+      }
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const manager = { check: vi.fn(async () => ({ shouldEnable: false })) };
+      mockGetAutoEnableManager.mockReturnValue(manager);
+      await import('@/bootstrap');
+      await vi.waitFor(() => expect(manager.check).toHaveBeenCalledTimes(1));
+      expect(mockActivateProtection).toHaveBeenCalled();
+      expect(mockDeactivateProtection).toHaveBeenCalled();
+      expect(mockRemoveOverlays).not.toHaveBeenCalled();
+    }
+  );
+
   it('discards an exit intent for another destination without cleaning or skipping detection', async () => {
     dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
       url: 'https://example.com/chapter/3',
