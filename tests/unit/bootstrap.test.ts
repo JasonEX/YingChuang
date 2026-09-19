@@ -291,9 +291,8 @@ describe('bootstrap', () => {
     const getTab = vi.fn((callback: (tab: Record<string, unknown>) => void) => {
       callback(tabState);
     });
-    const saveTab = vi.fn((tab: Record<string, unknown>, callback?: () => void) => {
+    const saveTab = vi.fn((tab: Record<string, unknown>) => {
       expect(tab).toBe(tabState);
-      callback?.();
     });
     vi.stubGlobal('GM_getTab', getTab);
     vi.stubGlobal('GM_saveTab', saveTab);

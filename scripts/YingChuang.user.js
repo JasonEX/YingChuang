@@ -23173,14 +23173,13 @@ ul, ol {
 		});
 	}
 	function saveUserscriptTabState(tab) {
-		return new Promise((resolve) => {
-			try {
-				GM_saveTab(tab, () => resolve(true));
-			} catch (e) {
-				console.error("[MNR] Failed to save userscript tab state:", e);
-				resolve(false);
-			}
-		});
+		try {
+			GM_saveTab(tab);
+			return true;
+		} catch (e) {
+			console.error("[MNR] Failed to save userscript tab state:", e);
+			return false;
+		}
 	}
 	function parseExitNavigation(value) {
 		let transition = value;
@@ -23198,7 +23197,7 @@ ul, ol {
 			const transition = parseExitNavigation(tab[EXIT_NAVIGATION_KEY]);
 			if (!(EXIT_NAVIGATION_KEY in tab)) return null;
 			delete tab[EXIT_NAVIGATION_KEY];
-			await saveUserscriptTabState(tab);
+			saveUserscriptTabState(tab);
 			return transition;
 		}
 		const serialized = sessionStorage.getItem(EXIT_NAVIGATION_KEY);
@@ -23210,7 +23209,7 @@ ul, ol {
 		const tab = await getUserscriptTabState();
 		if (tab) {
 			tab[EXIT_NAVIGATION_KEY] = transition;
-			if (await saveUserscriptTabState(tab)) return;
+			if (saveUserscriptTabState(tab)) return;
 		}
 		sessionStorage.setItem(EXIT_NAVIGATION_KEY, JSON.stringify(transition));
 	}

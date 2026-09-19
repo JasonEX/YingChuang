@@ -1376,10 +1376,9 @@ test('carries deferred overlay cleanup across a slow cross-origin canonical exit
           }
         };
         window.GM_getTab = callback => queueMicrotask(() => callback(readTab()));
-        window.GM_saveTab = (tab, callback) => {
+        window.GM_saveTab = tab => {
           document.cookie = cookieName + '=' + encodeURIComponent(JSON.stringify(tab))
             + '; Domain=mnr.test; Path=/; SameSite=Lax';
-          queueMicrotask(() => callback?.());
         };
       })();
       ${userScript}`,

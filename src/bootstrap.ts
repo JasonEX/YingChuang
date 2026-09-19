@@ -390,15 +390,14 @@ function getUserscriptTabState(): Promise<UserscriptTabState | null> {
   });
 }
 
-function saveUserscriptTabState(tab: UserscriptTabState): Promise<boolean> {
-  return new Promise(resolve => {
-    try {
-      GM_saveTab(tab, () => resolve(true));
-    } catch (e) {
-      console.error('[MNR] Failed to save userscript tab state:', e);
-      resolve(false);
-    }
-  });
+function saveUserscriptTabState(tab: UserscriptTabState): boolean {
+  try {
+    GM_saveTab(tab);
+    return true;
+  } catch (e) {
+    console.error('[MNR] Failed to save userscript tab state:', e);
+    return false;
+  }
 }
 
 function parseExitNavigation(value: unknown): ExitNavigation | null {
@@ -430,7 +429,7 @@ async function takeExitNavigation(): Promise<ExitNavigation | null> {
     if (!(EXIT_NAVIGATION_KEY in tab)) return null;
 
     delete tab[EXIT_NAVIGATION_KEY];
-    await saveUserscriptTabState(tab);
+    saveUserscriptTabState(tab);
     return transition;
   }
 
@@ -444,7 +443,7 @@ async function persistExitNavigation(transition: ExitNavigation): Promise<void> 
   const tab = await getUserscriptTabState();
   if (tab) {
     tab[EXIT_NAVIGATION_KEY] = transition;
-    if (await saveUserscriptTabState(tab)) return;
+    if (saveUserscriptTabState(tab)) return;
   }
 
   // Non-Tampermonkey/test fallback; same-origin navigation still retains the transition.
