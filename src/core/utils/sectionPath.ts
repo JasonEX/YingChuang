@@ -34,9 +34,12 @@ export function parseChapterSectionFromPathname(pathname: string): ChapterSectio
     }
   }
 
-  // 1b) Directory-style section: /123_2/ or /123-2/ (no .html extension).
-  // Require a long chapter id so paths like /2024-12/ are not mistaken for pages.
-  match = normalized.match(/^(.*\/\d{3,})[_-](\d{1,2})\/?$/);
+  // 1b) Directory-style section: /146537150_2/ (no .html extension).
+  // Without an extension to anchor on, this shape collides with ordinary numeric
+  // slugs, so both halves are constrained: only "_" separates a section (dates and
+  // slugs such as /archive/2024-12/ or /book/123-45/ use "-"), and the chapter id
+  // must be longer than a 4-digit year so /archive/2024_12/ is rejected too.
+  match = normalized.match(/^(.*\/\d{5,})_(\d{1,2})\/?$/);
   if (match) {
     const section = parseInt(match[2], 10);
     if (section >= 1 && section <= 99) {

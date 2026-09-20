@@ -351,7 +351,7 @@
 				section
 			};
 		}
-		match = normalized.match(/^(.*\/\d{3,})[_-](\d{1,2})\/?$/);
+		match = normalized.match(/^(.*\/\d{5,})_(\d{1,2})\/?$/);
 		if (match) {
 			const section = parseInt(match[2], 10);
 			if (section >= 1 && section <= 99) return {
@@ -482,7 +482,7 @@
 		if (novel543) return novel543.page > 1 ? novel543.chapterUrl : null;
 		const m = url.match(/^(.*\/\d+)[_-]\d+(\.html?)$/i);
 		if (m) return `${m[1]}${m[2]}`;
-		const dirSection = url.match(/^(.*\/\d{3,})[_-]\d{1,2}(\/?)(\?[^#]*)?(#.*)?$/);
+		const dirSection = url.match(/^(.*\/\d{5,})_\d{1,2}(\/?)(\?[^#]*)?(#.*)?$/);
 		if (dirSection) return `${dirSection[1]}${dirSection[2] || ""}${dirSection[3] || ""}${dirSection[4] || ""}`;
 		try {
 			const u = new URL(url);

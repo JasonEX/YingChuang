@@ -139,6 +139,26 @@ describe('isSectionLikeUrl', () => {
     ).toBe(false);
   });
 
+  it('does not treat date-style or short numeric slugs as sections', () => {
+    // /archive/2024-12/ and /book/123-45/ are ordinary slugs, not page 12/45 of
+    // /archive/2024/ or /book/123/.
+    expect(
+      isSectionLikeUrl(
+        'https://example.com/archive/2024-12/',
+        'https://example.com/archive/2024-13/'
+      )
+    ).toBe(false);
+    expect(
+      isSectionLikeUrl(
+        'https://example.com/archive/2024_12/',
+        'https://example.com/archive/2024_13/'
+      )
+    ).toBe(false);
+    expect(
+      isSectionLikeUrl('https://example.com/book/123-45/', 'https://example.com/book/123-46/')
+    ).toBe(false);
+  });
+
   it('detects query-based pagination (page increments)', () => {
     expect(
       isSectionLikeUrl(
@@ -222,6 +242,12 @@ describe('getSectionBaseUrl', () => {
       'https://m.kudushu.org/html/1088392/146537150/'
     );
     expect(getSectionBaseUrl('https://m.kudushu.org/html/1088392/146537150/')).toBe(null);
+  });
+
+  it('leaves date-style and short numeric slugs alone', () => {
+    expect(getSectionBaseUrl('https://example.com/archive/2024-12/')).toBe(null);
+    expect(getSectionBaseUrl('https://example.com/archive/2024_12/')).toBe(null);
+    expect(getSectionBaseUrl('https://example.com/book/123-45/')).toBe(null);
   });
 
   it('normalizes query-based pagination to the first page', () => {
