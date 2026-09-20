@@ -45,6 +45,7 @@ describe('userscript meta', () => {
     expect(block).toContain('// @match         *://dingdianzww.org/*');
     expect(block).toContain('// @match         *://www.deqixs.org/*');
     expect(block).toContain('// @match         *://www.deqixs.co/*');
+    expect(block).toContain('// @match         *://m.kudushu.org/html/*/*');
     expect(block).toContain('// @require       https://example.com/dep.js');
     expect(block).toContain('// @resource      demo https://example.com/demo.css');
     expect(block).not.toContain('@id');

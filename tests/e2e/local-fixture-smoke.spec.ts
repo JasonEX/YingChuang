@@ -65,7 +65,17 @@ for (const site of pagedCatalogSites) {
         });
       });
       await addYingChuangUserscript(context);
+      if (site.id === 'kudushu') {
+        // addInitScript bypasses the userscript manager's injection gate. Check
+        // the delivered header as well, otherwise missing @match goes unnoticed.
+        const script = fs.readFileSync(getMnrE2eConfig().userScriptPath, 'utf8');
+        expect(script.split('// ==/UserScript==')[0]).toMatch(
+          /^\/\/ @match\s+\*:\/\/m\.kudushu\.org\/html\/\*\/\*\s*$/m
+        );
+      }
       await page.goto(site.origin + site.chapterPath(25));
+      // Do not use the manual-entry fallback to mask a broken automatic startup.
+      await expect(page.locator('#mnr-reader-root .mnr-reader')).toBeVisible();
       await waitForMnrReader(page);
       const root = page.locator('#mnr-reader-root');
       await root.getByRole('button', { name: '打开目录', exact: true }).click();

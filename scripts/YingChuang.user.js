@@ -48,6 +48,7 @@
 // @match              *://www.deqixs.co/*
 // @match              *://xszj.org/*
 // @match              *://m.xszj.org/*
+// @match              *://m.kudushu.org/html/*/*
 // @match              *://*/*.php?*
 // @match              *://*/*_*.html
 // @match              *://*/book/*/*.html

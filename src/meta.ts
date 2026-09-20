@@ -100,6 +100,7 @@ const META_BASE = {
     '*://www.deqixs.co/*',
     '*://xszj.org/*',
     '*://m.xszj.org/*',
+    '*://m.kudushu.org/html/*/*',
 
     // PHP patterns
     '*://*/*.php?*',
