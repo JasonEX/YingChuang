@@ -13,8 +13,8 @@ export const kudushuRule: SiteRule = {
   },
   content: {
     selector: '#novelcontent',
-    // #novelcontent also wraps the site watermark, a repeated nav block and ad scripts.
-    remove: '#content_tip, ul.novelbutton, script, style',
+    // #novelcontent also wraps the site watermark and a repeated nav block.
+    remove: '#content_tip, ul.novelbutton',
     replace: [
       // Every section page repeats the chapter heading before the body, e.g.
       // "第64章 标题 (第1/3页)". Drop it so merged chapters do not repeat the title.
@@ -61,7 +61,7 @@ export const kudushuPcRule: SiteRule = {
   },
   content: {
     selector: '#clickeye_content',
-    remove: '.style3, script, style',
+    remove: '.style3',
     replace: [
       // 正文首尾各有一处站点水印：「(苦读书 www.kudushu.org)」与「苦读书 www.kudushu.org」。
       {

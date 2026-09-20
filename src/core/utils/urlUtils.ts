@@ -44,18 +44,18 @@ export function getSectionBaseUrl(url: string): string | null {
   const m = url.match(/^(.*\/\d+)[_-]\d+(\.html?)$/i);
   if (m) return `${m[1]}${m[2]}`;
 
-  // Directory-style section: /146537150_2/ -> /146537150/ (no .html extension).
-  // Mirrors branch 1b of parseChapterSectionFromPathname, including its guards
-  // against date-style and short numeric slugs; keep the two in step.
-  const dirSection = url.match(/^(.*\/\d{5,})_\d{1,2}(\/?)(\?[^#]*)?(#.*)?$/);
-  if (dirSection) {
-    return `${dirSection[1]}${dirSection[2] || ''}${dirSection[3] || ''}${dirSection[4] || ''}`;
-  }
-
   // Extensionless pagination: /{bookId}/{chapterId}/{page} -> /{bookId}/{chapterId}/1
   // Keep it conservative to avoid misclassifying /{bookId}/{chapterNo} as "page 2".
   try {
     const u = new URL(url);
+    // Directory-style sections; inspect only the path, preserving query and hash.
+    // Keep the chapter-id/page guards aligned with sectionPath.ts.
+    const dirSection = u.pathname.match(/^(.*\/\d{5,})_(\d{1,2})(\/?)$/);
+    if (dirSection && Number(dirSection[2]) >= 1) {
+      u.pathname = `${dirSection[1]}${dirSection[3]}`;
+      return u.toString();
+    }
+
     const parts = u.pathname.split('/').filter(Boolean);
     const hasTrailingSlash = u.pathname.endsWith('/');
 

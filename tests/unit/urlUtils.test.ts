@@ -250,6 +250,20 @@ describe('getSectionBaseUrl', () => {
     expect(getSectionBaseUrl('https://example.com/book/123-45/')).toBe(null);
   });
 
+  it('does not treat section-shaped query values or fragments as chapter paths', () => {
+    expect(getSectionBaseUrl('https://example.com/read?chapter=/12345_2/')).toBe(null);
+    expect(getSectionBaseUrl('https://example.com/read#/12345_2/')).toBe(null);
+    expect(getSectionBaseUrl('https://example.com/book/12345_2/?from=/98765_3/#/54321_4/')).toBe(
+      'https://example.com/book/12345/?from=/98765_3/#/54321_4/'
+    );
+  });
+
+  it('rejects zero and out-of-range directory section numbers', () => {
+    for (const page of ['0', '00', '100']) {
+      expect(getSectionBaseUrl(`https://example.com/book/12345_${page}/`)).toBe(null);
+    }
+  });
+
   it('normalizes query-based pagination to the first page', () => {
     expect(getSectionBaseUrl('https://example.com/chapter.html?page=2')).toBe(
       'https://example.com/chapter.html?page=1'

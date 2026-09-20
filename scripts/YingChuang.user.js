@@ -482,10 +482,13 @@
 		if (novel543) return novel543.page > 1 ? novel543.chapterUrl : null;
 		const m = url.match(/^(.*\/\d+)[_-]\d+(\.html?)$/i);
 		if (m) return `${m[1]}${m[2]}`;
-		const dirSection = url.match(/^(.*\/\d{5,})_\d{1,2}(\/?)(\?[^#]*)?(#.*)?$/);
-		if (dirSection) return `${dirSection[1]}${dirSection[2] || ""}${dirSection[3] || ""}${dirSection[4] || ""}`;
 		try {
 			const u = new URL(url);
+			const dirSection = u.pathname.match(/^(.*\/\d{5,})_(\d{1,2})(\/?)$/);
+			if (dirSection && Number(dirSection[2]) >= 1) {
+				u.pathname = `${dirSection[1]}${dirSection[3]}`;
+				return u.toString();
+			}
 			const parts = u.pathname.split("/").filter(Boolean);
 			const hasTrailingSlash = u.pathname.endsWith("/");
 			if (parts.length >= 3) {
@@ -6480,7 +6483,7 @@
 		match: { pattern: "^https?://m\\.kudushu\\.org/html/\\d+/\\d+(?:_\\d+)?/(?:[?#].*)?$" },
 		content: {
 			selector: "#novelcontent",
-			remove: "#content_tip, ul.novelbutton, script, style",
+			remove: "#content_tip, ul.novelbutton",
 			replace: [{
 				pattern: "^[\\s\\S]*?[（(]第\\d+[/／]\\d+页[）)]",
 				replacement: "",
@@ -6510,7 +6513,7 @@
 		match: { pattern: "^https?://www\\.kudushu\\.org/html/\\d+/\\d+/\\d+\\.html(?:[?#].*)?$" },
 		content: {
 			selector: "#clickeye_content",
-			remove: ".style3, script, style",
+			remove: ".style3",
 			replace: [{
 				pattern: "[（(]?\\s*苦读书\\s*www\\.kudushu\\.org\\s*[）)]?",
 				replacement: "",
