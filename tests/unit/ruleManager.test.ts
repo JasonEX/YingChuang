@@ -26,7 +26,6 @@ describe('RuleManager', () => {
 
   it('matches built-in rules', async () => {
     const manager = new RuleManager();
-    (manager as unknown as { initialized: boolean }).initialized = true;
     (manager as unknown as { builtInRules: SiteRule[] }).builtInRules = [
       makeRule({
         id: 'builtin',
@@ -34,7 +33,7 @@ describe('RuleManager', () => {
       }),
     ];
 
-    const matched = await manager.matchRule('https://builtin.com/1');
+    const matched = manager.matchRule('https://builtin.com/1');
     expect(matched).toMatchObject({
       source: 'builtin',
       matchedPattern: 'builtin\\.com',
@@ -44,7 +43,6 @@ describe('RuleManager', () => {
 
   it('supports glob matchers and exclude patterns', async () => {
     const manager = new RuleManager();
-    (manager as unknown as { initialized: boolean }).initialized = true;
     (manager as unknown as { builtInRules: SiteRule[] }).builtInRules = [
       makeRule({
         id: 'glob',
@@ -52,46 +50,31 @@ describe('RuleManager', () => {
       }),
     ];
 
-    await expect(manager.matchRule('https://a.example.com/skip')).resolves.toBeNull();
+    expect(manager.matchRule('https://a.example.com/skip')).toBeNull();
 
-    const matched = await manager.matchRule('https://a.example.com/chapter/1');
+    const matched = manager.matchRule('https://a.example.com/chapter/1');
     expect(matched?.rule.id).toBe('glob');
   });
 
   it('skips invalid rules without throwing', async () => {
     const manager = new RuleManager();
-    (manager as unknown as { initialized: boolean }).initialized = true;
     (manager as unknown as { builtInRules: SiteRule[] }).builtInRules = [
       makeRule({ id: 'bad', match: { pattern: '[', type: 'regex' } }),
     ];
 
-    await expect(manager.matchRule('https://example.com/1')).resolves.toBeNull();
-  });
-
-  it('matchRule triggers initialize on first use', async () => {
-    const manager = new RuleManager();
-    const initialize = vi.spyOn(manager, 'initialize');
-    (manager as unknown as { builtInRules: SiteRule[] }).builtInRules = [
-      makeRule({ id: 'lazy', match: { pattern: 'example\\.com', type: 'regex' } }),
-    ];
-
-    const result = await manager.matchRule('https://example.com/chapter/1');
-    expect(initialize).toHaveBeenCalledTimes(1);
-    expect(result?.rule.id).toBe('lazy');
+    expect(manager.matchRule('https://example.com/1')).toBeNull();
   });
 
   it('returns null for malformed URLs without throwing', async () => {
     const manager = new RuleManager();
-    (manager as unknown as { initialized: boolean }).initialized = true;
     (manager as unknown as { builtInRules: SiteRule[] }).builtInRules = [];
 
-    const result: RuleMatchResult | null = await manager.matchRule('not a url');
+    const result: RuleMatchResult | null = manager.matchRule('not a url');
     expect(result).toBeNull();
   });
 
   it('caches compiled regexps and does not recompile on repeated matches', async () => {
     const manager = new RuleManager();
-    (manager as unknown as { initialized: boolean }).initialized = true;
 
     const rule = makeRule({
       id: 'cached',
@@ -99,7 +82,7 @@ describe('RuleManager', () => {
     });
     (manager as unknown as { builtInRules: SiteRule[] }).builtInRules = [rule];
 
-    const r1 = await manager.matchRule('https://cached.com/1');
+    const r1 = manager.matchRule('https://cached.com/1');
     expect(r1?.rule.id).toBe('cached');
 
     const compiledCache = (
@@ -110,7 +93,7 @@ describe('RuleManager', () => {
     const entry1 = compiledCache.get(rule);
     expect(entry1).toBeDefined();
 
-    const r2 = await manager.matchRule('https://cached.com/2');
+    const r2 = manager.matchRule('https://cached.com/2');
     expect(r2?.rule.id).toBe('cached');
     const entry2 = compiledCache.get(rule);
     expect(entry2).toBe(entry1);
@@ -118,7 +101,6 @@ describe('RuleManager', () => {
 
   it('invalid regex in exclude list is caught during compilation and does not throw', async () => {
     const manager = new RuleManager();
-    (manager as unknown as { initialized: boolean }).initialized = true;
     (manager as unknown as { builtInRules: SiteRule[] }).builtInRules = [
       makeRule({
         id: 'bad-exclude',
@@ -126,6 +108,6 @@ describe('RuleManager', () => {
       }),
     ];
 
-    await expect(manager.matchRule('https://example.com/1')).resolves.toBeNull();
+    expect(manager.matchRule('https://example.com/1')).toBeNull();
   });
 });

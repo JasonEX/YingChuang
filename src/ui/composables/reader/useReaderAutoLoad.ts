@@ -269,7 +269,6 @@ export function useReaderAutoLoad(options: UseReaderAutoLoadOptions) {
       graceUntil,
       hasChapter: readerStore.chapters.length > 0,
       hasNext: readerStore.hasNext,
-      isLoading: readerStore.isLoading,
       isLoadingNext: readerStore.isLoadingNext,
       isLoadingPrev: readerStore.isLoadingPrev,
       isNavigating: isNavigating.value,
@@ -338,14 +337,9 @@ export function useReaderAutoLoad(options: UseReaderAutoLoadOptions) {
   );
 
   watch(
-    () => [
-      readerStore.isLoadingNext,
-      readerStore.isLoadingPrev,
-      readerStore.isLoading,
-      isNavigating.value,
-    ],
-    ([loadingNext, loadingPrev, loading, navigating]) => {
-      if (loadingNext || loadingPrev || loading || navigating) return;
+    () => [readerStore.isLoadingNext, readerStore.isLoadingPrev, isNavigating.value],
+    ([loadingNext, loadingPrev, navigating]) => {
+      if (loadingNext || loadingPrev || navigating) return;
       scheduleAutoLoadNext('state');
     }
   );

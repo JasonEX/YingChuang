@@ -26,7 +26,6 @@ export async function insertCachedChapter(
     ctx.chapters.value.unshift(entry);
     ctx.currentChapterIndex.value++;
   }
-  ctx.loadedUrls.value.add(entry.chapter.url);
 
   ctx.originalContents.value.set(id, cached.chapter.content);
   ctx.originalTitles.value.set(id, {
@@ -64,7 +63,6 @@ export async function insertParsedChapter(
     ctx.chapters.value.unshift(entry);
     ctx.currentChapterIndex.value++;
   }
-  ctx.loadedUrls.value.add(parsed.url);
 
   ctx.originalContents.value.set(id, parsed.content);
   ctx.originalTitles.value.set(id, { title: parsed.title, bookTitle: parsed.bookTitle });
@@ -97,13 +95,11 @@ export async function insertParsedChapter(
 
 export async function rebuildChaptersFromCache(
   ctx: NavigationContext,
-  cached: CachedChapter,
-  url: string
+  cached: CachedChapter
 ): Promise<boolean> {
   const runId = ctx.runtime.viewId();
   ctx.chapters.value = [];
   ctx.currentChapterIndex.value = 0;
-  ctx.loadedUrls.value.clear();
   ctx.originalContents.value.clear();
   ctx.originalTitles.value.clear();
 
@@ -113,7 +109,6 @@ export async function rebuildChaptersFromCache(
     rule: cached.rule,
     id,
   });
-  ctx.loadedUrls.value.add(url);
 
   ctx.originalContents.value.set(id, cached.chapter.content);
   ctx.originalTitles.value.set(id, {
@@ -135,7 +130,6 @@ function trimDisplayChapters(ctx: NavigationContext, isAppend: boolean): void {
   if (isAppend && ctx.currentChapterIndex.value > 2) {
     const removed = ctx.chapters.value.shift();
     if (removed) {
-      ctx.loadedUrls.value.delete(removed.chapter.url);
       ctx.originalContents.value.delete(removed.id);
       ctx.originalTitles.value.delete(removed.id);
       ctx.currentChapterIndex.value = Math.max(0, ctx.currentChapterIndex.value - 1);
@@ -146,7 +140,6 @@ function trimDisplayChapters(ctx: NavigationContext, isAppend: boolean): void {
   if (!isAppend) {
     const removed = ctx.chapters.value.pop();
     if (removed) {
-      ctx.loadedUrls.value.delete(removed.chapter.url);
       ctx.originalContents.value.delete(removed.id);
       ctx.originalTitles.value.delete(removed.id);
     }

@@ -94,6 +94,8 @@ export class AutoEnableManager {
   private promptCallback?: PromptCallback;
   private launchCallback?: LaunchCallback;
   private hasRun = false;
+  private launchVersion = 0;
+  private pendingLaunch: Promise<'complete' | 'initial' | false> | null = null;
   private currentDecision?: AutoEnableDecision;
   private currentDecisionUrl?: string;
 
@@ -157,7 +159,7 @@ export class AutoEnableManager {
   /**
    * Run the auto-enable check
    */
-  async check(doc: Document = document): Promise<AutoEnableDecision> {
+  check(doc: Document = document): AutoEnableDecision {
     const url = doc.location?.href || window.location.href;
     const decide = (decision: AutoEnableDecision): AutoEnableDecision =>
       this.recordDecision(url, decision);
@@ -235,8 +237,7 @@ export class AutoEnableManager {
     // Explicit rules should still apply even if quickCheck is a false negative.
     if (!this.options.forceDetection) {
       const ruleManager = getRuleManager();
-      await ruleManager.initialize();
-      const ruleMatch = await ruleManager.matchRule(url);
+      const ruleMatch = ruleManager.matchRule(url);
 
       if (ruleMatch) {
         if (sitePreference?.enabled === false) {
@@ -334,7 +335,7 @@ export class AutoEnableManager {
     const decision =
       this.currentDecision && this.currentDecisionUrl === currentUrl
         ? this.currentDecision
-        : await this.check(doc);
+        : this.check(doc);
 
     if (!decision.shouldEnable) {
       this.deactivateProtection();
@@ -347,17 +348,20 @@ export class AutoEnableManager {
       decision.confidence >= (this.options.autoLaunchThreshold || 0.9);
 
     if (shouldAutoLaunch) {
-      await this.launch(doc, decision);
+      await this.launch(doc, decision.rule);
       return;
     }
 
     // Show prompt for medium confidence detection
     if (this.promptCallback) {
       this.deactivateProtection();
+      const launchVersion = this.launchVersion;
       const response = await this.promptCallback();
+      // A manual entry supersedes the prompt, even if its parse has already finished.
+      if (launchVersion !== this.launchVersion) return;
 
       if (response.accepted) {
-        const launched = await this.launch(doc, decision);
+        const launched = await this.launch(doc, decision.rule);
         if (launched && response.rememberForSite) {
           this.rememberSiteEnabled(doc);
         }
@@ -371,7 +375,20 @@ export class AutoEnableManager {
   /**
    * Launch the reader
    */
-  private async launch(doc: Document, decision: AutoEnableDecision): Promise<boolean> {
+  private launch(doc: Document, rule?: SiteRule): Promise<'complete' | 'initial' | false> {
+    if (!this.pendingLaunch) {
+      this.launchVersion++;
+      this.pendingLaunch = this.parseAndLaunch(doc, rule).finally(() => {
+        this.pendingLaunch = null;
+      });
+    }
+    return this.pendingLaunch;
+  }
+
+  private async parseAndLaunch(
+    doc: Document,
+    rule?: SiteRule
+  ): Promise<'complete' | 'initial' | false> {
     this.activateProtection();
 
     let launchedEarly = false;
@@ -380,25 +397,21 @@ export class AutoEnableManager {
       const chapter = await this.sectionMerger.merge(doc, currentUrl, {
         onFirstPage: firstPage => {
           if (!this.launchCallback) return;
-          this.launchCallback(firstPage, decision.rule || firstPage.rule, 'initial');
+          this.launchCallback(firstPage, rule || firstPage.rule, 'initial');
           launchedEarly = true;
         },
       });
 
       if (chapter && this.launchCallback) {
-        this.launchCallback(
-          chapter,
-          decision.rule || chapter.rule,
-          launchedEarly ? 'update' : 'complete'
-        );
-        return true;
+        this.launchCallback(chapter, rule || chapter.rule, launchedEarly ? 'update' : 'complete');
+        return 'complete';
       }
-      if (launchedEarly) return true;
+      if (launchedEarly) return 'initial';
       this.deactivateProtection();
       return false;
     } catch (e) {
       console.error('[AutoEnableManager] Parse error:', e);
-      if (launchedEarly) return true;
+      if (launchedEarly) return 'initial';
       this.deactivateProtection();
       return false;
     }
@@ -453,32 +466,7 @@ export class AutoEnableManager {
       return;
     }
 
-    this.activateProtection();
-
-    // Parse and launch
-    let launched = false;
-    try {
-      const currentUrl = doc.location?.href || window.location.href;
-      const chapter = await this.sectionMerger.merge(doc, currentUrl, {
-        onFirstPage: firstPage => {
-          if (!this.launchCallback) return;
-          this.launchCallback(firstPage, firstPage.rule, 'initial');
-          launched = true;
-        },
-      });
-
-      if (chapter && this.launchCallback) {
-        this.launchCallback(chapter, chapter.rule, launched ? 'update' : 'complete');
-        this.rememberSiteEnabled(doc);
-        launched = true;
-      }
-    } catch (e) {
-      console.error('[AutoEnableManager] Manual enable error:', e);
-    } finally {
-      if (!launched) {
-        this.deactivateProtection();
-      }
-    }
+    if ((await this.launch(doc)) === 'complete') this.rememberSiteEnabled(doc);
   }
 }
 

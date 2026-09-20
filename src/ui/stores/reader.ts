@@ -47,7 +47,6 @@ export type { CachedChapter, CacheProgressState, ChapterEntry, TocEntry, TocEntr
 export const useReaderStore = defineStore('reader', () => {
   // State
   const isActive = ref(false);
-  const isLoading = ref(false);
   const isLoadingPrev = ref(false);
   const isLoadingNext = ref(false);
   const chapters = ref<ChapterEntry[]>([]);
@@ -57,7 +56,7 @@ export const useReaderStore = defineStore('reader', () => {
   const toastTimer = ref<number | null>(null);
   const scrollPercent = ref(0);
   const history = ref<string[]>([]);
-  const loadedUrls = ref<Set<string>>(new Set());
+  const loadedUrls = computed(() => new Set(chapters.value.map(entry => entry.chapter.url)));
   const vipBlockedUrls = ref<Set<string>>(new Set());
   const blockedNavUrls = ref<Set<string>>(new Set());
   const originalContents = ref<Map<string, string>>(new Map());
@@ -148,17 +147,7 @@ export const useReaderStore = defineStore('reader', () => {
   }
 
   function setError(msg: string) {
-    recordDebugEvent('reader.error', { message: msg }, 'error');
-    error.value = msg;
-    toastType.value = 'error';
-    isLoading.value = false;
-    if (toastTimer.value) {
-      window.clearTimeout(toastTimer.value);
-    }
-    toastTimer.value = window.setTimeout(() => {
-      error.value = null;
-      toastTimer.value = null;
-    }, 3000);
+    showToast(msg, 'error', 3000);
   }
 
   function showToast(msg: string, type: 'info' | 'error' = 'info', duration = 2000) {
@@ -233,35 +222,27 @@ export const useReaderStore = defineStore('reader', () => {
     syncCurrentHostPage();
   }
 
-  async function getPersistedCachedChapterForCurrentBook(
-    url: string
-  ): Promise<CachedChapter | null> {
+  function getPersistedCachedChapterForCurrentBook(url: string): CachedChapter | null {
     const cacheBook = getCurrentBookCacheKey(chapter.value?.indexUrl);
     if (!cacheBook) return null;
     return getPersistedCachedChapter(cacheBook, url);
   }
 
-  async function persistCache(skipChapterUrls?: ReadonlySet<string>): Promise<void> {
-    const runId = runtime.sessionId();
+  function persistCache(skipChapterUrls?: ReadonlySet<string>): void {
     const cacheBook = getCurrentBookCacheKey(chapter.value?.indexUrl);
     if (!cacheBook) return;
-    const result = persistCacheImpl(
+    persistedUrls.value = persistCacheImpl(
       cacheBook,
       cachedContents.value,
       persistedUrls.value,
       skipChapterUrls
     );
-    if (!runtime.isSessionStale(runId)) {
-      persistedUrls.value = result;
-    }
   }
 
-  async function restoreCache(): Promise<void> {
-    const runId = runtime.sessionId();
+  function restoreCache(): void {
     const cacheBook = getCurrentBookCacheKey(chapter.value?.indexUrl);
     if (!cacheBook) return;
     const restored = restoreCacheImpl(cacheBook);
-    if (runtime.isSessionStale(runId)) return;
     if (restored) {
       persistedUrls.value = restored;
       touchPersistedCache(cacheBook);
@@ -269,7 +250,7 @@ export const useReaderStore = defineStore('reader', () => {
     cleanupExpiredCaches({ currentBookId: cacheBook.bookId });
   }
 
-  async function clearPersistedCache(): Promise<void> {
+  function clearPersistedCache(): void {
     const cacheBook = getCurrentBookCacheKey(chapter.value?.indexUrl);
     if (!cacheBook) return;
     clearPersistedCacheImpl(cacheBook, persistedUrls.value);
@@ -280,7 +261,6 @@ export const useReaderStore = defineStore('reader', () => {
   const nav = createNavigation({
     chapters,
     currentChapterIndex,
-    isLoading,
     isLoadingNext,
     isLoadingPrev,
     pendingNextAbort,
@@ -350,7 +330,6 @@ export const useReaderStore = defineStore('reader', () => {
     tocAbort.value?.();
     tocAbort.value = null;
 
-    isLoading.value = false;
     isLoadingPrev.value = false;
     isLoadingNext.value = false;
     tocLoading.value = false;
@@ -363,8 +342,7 @@ export const useReaderStore = defineStore('reader', () => {
   function clearAllData() {
     chapters.value = [];
     currentChapterIndex.value = 0;
-    error.value = null;
-    loadedUrls.value.clear();
+    clearError();
     vipBlockedUrls.value.clear();
     blockedNavUrls.value.clear();
     navFailures.clear();
@@ -379,7 +357,7 @@ export const useReaderStore = defineStore('reader', () => {
   function activate() {
     recordDebugEvent('reader.activate');
     isActive.value = true;
-    error.value = null;
+    clearError();
   }
 
   function deactivate() {
@@ -398,8 +376,7 @@ export const useReaderStore = defineStore('reader', () => {
     });
     runtime.bumpSession();
     cancelAllInFlight();
-    toc.value = [];
-    tocOriginal.value = [];
+    clearAllData();
     const effectiveRule = newRule || newChapter.rule;
 
     // Canonicalize URLs (strip hashes etc.) to stabilize caching and navigation.
@@ -410,20 +387,9 @@ export const useReaderStore = defineStore('reader', () => {
 
     const id = `chapter-${Date.now()}-0`;
     chapters.value = [{ chapter: newChapter, rule: effectiveRule, id }];
-    currentChapterIndex.value = 0;
-    error.value = null;
-    loadedUrls.value.clear();
-    loadedUrls.value.add(newChapter.url);
-    vipBlockedUrls.value.clear();
-    blockedNavUrls.value.clear();
-    navFailures.clear();
-    cachedContents.value.clear();
-    persistedUrls.value.clear();
 
     // Store original content for text conversion
-    originalContents.value.clear();
     originalContents.value.set(id, newChapter.content);
-    originalTitles.value.clear();
     originalTitles.value.set(id, { title: newChapter.title, bookTitle: newChapter.bookTitle });
 
     // Also store in cachedContents for quick jump
@@ -449,8 +415,8 @@ export const useReaderStore = defineStore('reader', () => {
 
     syncCurrentHostPage();
 
-    // Restore persisted cache for this book (async, don't block)
-    void restoreCache();
+    // Restore the persisted chapter index for this book.
+    restoreCache();
   }
 
   /** Replace a progressively loaded chapter without resetting the reader session. */
@@ -569,7 +535,6 @@ export const useReaderStore = defineStore('reader', () => {
     return {
       active: isActive.value,
       loading: {
-        main: isLoading.value,
         prev: isLoadingPrev.value,
         next: isLoadingNext.value,
         toc: tocLoading.value,
@@ -698,7 +663,6 @@ export const useReaderStore = defineStore('reader', () => {
 
   return {
     isActive,
-    isLoading,
     isLoadingPrev,
     isLoadingNext,
     chapters,

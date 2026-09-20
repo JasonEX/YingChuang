@@ -1,6 +1,6 @@
 /** Reader scroll handling: chapter tracking, local progress and control visibility. */
 
-import { type ComputedRef, type Ref } from 'vue';
+import { type ComputedRef, onScopeDispose, type Ref } from 'vue';
 import { saveReadingPosition } from '@/ui/stores/reader/readingPosition';
 import type { ScheduleAutoLoadNext } from './useReaderAutoLoad';
 import type { useReaderStore } from '@/ui/stores/reader';
@@ -8,30 +8,6 @@ import type { useReaderStore } from '@/ui/stores/reader';
 const SCROLL_THROTTLE_MS = 16;
 const SCROLL_SETTLE_CHECK_MS = 180;
 const POSITION_SAVE_INTERVAL_MS = 500;
-
-function throttle<T extends (...args: unknown[]) => void>(fn: T, delay: number): T {
-  let lastCall = 0;
-  let timeoutId: ReturnType<typeof setTimeout> | null = null;
-
-  return ((...args: Parameters<T>) => {
-    const now = Date.now();
-    const remaining = delay - (now - lastCall);
-    if (remaining <= 0) {
-      if (timeoutId) clearTimeout(timeoutId);
-      timeoutId = null;
-      lastCall = now;
-      fn(...args);
-      return;
-    }
-
-    if (timeoutId) return;
-    timeoutId = setTimeout(() => {
-      timeoutId = null;
-      lastCall = Date.now();
-      fn(...args);
-    }, remaining);
-  }) as T;
-}
 
 export interface UseReaderScrollOptions {
   mainRef: Ref<HTMLElement | null>;
@@ -54,9 +30,16 @@ export function useReaderScroll(options: UseReaderScrollOptions) {
     scheduleAutoLoadNext,
   } = options;
 
+  let lastScrollCall = 0;
+  let pendingScrollTimer: ReturnType<typeof setTimeout> | null = null;
   let lastScrollTop = 0;
   let lastPositionSaveAt = 0;
   let pendingScrollSettleTimer: ReturnType<typeof setTimeout> | null = null;
+
+  onScopeDispose(() => {
+    if (pendingScrollTimer) clearTimeout(pendingScrollTimer);
+    if (pendingScrollSettleTimer) clearTimeout(pendingScrollSettleTimer);
+  }, true);
 
   function queueScrollSettledAutoLoadCheck(): void {
     if (pendingScrollSettleTimer) clearTimeout(pendingScrollSettleTimer);
@@ -150,5 +133,21 @@ export function useReaderScroll(options: UseReaderScrollOptions) {
     queueScrollSettledAutoLoadCheck();
   }
 
-  return { handleScroll: throttle(handleScrollCore, SCROLL_THROTTLE_MS) };
+  function handleScroll(): void {
+    const remaining = SCROLL_THROTTLE_MS - (Date.now() - lastScrollCall);
+    if (remaining <= 0) {
+      if (pendingScrollTimer) clearTimeout(pendingScrollTimer);
+      pendingScrollTimer = null;
+      lastScrollCall = Date.now();
+      handleScrollCore();
+    } else if (!pendingScrollTimer) {
+      pendingScrollTimer = setTimeout(() => {
+        pendingScrollTimer = null;
+        lastScrollCall = Date.now();
+        handleScrollCore();
+      }, remaining);
+    }
+  }
+
+  return { handleScroll };
 }

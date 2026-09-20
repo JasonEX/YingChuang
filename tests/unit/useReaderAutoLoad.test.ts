@@ -105,7 +105,6 @@ describe('useReaderAutoLoad', () => {
       hasNext: overrides.hasNext ?? true,
       isLoadingNext: overrides.isLoadingNext ?? false,
       isLoadingPrev: overrides.isLoadingPrev ?? false,
-      isLoading: overrides.isLoading ?? false,
       loadNextChapter: vi.fn().mockResolvedValue(true),
       ...overrides.readerStore,
     });
@@ -432,7 +431,6 @@ describe('useReaderAutoLoad', () => {
       { preloadNext: false },
       { isLoadingNext: true },
       { isLoadingPrev: true },
-      { isLoading: true },
       { isNavigating: true },
       { hasNext: false },
     ]) {

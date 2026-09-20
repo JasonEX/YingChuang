@@ -72,6 +72,23 @@ describe('ReaderStore - navigation & toast', () => {
     vi.useRealTimers();
   });
 
+  it('cancels the toast timer on close and gives a new session its full duration', () => {
+    vi.useFakeTimers();
+    const store = useReaderStore();
+    store.setError('old error');
+    const clearTimeout = vi.spyOn(window, 'clearTimeout');
+    store.deactivate();
+    expect(clearTimeout).toHaveBeenCalled();
+    expect(store.error).toBeNull();
+    store.activate();
+    store.showToast('new session', 'info', 4000);
+    vi.advanceTimersByTime(3000);
+    expect(store.error).toBe('new session');
+    vi.advanceTimersByTime(1000);
+    expect(store.error).toBeNull();
+    vi.useRealTimers();
+  });
+
   it('setCurrentChapter ignores replaceState errors', () => {
     const store = useReaderStore();
     store.setChapter({

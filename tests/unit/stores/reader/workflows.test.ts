@@ -93,6 +93,37 @@ describe('ReaderStore - workflows', () => {
     ).toContain('第二页');
   });
 
+  it('tracks displayed URLs through cache navigation, session replacement, and exit', async () => {
+    const store = useReaderStore();
+    const first = {
+      title: '第一章',
+      content: '<p>正文</p>',
+      rawContent: '<p>正文</p>',
+      url: 'https://example.com/book/1/1.html',
+      nextUrl: 'https://example.com/book/1/2.html',
+      confidence: 1,
+      method: 'rule' as const,
+    };
+    const second = { ...first, title: '第二章', url: first.nextUrl, nextUrl: first.url };
+    store.setChapter(first);
+    store.cachedContents.set(second.url, { chapter: second, cachedAt: Date.now() });
+    expect(await store.loadNextChapter()).toBe(true);
+    expect(await store.loadNextChapter()).toBe(false);
+    expect(store.chapters).toHaveLength(2);
+    expect(store.getDebugSnapshot().navigation.loadedUrls.count).toBe(2);
+
+    expect(await store.rebuildChaptersAround(first.url)).toBe(true);
+    expect(store.getDebugSnapshot().navigation.loadedUrls.count).toBe(1);
+    expect(await store.loadNextChapter()).toBe(true);
+    expect(mockFetchAndParseUrl).not.toHaveBeenCalled();
+
+    store.setChapter(second);
+    expect(store.getDebugSnapshot().navigation.loadedUrls.count).toBe(1);
+    expect(store.getDebugSnapshot().navigation.loadedUrls.tail).toEqual([second.url]);
+    store.deactivate();
+    expect(store.getDebugSnapshot().navigation.loadedUrls.count).toBe(0);
+  });
+
   it('reserves TOC loading before detecting a missing index URL', async () => {
     const store = useReaderStore();
     store.setChapter({

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { computed, ref } from 'vue';
+import { computed, effectScope, ref } from 'vue';
 import { JSDOM } from 'jsdom';
 
 import type { ChapterEntry } from '@/ui/stores/reader';
@@ -62,6 +62,21 @@ describe('useReaderScroll', () => {
       scheduleAutoLoadNext: vi.fn(),
     };
   }
+
+  it('cancels pending scroll and settled work when the reader scope closes', () => {
+    vi.useFakeTimers();
+    const options = createOptions({ mainRef: createMain() });
+    const scope = effectScope();
+    const { handleScroll } = scope.run(() => useReaderScroll(options))!;
+    handleScroll();
+    handleScroll();
+    expect(options.readerStore.updateScroll).toHaveBeenCalledTimes(1);
+    scope.stop();
+    vi.advanceTimersByTime(1000);
+    expect(options.readerStore.updateScroll).toHaveBeenCalledTimes(1);
+    expect(options.scheduleAutoLoadNext).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
 
   it('does nothing without a reader element', () => {
     const options = createOptions();

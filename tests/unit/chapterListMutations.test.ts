@@ -1,5 +1,5 @@
+import { computed, ref } from 'vue';
 import { describe, expect, it, vi } from 'vitest';
-import { ref } from 'vue';
 
 import {
   type CachedChapter,
@@ -48,16 +48,16 @@ describe('chapterListMutations', () => {
   }
 
   function makeContext(entries: ChapterEntry[] = [makeEntry(1)]): NavigationContext {
+    const chapters = ref(entries);
     return {
-      chapters: ref(entries),
+      chapters,
       currentChapterIndex: ref(0),
-      isLoading: ref(false),
       isLoadingNext: ref(false),
       isLoadingPrev: ref(false),
       pendingNextAbort: ref(null),
       pendingPrevAbort: ref(null),
       reloadAbort: ref(null),
-      loadedUrls: ref(new Set(entries.map(entry => entry.chapter.url))),
+      loadedUrls: computed(() => new Set(chapters.value.map(entry => entry.chapter.url))),
       vipBlockedUrls: ref(new Set()),
       blockedNavUrls: ref(new Set()),
       cachedContents: ref(new Map()),
@@ -160,7 +160,7 @@ describe('chapterListMutations', () => {
     ctx.originalTitles.value.set('stale', { title: 'stale' });
     const cached = makeCached(3);
 
-    await expect(rebuildChaptersFromCache(ctx, cached, cached.chapter.url)).resolves.toBe(true);
+    await expect(rebuildChaptersFromCache(ctx, cached)).resolves.toBe(true);
 
     expect(ctx.chapters.value).toHaveLength(1);
     expect(ctx.chapters.value[0].chapter.url).toBe('https://example.com/3.html');
@@ -176,8 +176,10 @@ describe('chapterListMutations', () => {
   it('reserves persisted navigation before its first await', async () => {
     const ctx = makeContext();
     const cached = makeCached(2);
-    let resolve!: (value: CachedChapter) => void;
-    vi.mocked(ctx.getPersistedCachedChapter).mockReturnValue(
+    ctx.currentConversionMode.value = 'sc';
+    vi.mocked(ctx.getPersistedCachedChapter).mockReturnValue(cached);
+    let resolve!: () => void;
+    vi.mocked(ctx.applyConversionToChapterEntry).mockReturnValue(
       new Promise(done => {
         resolve = done;
       })
@@ -187,7 +189,7 @@ describe('chapterListMutations', () => {
     const first = actions.loadNextChapter('auto');
     const second = actions.loadNextChapter('manual');
     expect(ctx.getPersistedCachedChapter).toHaveBeenCalledTimes(1);
-    resolve(cached);
+    resolve();
     expect(await first).toBe(true);
     expect(await second).toBe(false);
     expect(ctx.chapters.value.map(entry => entry.chapter.url)).toEqual([

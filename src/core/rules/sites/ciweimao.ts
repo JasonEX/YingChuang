@@ -564,6 +564,11 @@ const ciweimaoContent: SiteRule['content'] = {
 };
 
 const ciweimaoHooks: SiteRule['hooks'] = {
+  isVipChapter: (doc, url) => {
+    if (!/^https?:\/\/(?:www|wap)\.ciweimao\.com\/chapter\/\d+/i.test(url)) return null;
+    // The chapter shell also contains subscription promotions; it is not a locked-page signal.
+    return doc.querySelector('#J_BookCnt, #J_BookRead') ? false : null;
+  },
   beforeParse: ciweimaoBeforeParse,
   fetchDocument: (url, context) =>
     fetchCiweimaoApiDocument(url, {

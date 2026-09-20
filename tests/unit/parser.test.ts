@@ -30,14 +30,12 @@ type WaitForDynamicContentOptions = {
   scroll?: boolean;
 };
 
-const { mockInitialize, mockMatchRule } = vi.hoisted(() => ({
-  mockInitialize: vi.fn(async () => {}),
+const { mockMatchRule } = vi.hoisted(() => ({
   mockMatchRule: vi.fn(),
 }));
 
 vi.mock('@/core/rules/RuleManager', () => ({
   getRuleManager: () => ({
-    initialize: mockInitialize,
     matchRule: mockMatchRule,
   }),
 }));
@@ -61,7 +59,6 @@ describe('Parser', () => {
 
     parser = new Parser();
 
-    mockInitialize.mockClear();
     mockMatchRule.mockReset();
   });
 
@@ -266,7 +263,7 @@ describe('Parser', () => {
       meta: { source: 'builtin' },
     };
 
-    mockMatchRule.mockResolvedValue({
+    mockMatchRule.mockReturnValue({
       rule,
       source: 'builtin',
       matchedPattern: '.*',
@@ -304,7 +301,7 @@ describe('Parser', () => {
       meta: { source: 'builtin' },
     };
 
-    mockMatchRule.mockResolvedValue({ rule, source: 'builtin', matchedPattern: '.*' });
+    mockMatchRule.mockReturnValue({ rule, source: 'builtin', matchedPattern: '.*' });
 
     const out = await parser.parse(dom.window.document, dom.window.location.href);
 
@@ -333,7 +330,7 @@ describe('Parser', () => {
       meta: { source: 'builtin' },
     };
 
-    mockMatchRule.mockResolvedValueOnce({
+    mockMatchRule.mockReturnValueOnce({
       rule: rawRule,
       source: 'builtin',
       matchedPattern: '.*',
@@ -379,7 +376,7 @@ describe('Parser', () => {
       ) as unknown as DetectionEngineLike['detectSection'],
       quickCheck: vi.fn(() => true) as unknown as DetectionEngineLike['quickCheck'],
     };
-    mockMatchRule.mockResolvedValueOnce(null);
+    mockMatchRule.mockReturnValueOnce(null);
 
     const second = await parser.parse(dom.window.document, dom.window.location.href);
 
@@ -389,7 +386,7 @@ describe('Parser', () => {
   });
 
   it('returns null when detection cannot find a content element', async () => {
-    mockMatchRule.mockResolvedValue(null);
+    mockMatchRule.mockReturnValue(null);
     dom.window.document.body.innerHTML = '<div>short</div>';
 
     const out = await parser.parse(dom.window.document, 'https://example.com/chapter/1');
@@ -397,7 +394,7 @@ describe('Parser', () => {
   });
 
   it('uses window.location.href when doc.location is missing', async () => {
-    mockMatchRule.mockResolvedValue(null);
+    mockMatchRule.mockReturnValue(null);
 
     const doc = new DOMParser().parseFromString(
       '<!doctype html><html><body><div id="content">正文' +
@@ -959,7 +956,7 @@ describe('Parser', () => {
       quickCheck: vi.fn(() => true) as unknown as DetectionEngineLike['quickCheck'],
     };
 
-    mockMatchRule.mockResolvedValue({
+    mockMatchRule.mockReturnValue({
       rule,
       source: 'builtin',
       matchedPattern: rule.match.pattern,
@@ -1037,7 +1034,7 @@ describe('Parser', () => {
       quickCheck: vi.fn(() => true) as unknown as DetectionEngineLike['quickCheck'],
     };
 
-    mockMatchRule.mockResolvedValue({
+    mockMatchRule.mockReturnValue({
       rule,
       source: 'builtin',
       matchedPattern: rule.match.pattern,
@@ -1123,7 +1120,7 @@ describe('Parser', () => {
       content: { selector: '#content' },
       navigation: { prev: false, next: false, index: false },
     };
-    mockMatchRule.mockResolvedValue({ rule, source: 'builtin', matchedPattern: '.*' });
+    mockMatchRule.mockReturnValue({ rule, source: 'builtin', matchedPattern: '.*' });
     const result = await parser.parse(doc, 'https://example.com/123.html');
     expect(result?.title).toBe(expected.chapterTitle);
     expect(result?.bookTitle).toBe(expected.bookTitle);

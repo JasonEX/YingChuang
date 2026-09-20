@@ -26,7 +26,6 @@ describe('chapterLoadGuards', () => {
     return {
       chapters: ref(overrides.chapters || [makeEntry(overrides.chapter)]),
       currentChapterIndex: ref(0),
-      isLoading: ref(false),
       isLoadingNext: ref(overrides.isLoadingNext ?? false),
       isLoadingPrev: ref(overrides.isLoadingPrev ?? false),
       pendingNextAbort: ref(null),

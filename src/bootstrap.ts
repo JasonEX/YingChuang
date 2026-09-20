@@ -71,6 +71,7 @@ const appState: AppState = {
 // Vue app instance
 let app: ReturnType<typeof createApp> | null = null;
 let pinia: ReturnType<typeof createPinia> | null = null;
+let initialization: Promise<void> | null = null;
 let readerCleanup: (() => void) | null = null;
 let readerEntryApp: ReturnType<typeof createApp> | null = null;
 let readerEntryCleanup: (() => void) | null = null;
@@ -129,11 +130,8 @@ try {
  */
 export async function initialize(): Promise<void> {
   await ensureInitialized();
-  if (!appState.isInitialized) {
-    getSiteProtection().deactivate();
-    return;
-  }
-  if (appState.autoEnableDone) return;
+  if (!appState.isInitialized) return;
+  if (appState.autoEnableDone || appState.isActive) return;
 
   appState.autoEnableDone = true;
   await runAutoEnable();
@@ -142,21 +140,22 @@ export async function initialize(): Promise<void> {
 async function ensureInitialized(): Promise<void> {
   if (appState.isInitialized) return;
 
-  console.log(`[MNR] YingChuang v${VERSION} (${BUILD_DATE})`);
-
-  try {
-    // Create Pinia store
-    pinia = createPinia();
-
-    // Initialize stores
-    const configStore = useConfigStore(pinia);
-
-    await configStore.load();
-
-    appState.isInitialized = true;
-  } catch (e) {
-    console.error('[MNR] Initialization error:', e);
+  if (!initialization) {
+    initialization = (async () => {
+      console.log(`[MNR] YingChuang v${VERSION} (${BUILD_DATE})`);
+      try {
+        const stores = createPinia();
+        await useConfigStore(stores).load();
+        pinia = stores;
+        appState.isInitialized = true;
+      } catch (e) {
+        console.error('[MNR] Initialization error:', e);
+        getSiteProtection().deactivate();
+      }
+    })();
   }
+  await initialization;
+  initialization = null;
 }
 
 /**
@@ -173,7 +172,7 @@ async function runAutoEnable(): Promise<void> {
   });
 
   // First, check the decision to handle user-disabled case
-  const decision = await manager.check(document);
+  const decision = manager.check(document);
   appState.currentDecision = decision;
 
   // If user previously disabled auto-enable, keep only the manual entry.
@@ -601,7 +600,8 @@ export async function manualEnable(): Promise<void> {
 
   try {
     await ensureInitialized();
-    if (!pinia) return;
+    if (!pinia || appState.isActive) return;
+    appState.autoEnableDone = true;
 
     const configStore = useConfigStore(pinia);
     const protectionOptions = toProtectionOptions(configStore.protection);
@@ -613,7 +613,7 @@ export async function manualEnable(): Promise<void> {
     manager.setLaunchCallback(launchReader);
     await manager.manualEnable(document);
   } finally {
-    if (!appState.isActive && (await shouldShowManualEntryForPage(currentUrl, document))) {
+    if (!appState.isActive && isReaderEntryPage(currentUrl, document)) {
       showReaderEntry();
     }
   }
@@ -717,7 +717,7 @@ async function bootstrap(): Promise<void> {
   if (await consumeExitNavigation()) return;
 
   const url = window.location.href;
-  if (!(await shouldBootstrapForPage(url, document))) {
+  if (!isReaderEntryPage(url, document)) {
     getSiteProtection().deactivate();
     return;
   }
@@ -738,36 +738,16 @@ async function bootstrap(): Promise<void> {
   await initialize();
 }
 
-async function shouldBootstrapForPage(url: string, doc: Document): Promise<boolean> {
+function isReaderEntryPage(url: string, doc: Document): boolean {
   const urlKind = getPageKindFromUrl(url);
   if (urlKind === 'chapter') return true;
   if (urlKind === 'toc') return false;
 
   try {
     const manager = getRuleManager();
-    await manager.initialize();
-    if ((await manager.matchRule(url)) !== null) return true;
+    if (manager.matchRule(url) !== null) return true;
   } catch (e) {
-    console.debug('[MNR] Failed to match bootstrap rule:', e);
-  }
-
-  return getPageKind(url, doc) === 'chapter';
-}
-
-async function shouldShowManualEntryForPage(
-  url: string,
-  doc: Document = document
-): Promise<boolean> {
-  const urlKind = getPageKindFromUrl(url);
-  if (urlKind === 'chapter') return true;
-  if (urlKind === 'toc') return false;
-
-  try {
-    const manager = getRuleManager();
-    await manager.initialize();
-    if ((await manager.matchRule(url)) !== null) return true;
-  } catch (e) {
-    console.debug('[MNR] Failed to match manual-entry rule:', e);
+    console.debug('[MNR] Failed to match reader entry rule:', e);
   }
 
   return getPageKind(url, doc) === 'chapter';

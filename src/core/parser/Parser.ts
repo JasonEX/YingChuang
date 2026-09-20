@@ -76,8 +76,7 @@ export class Parser {
 
     // Try to match a rule first
     const ruleManager = getRuleManager();
-    await ruleManager.initialize();
-    const ruleMatch = await ruleManager.matchRule(url);
+    const ruleMatch = ruleManager.matchRule(url);
 
     if (ruleMatch && !this.options.forceDetection) {
       // Use rule-based parsing

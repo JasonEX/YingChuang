@@ -25,7 +25,6 @@ function toRegExp(pattern: string, type: 'regex' | 'glob' = 'regex'): RegExp {
 
 export class RuleManager {
   private builtInRules: SiteRule[] = curatedBuiltInRules;
-  private initialized: boolean = false;
   private compiledCache = new WeakMap<SiteRule, { main: RegExp; excludes: RegExp[] }>();
   // Curated rules are static; collect only participating hooks once, not per link.
   private readonly sectionUrlParsers = this.builtInRules.flatMap(rule =>
@@ -35,13 +34,19 @@ export class RuleManager {
     rule.hooks?.resolveEntryUrl ? [rule.hooks.resolveEntryUrl] : []
   );
 
-  /**
-   * Initialize the rule manager
-   * Reserved for future async built-in rule setup.
-   */
-  async initialize(): Promise<void> {
-    if (this.initialized) return;
-    this.initialized = true;
+  private readonly vipClassifiers = [
+    ...new Set(
+      this.builtInRules.flatMap(rule => (rule.hooks?.isVipChapter ? [rule.hooks.isVipChapter] : []))
+    ),
+  ];
+
+  /** Only registered site checks run; each checks its URL before inspecting the document. */
+  isVipChapter(doc: Document, url: string): boolean | null {
+    for (const classify of this.vipClassifiers) {
+      const result = classify(doc, url);
+      if (result !== null) return result;
+    }
+    return null;
   }
 
   /** Synchronous so URL helpers and detectors can use the same site parser. */
@@ -65,11 +70,7 @@ export class RuleManager {
   /**
    * Match a URL against curated built-in rules.
    */
-  async matchRule(url: string): Promise<RuleMatchResult | null> {
-    if (!this.initialized) {
-      await this.initialize();
-    }
-
+  matchRule(url: string): RuleMatchResult | null {
     for (const rule of this.builtInRules) {
       if (this.matchesUrl(rule, url)) {
         return {

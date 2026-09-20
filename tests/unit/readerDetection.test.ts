@@ -71,6 +71,29 @@ describe('Reader detection utilities', () => {
     ).toBe(true);
   });
 
+  it.each([
+    ['https://www.ciweimao.com/chapter/123', 'J_BookRead', false],
+    ['https://wap.ciweimao.com/chapter/123', 'J_BookCnt', false],
+    ['https://www.ciweimao.com/chapter/123', 'locked', true],
+    ['https://www.ciweimao.com/book/123', 'J_BookRead', true],
+    ['https://example.com/chapter/123', 'J_BookRead', true],
+  ])('keeps the chapter-shell exception scoped to %s (%s)', (url, id, blocked) => {
+    const doc = new DOMParser().parseFromString(
+      `<div id="${id}">本章为VIP章节，订阅后可阅读</div>`,
+      'text/html'
+    );
+    // Fetched documents inherit the host URL; classification must use the request URL.
+    Object.assign(doc, { _mnrUrl: url });
+    expect(isVipChapterPage(doc)).toBe(blocked);
+  });
+
+  it('checks Cloudflare before the site chapter-shell exception', () => {
+    const doc = new JSDOM('<title>Just a moment...</title><div id="J_BookRead"></div>', {
+      url: 'https://www.ciweimao.com/chapter/123',
+    }).window.document;
+    expect(getChapterDocumentBlockReason(doc)).toBe('cloudflare');
+  });
+
   it('isVipChapterPage detects VIP/locked chapter pages via body text', () => {
     const doc = new JSDOM('<!doctype html><html><body>本章为VIP章节，订阅后可阅读</body></html>')
       .window.document;

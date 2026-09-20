@@ -15,7 +15,7 @@ type MockedRuleStorage = {
 };
 
 type MockedRuleManager = {
-  initialize: ReturnType<typeof vi.fn>;
+  isVipChapter: ReturnType<typeof vi.fn>;
   matchRule: ReturnType<typeof vi.fn>;
 };
 
@@ -29,8 +29,8 @@ const mockedRuleStorage: MockedRuleStorage = {
 };
 
 const mockedRuleManager: MockedRuleManager = {
-  initialize: vi.fn(async () => {}),
-  matchRule: vi.fn(async () => null),
+  isVipChapter: vi.fn(() => null),
+  matchRule: vi.fn(() => null),
 };
 
 const mockedProtection: MockedSiteProtection = {
@@ -86,8 +86,7 @@ describe('AutoEnableManager', () => {
     mockedRuleStorage.getSitePreference.mockReturnValue(null);
     mockedRuleStorage.setSitePreference.mockImplementation(() => {});
 
-    mockedRuleManager.initialize.mockResolvedValue(undefined);
-    mockedRuleManager.matchRule.mockResolvedValue(null);
+    mockedRuleManager.matchRule.mockReturnValue(null);
 
     mockedProtection.activate.mockImplementation(() => {});
     mockedProtection.deactivate.mockImplementation(() => {});
@@ -147,7 +146,6 @@ describe('AutoEnableManager', () => {
       confidence: 0,
     });
     expect(decision.reasons.join(' ')).toContain('VIP/付费章节');
-    expect(mockedRuleManager.initialize).not.toHaveBeenCalled();
   });
 
   it('returns site-preference decision when user enabled auto-enable for the site', async () => {
@@ -164,8 +162,6 @@ describe('AutoEnableManager', () => {
       method: 'site-preference',
       confidence: 1,
     });
-
-    expect(mockedRuleManager.initialize).not.toHaveBeenCalled();
   });
 
   it('skips auto-enable on toc pages even if the site preference is disabled', async () => {
@@ -217,7 +213,7 @@ describe('AutoEnableManager', () => {
   });
 
   it('treats every explicit rule match as a built-in rule decision', async () => {
-    mockedRuleManager.matchRule.mockResolvedValue({
+    mockedRuleManager.matchRule.mockReturnValue({
       rule: {
         id: 'builtin',
         match: { pattern: 'example', type: 'regex' },
@@ -241,7 +237,7 @@ describe('AutoEnableManager', () => {
   });
 
   it('returns builtin-rule decision when rule match is not from user', async () => {
-    mockedRuleManager.matchRule.mockResolvedValue({
+    mockedRuleManager.matchRule.mockReturnValue({
       rule: {
         id: 'builtin',
         match: { pattern: 'example', type: 'regex' },
@@ -265,7 +261,7 @@ describe('AutoEnableManager', () => {
   });
 
   it('allows explicit rules to override ambiguous page-kind detection', async () => {
-    mockedRuleManager.matchRule.mockResolvedValue({
+    mockedRuleManager.matchRule.mockReturnValue({
       rule: {
         id: 'paged-section',
         match: { pattern: 'example', type: 'regex' },
@@ -332,7 +328,7 @@ describe('AutoEnableManager', () => {
   });
 
   it('execute auto-launches on rule match and activates protection', async () => {
-    mockedRuleManager.matchRule.mockResolvedValue({
+    mockedRuleManager.matchRule.mockReturnValue({
       rule: {
         id: 'builtin',
         match: { pattern: 'example', type: 'regex' },
@@ -376,7 +372,7 @@ describe('AutoEnableManager', () => {
       rule,
     };
     const merged = { ...firstPage, content: '<p>first</p><p>second</p>' };
-    mockedRuleManager.matchRule.mockResolvedValue({
+    mockedRuleManager.matchRule.mockReturnValue({
       rule,
       source: 'builtin',
       matchedPattern: 'example',
@@ -600,6 +596,93 @@ describe('AutoEnableManager', () => {
       rule,
       'complete'
     );
+  });
+
+  it('shares an automatic parse with repeated manual entries', async () => {
+    const { AutoEnableManager } = await import('@/core/AutoEnableManager');
+    const manager = new AutoEnableManager();
+    const doc = createDoc();
+    mockedRuleStorage.getSitePreference.mockReturnValue({ enabled: true });
+    const chapter = {
+      title: 'Chapter 1',
+      content: '<p>content</p>',
+      rawContent: '<p>content</p>',
+      url: doc.URL,
+      confidence: 1,
+      method: 'rule' as const,
+    };
+    let finish!: (value: typeof chapter) => void;
+    mockedSectionMerger.merge.mockReturnValueOnce(
+      new Promise(resolve => {
+        finish = resolve;
+      })
+    );
+    const launch = vi.fn();
+    manager.setLaunchCallback(launch);
+    const auto = manager.execute(doc);
+    const manual = manager.manualEnable(doc);
+    const repeated = manager.manualEnable(doc);
+    expect(mockedSectionMerger.merge).toHaveBeenCalledTimes(1);
+    finish(chapter);
+    await Promise.all([auto, manual, repeated]);
+    expect(launch).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the first page and protection when manual background merging fails', async () => {
+    const { AutoEnableManager } = await import('@/core/AutoEnableManager');
+    const manager = new AutoEnableManager();
+    const doc = createDoc();
+    const firstPage = {
+      title: 'Chapter 1',
+      content: '<p>first</p>',
+      rawContent: '<p>first</p>',
+      url: doc.URL,
+      confidence: 1,
+      method: 'rule' as const,
+    };
+    mockedSectionMerger.merge.mockImplementationOnce(async (_doc, _url, options) => {
+      options.onFirstPage(firstPage);
+      throw new Error('second page failed');
+    });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const launch = vi.fn();
+    manager.setLaunchCallback(launch);
+    await manager.manualEnable(doc);
+    expect(launch).toHaveBeenCalledExactlyOnceWith(firstPage, undefined, 'initial');
+    expect(mockedProtection.deactivate).not.toHaveBeenCalled();
+    expect(mockedRuleStorage.setSitePreference).not.toHaveBeenCalled();
+  });
+
+  it('allows a new manual attempt after a failed shared parse', async () => {
+    const { AutoEnableManager } = await import('@/core/AutoEnableManager');
+    const manager = new AutoEnableManager();
+    const doc = createDoc();
+    const launch = vi.fn();
+    manager.setLaunchCallback(launch);
+    mockedSectionMerger.merge.mockResolvedValueOnce(null);
+    await Promise.all([manager.manualEnable(doc), manager.manualEnable(doc)]);
+    await manager.manualEnable(doc);
+    expect(mockedSectionMerger.merge).toHaveBeenCalledTimes(2);
+    expect(launch).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not restart parsing when an older prompt responds after manual entry', async () => {
+    const { AutoEnableManager } = await import('@/core/AutoEnableManager');
+    const manager = new AutoEnableManager();
+    const doc = createDoc();
+    let respond!: (value: { accepted: boolean; rememberForSite: boolean }) => void;
+    manager.setPromptCallback(
+      () =>
+        new Promise(resolve => {
+          respond = resolve;
+        })
+    );
+    manager.setLaunchCallback(vi.fn());
+    const auto = manager.execute(doc);
+    await manager.manualEnable(doc);
+    respond({ accepted: true, rememberForSite: false });
+    await auto;
+    expect(mockedSectionMerger.merge).toHaveBeenCalledTimes(1);
   });
 
   it('manualEnable logs and swallows merge errors', async () => {

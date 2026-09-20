@@ -178,6 +178,8 @@ export type FetchDocumentHook = (
 
 /** JavaScript hooks for built-in site adapters */
 interface HooksConfig {
+  /** Site-specific VIP evidence; null leaves the generic document classifier in charge. */
+  isVipChapter?: (doc: Document, url: string) => boolean | null;
   /** Override generic section parsing when the chapter ID itself contains a separator. */
   parseSectionUrl?: SectionUrlParser;
   /** Typed hook to run before parsing. */

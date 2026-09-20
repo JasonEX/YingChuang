@@ -1,3 +1,4 @@
+import { getRuleManager } from '@/core/rules/RuleManager';
 import { isCloudflareChallenge } from '@/core/protection';
 
 export type ChapterDocumentBlockReason = 'cloudflare' | 'vip';
@@ -15,16 +16,10 @@ export function normalizeTextForVipDetection(text: string): string {
  * The heuristics stay conservative to avoid false positives from author requests for subscriptions.
  */
 export function isVipChapterPage(doc: Document): boolean {
-  try {
-    const url =
-      (doc as Document & { _mnrUrl?: string })._mnrUrl || doc.location?.href || doc.baseURI || '';
-    if (/^https?:\/\/(?:www|wap)\.ciweimao\.com\/chapter\/\d+/i.test(url)) {
-      const hasChapterShell = !!doc.querySelector('#J_BookCnt, #J_BookRead');
-      if (hasChapterShell) return false;
-    }
-  } catch {
-    // Fall through to generic VIP detection.
-  }
+  const url =
+    (doc as Document & { _mnrUrl?: string })._mnrUrl || doc.location?.href || doc.baseURI || '';
+  const siteResult = getRuleManager().isVipChapter(doc, url);
+  if (siteResult !== null) return siteResult;
 
   const rawText = doc.body?.textContent || '';
   if (!rawText) return false;

@@ -5,7 +5,7 @@
  * loading adjacent chapters while preserving context, and keyboard-driven scrolling.
  */
 
-import { nextTick, type Ref } from 'vue';
+import { nextTick, onScopeDispose, type Ref } from 'vue';
 import type { useReaderStore } from '@/ui/stores/reader';
 
 export interface UseChapterNavigationOptions {
@@ -32,28 +32,65 @@ const LINE_SCROLL_STEP_PX = 150;
 export function useChapterNavigation(options: UseChapterNavigationOptions) {
   const { mainRef, chapterRefs, readerStore, isNavigating, onViewportSettled } = options;
 
-  function scrollByPage(mainEl: HTMLElement, direction: 'prev' | 'next'): void {
+  let navigationId = 0;
+  let settleTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function clearSettleTimer(): void {
+    clearTimeout(settleTimer);
+    settleTimer = undefined;
+  }
+
+  onScopeDispose(() => {
+    navigationId += 1;
+    clearSettleTimer();
+    isNavigating.value = false;
+  }, true);
+
+  /** A directory selection supersedes older navigation; repeated paging waits for completion. */
+  async function runNavigation(
+    action: (mainEl: HTMLElement, isCurrent: () => boolean) => Promise<'auto' | 'smooth' | void>,
+    replace = false
+  ): Promise<boolean> {
+    const mainEl = mainRef.value;
+    if (!mainEl || (isNavigating.value && !replace)) return false;
+    const id = ++navigationId;
+    const isCurrent = () => id === navigationId;
+    clearSettleTimer();
     isNavigating.value = true;
-    mainEl.scrollBy({
-      top: mainEl.clientHeight * PAGE_SCROLL_RATIO * (direction === 'next' ? 1 : -1),
-      behavior: 'smooth',
-    });
-    setTimeout(() => {
+    let behavior: 'auto' | 'smooth' | void = undefined;
+    const finish = () => {
+      if (!isCurrent()) return;
+      clearSettleTimer();
       isNavigating.value = false;
-      onViewportSettled();
-    }, SMOOTH_NAVIGATION_LOCK_MS);
+      if (behavior) onViewportSettled();
+    };
+    try {
+      behavior = await action(mainEl, isCurrent);
+      return isCurrent() && behavior !== undefined;
+    } finally {
+      if (isCurrent()) {
+        if (behavior === 'smooth') settleTimer = setTimeout(finish, SMOOTH_NAVIGATION_LOCK_MS);
+        else finish();
+      }
+    }
   }
 
-  function scrollByLine(mainEl: HTMLElement, direction: ChapterDirection): void {
-    mainEl.scrollBy({
-      top: LINE_SCROLL_STEP_PX * (direction === 'next' ? 1 : -1),
-      behavior: 'auto',
-    });
-  }
-
-  async function waitForLayout(): Promise<void> {
+  async function scrollToChapter(
+    mainEl: HTMLElement,
+    url: string,
+    behavior: 'auto' | 'smooth',
+    isCurrent: () => boolean
+  ): Promise<'auto' | 'smooth' | void> {
     await nextTick();
-    await new Promise<void>(resolve => globalThis.requestAnimationFrame(() => resolve()));
+    if (!isCurrent()) return;
+    const index = readerStore.chapters.findIndex(entry => entry.chapter.url === url);
+    const targetEl = chapterRefs.get(url);
+    if (index < 0 || !targetEl) return;
+    const top =
+      targetEl.getBoundingClientRect().top - mainEl.getBoundingClientRect().top + mainEl.scrollTop;
+    mainEl.scrollTo({ top, behavior });
+    readerStore.setCurrentChapter(index);
+    return behavior;
   }
 
   function captureViewportAnchor(
@@ -117,7 +154,8 @@ export function useChapterNavigation(options: UseChapterNavigationOptions) {
 
   async function loadAtBoundary(
     mainEl: HTMLElement,
-    direction: ChapterDirection
+    direction: ChapterDirection,
+    isCurrent: () => boolean
   ): Promise<boolean> {
     const available = direction === 'next' ? readerStore.hasNext : readerStore.hasPrev;
     if (!available) {
@@ -132,9 +170,12 @@ export function useChapterNavigation(options: UseChapterNavigationOptions) {
         direction === 'next'
           ? await readerStore.loadNextChapter('manual')
           : await readerStore.loadPrevChapter('manual');
-      if (!loaded) return false;
+      if (!loaded || !isCurrent()) return false;
 
-      await waitForLayout();
+      // Commit the DOM and anchor together before accepting another gesture. Geometry reads
+      // resolve layout; waiting for a frame would leave the new chapter visible but locked.
+      await nextTick();
+      if (!isCurrent()) return false;
       restoreViewportAnchor(mainEl, anchor);
       return true;
     } catch (error) {
@@ -144,131 +185,61 @@ export function useChapterNavigation(options: UseChapterNavigationOptions) {
   }
 
   async function loadBoundaryChapter(direction: ChapterDirection): Promise<boolean> {
-    const mainEl = mainRef.value;
-    if (!mainEl) return false;
-    if (isNavigating.value || readerStore.isLoadingPrev || readerStore.isLoadingNext) return false;
-
-    isNavigating.value = true;
-    try {
-      return await loadAtBoundary(mainEl, direction);
-    } finally {
-      isNavigating.value = false;
-    }
-  }
-
-  /**
-   * Jump to a cached chapter without page reload
-   */
-  async function jumpToCachedChapter(url: string) {
-    // First check if already in the current chapters array
-    const existingIndex = readerStore.chapters.findIndex(entry => entry.chapter.url === url);
-
-    if (existingIndex >= 0) {
-      // Already in display list - just scroll to it
-      readerStore.setCurrentChapter(existingIndex);
-      chapterRefs.get(url)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      return;
-    }
-
-    // Not in current chapters - rebuild from cache
-    const success = await readerStore.rebuildChaptersAround(url);
-    if (success) {
-      // Scroll to top
-      mainRef.value?.scrollTo({ top: 0, behavior: 'auto' });
-    } else {
-      // Fallback to page navigation if cache miss
-      window.location.href = url;
-    }
-  }
-
-  /**
-   * Jump to a specific chapter by index
-   */
-  async function jumpToChapter(index: number, behavior: 'auto' | 'smooth' = 'smooth') {
-    const mainEl = mainRef.value;
-    if (!mainEl) return;
-    if (index < 0 || index >= readerStore.chapters.length) return;
-
-    isNavigating.value = true;
-
-    await waitForLayout();
-
-    const url = readerStore.chapters[index]?.chapter.url;
-    if (!url) {
-      isNavigating.value = false;
-      return;
-    }
-
-    const targetEl = chapterRefs.get(url);
-    if (!targetEl) {
-      isNavigating.value = false;
-      return;
-    }
-
-    const containerRect = mainEl.getBoundingClientRect();
-    const targetRect = targetEl.getBoundingClientRect();
-    const targetOffset = targetRect.top - containerRect.top + mainEl.scrollTop;
-    mainEl.scrollTo({
-      top: targetOffset,
-      behavior,
+    if (readerStore.isLoadingPrev || readerStore.isLoadingNext) return false;
+    return runNavigation(async (mainEl, isCurrent) => {
+      if (await loadAtBoundary(mainEl, direction, isCurrent)) return 'auto';
     });
-
-    // Update current chapter index
-    readerStore.setCurrentChapter(index);
-
-    // Reset navigating flag
-    if (behavior === 'smooth') {
-      setTimeout(() => {
-        isNavigating.value = false;
-      }, SMOOTH_NAVIGATION_LOCK_MS);
-    } else {
-      // Immediate reset for auto scroll
-      globalThis.requestAnimationFrame(() => {
-        isNavigating.value = false;
-      });
-    }
   }
 
-  /** Coordinate scrolling, boundary loading and the shared navigation lock. */
+  async function jumpToCachedChapter(url: string): Promise<void> {
+    await runNavigation(async (mainEl, isCurrent) => {
+      if (readerStore.chapters.some(entry => entry.chapter.url === url)) {
+        return scrollToChapter(mainEl, url, 'smooth', isCurrent);
+      }
+      const success = await readerStore.rebuildChaptersAround(url);
+      if (!isCurrent()) return;
+      if (!success) {
+        window.location.href = url;
+        return;
+      }
+      await nextTick();
+      if (!isCurrent()) return;
+      mainEl.scrollTo({ top: 0, behavior: 'auto' });
+      return 'auto';
+    }, true);
+  }
+
+  async function jumpToChapter(
+    index: number,
+    behavior: 'auto' | 'smooth' = 'smooth'
+  ): Promise<void> {
+    const url = readerStore.chapters[index]?.chapter.url;
+    if (!url) return;
+    await runNavigation((mainEl, isCurrent) => scrollToChapter(mainEl, url, behavior, isCurrent));
+  }
+
   async function moveReader(direction: ChapterDirection, mode: ReaderMoveMode): Promise<void> {
-    const mainEl = mainRef.value;
-    if (!mainEl) return;
-    if (isNavigating.value) return;
-
-    const atBoundary = direction === 'next' ? isAtBottom(mainEl) : isAtTop(mainEl);
-    if (!atBoundary) {
-      if (mode === 'page') scrollByPage(mainEl, direction);
-      else scrollByLine(mainEl, direction);
-      return;
-    }
-
-    if (readerStore.isLoadingPrev || readerStore.isLoadingNext) return;
-
-    const available = direction === 'next' ? readerStore.hasNext : readerStore.hasPrev;
-    if (!available) {
-      if (mode === 'page') showBoundaryEnd(direction);
-      return;
-    }
-
-    isNavigating.value = true;
-    let loaded = false;
-    let pageScrollStarted = false;
-    try {
-      loaded = await loadAtBoundary(mainEl, direction);
-      if (!loaded) return;
-
-      if (mode === 'page') {
-        scrollByPage(mainEl, direction);
-        pageScrollStarted = true;
-      } else {
-        scrollByLine(mainEl, direction);
+    await runNavigation(async (mainEl, isCurrent) => {
+      const atBoundary = direction === 'next' ? isAtBottom(mainEl) : isAtTop(mainEl);
+      if (atBoundary) {
+        if (readerStore.isLoadingPrev || readerStore.isLoadingNext) return;
+        const available = direction === 'next' ? readerStore.hasNext : readerStore.hasPrev;
+        if (!available) {
+          if (mode === 'page') showBoundaryEnd(direction);
+          return;
+        }
+        if (!(await loadAtBoundary(mainEl, direction, isCurrent))) return;
+        if (!isCurrent()) return;
       }
-    } finally {
-      if (!pageScrollStarted) {
-        isNavigating.value = false;
-        if (loaded) onViewportSettled();
-      }
-    }
+      const behavior = mode === 'page' ? 'smooth' : 'auto';
+      mainEl.scrollBy({
+        top:
+          (mode === 'page' ? mainEl.clientHeight * PAGE_SCROLL_RATIO : LINE_SCROLL_STEP_PX) *
+          (direction === 'next' ? 1 : -1),
+        behavior,
+      });
+      return behavior;
+    });
   }
 
   /**
@@ -303,42 +274,36 @@ export function useChapterNavigation(options: UseChapterNavigationOptions) {
   /**
    * Navigate to previous or next chapter
    */
-  async function navigateChapter(direction: ChapterDirection) {
-    const mainEl = mainRef.value;
-    if (!mainEl) return;
-
-    const currentIdx = readerStore.currentChapterIndex;
-    const chaptersCount = readerStore.chapters.length;
-
-    // Smart lock: prevent instant double-clicks.
-    if (isNavigating.value) {
-      return;
-    }
-
-    const targetIndex = currentIdx + (direction === 'next' ? 1 : -1);
-    if (targetIndex >= 0 && targetIndex < chaptersCount) {
+  async function navigateChapter(direction: ChapterDirection): Promise<void> {
+    const targetIndex = readerStore.currentChapterIndex + (direction === 'next' ? 1 : -1);
+    if (readerStore.chapters[targetIndex]) {
       await jumpToChapter(targetIndex);
       return;
     }
-
-    const available = direction === 'next' ? readerStore.hasNext : readerStore.hasPrev;
-    if (!available) {
-      showBoundaryEnd(direction);
-      return;
-    }
-
-    const loading = direction === 'next' ? readerStore.isLoadingNext : readerStore.isLoadingPrev;
-    if (loading) return;
-
-    const success =
-      direction === 'next'
-        ? await readerStore.loadNextChapter('manual')
-        : await readerStore.loadPrevChapter('manual');
-    if (!success) return;
-
-    const loadedIndex = direction === 'next' ? readerStore.chapters.length - 1 : 0;
-    const behavior = direction === 'next' ? 'smooth' : 'auto';
-    globalThis.requestAnimationFrame(() => void jumpToChapter(loadedIndex, behavior));
+    await runNavigation(async (mainEl, isCurrent) => {
+      const available = direction === 'next' ? readerStore.hasNext : readerStore.hasPrev;
+      if (!available) {
+        showBoundaryEnd(direction);
+        return;
+      }
+      if (readerStore.isLoadingPrev || readerStore.isLoadingNext) return;
+      const loaded =
+        direction === 'next'
+          ? await readerStore.loadNextChapter('manual')
+          : await readerStore.loadPrevChapter('manual');
+      if (!loaded || !isCurrent()) return;
+      const entry =
+        direction === 'next'
+          ? readerStore.chapters[readerStore.chapters.length - 1]
+          : readerStore.chapters[0];
+      if (entry)
+        return scrollToChapter(
+          mainEl,
+          entry.chapter.url,
+          direction === 'next' ? 'smooth' : 'auto',
+          isCurrent
+        );
+    });
   }
 
   /**

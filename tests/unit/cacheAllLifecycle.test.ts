@@ -48,8 +48,8 @@ function makeContext(): CacheAllContext {
     chapters: ref([]),
     runtime: createReaderRuntime(),
     loadToc: vi.fn(async () => {}),
-    restoreCache: vi.fn(async () => {}),
-    persistCache: vi.fn(async () => {}),
+    restoreCache: vi.fn(() => {}),
+    persistCache: vi.fn(() => {}),
     showToast: vi.fn(),
   };
 }
@@ -71,12 +71,9 @@ afterEach(() => {
 describe('cache task ownership', () => {
   it('reserves the task before restoring storage', async () => {
     const ctx = makeContext();
-    const pending = deferred<void>();
-    vi.mocked(ctx.restoreCache).mockReturnValue(pending.promise);
     const actions = createCacheAll(ctx);
     const first = actions.startCacheAll([target]);
     const second = actions.startCacheAll([target]);
-    pending.resolve();
     await Promise.all([first, second]);
     expect(ctx.restoreCache).toHaveBeenCalledTimes(1);
     expect(mocks.fetch).toHaveBeenCalledTimes(1);
@@ -84,9 +81,10 @@ describe('cache task ownership', () => {
   it('does not resume a cancelled preparation', async () => {
     const ctx = makeContext();
     const pending = deferred<void>();
-    vi.mocked(ctx.restoreCache).mockReturnValue(pending.promise);
+    vi.mocked(ctx.loadToc).mockReturnValue(pending.promise);
     const actions = createCacheAll(ctx);
-    const run = actions.startCacheAll([target]);
+    ctx.chapter = computed(() => ({ ...chapter, indexUrl: 'https://example.com/read/100/' }));
+    const run = actions.startCacheAll();
     actions.cancelCacheAll();
     pending.resolve();
     await run;
@@ -234,7 +232,9 @@ describe('cache task ownership', () => {
 
 it('releases ownership after a preparation error so the user can retry', async () => {
   const ctx = makeContext();
-  vi.mocked(ctx.restoreCache).mockRejectedValueOnce(new Error('storage unavailable'));
+  vi.mocked(ctx.restoreCache).mockImplementationOnce(() => {
+    throw new Error('storage unavailable');
+  });
   const actions = createCacheAll(ctx);
   await actions.startCacheAll([target]);
   expect(ctx.cacheProgress.value.running).toBe(false);
@@ -242,23 +242,25 @@ it('releases ownership after a preparation error so the user can retry', async (
   expect(ctx.cachedContents.value.has(target)).toBe(true);
 });
 
-it('does not let an old completion clear or announce a restarted task', async () => {
+it('does not let old parsing clear or announce a restarted task', async () => {
   const ctx = makeContext();
-  const pending = deferred<void>();
-  vi.mocked(ctx.persistCache).mockReturnValueOnce(pending.promise);
+  const pending = deferred<ParsedChapter>();
+  mocks.parse.mockReturnValueOnce(pending.promise);
   const actions = createCacheAll(ctx);
   const oldRun = actions.startCacheAll([target]);
-  await vi.waitFor(() => expect(ctx.persistCache).toHaveBeenCalledTimes(1));
+  await vi.waitFor(() => expect(mocks.parse).toHaveBeenCalledTimes(1));
   actions.cancelCacheAll();
-  const preparation = deferred<void>();
-  vi.mocked(ctx.restoreCache).mockReturnValueOnce(preparation.promise);
+  const responsePending = deferred<ReturnType<typeof response>>();
+  mocks.fetch.mockReturnValueOnce({ promise: responsePending.promise, abort: vi.fn() });
   const newRun = actions.startCacheAll([target]);
-  pending.resolve();
+  await vi.waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(2));
+  pending.resolve(chapter);
   await oldRun;
   expect(ctx.cacheProgress.value.running).toBe(true);
+  expect(ctx.cachedContents.value.size).toBe(0);
   expect(ctx.showToast).not.toHaveBeenCalled();
   actions.cancelCacheAll();
-  preparation.resolve();
+  responsePending.resolve(response());
   await newRun;
 });
 

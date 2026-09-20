@@ -149,8 +149,7 @@ describe('bootstrap', () => {
     mockRemoveOverlays.mockReset();
     mockSetSitePreference.mockReset();
     mockGetRuleManager.mockReturnValue({
-      initialize: vi.fn(async () => {}),
-      matchRule: vi.fn(async () => null),
+      matchRule: vi.fn(() => null),
     });
 
     configStore = {
@@ -187,6 +186,57 @@ describe('bootstrap', () => {
     vi.restoreAllMocks();
   });
 
+  it('shares config initialization across automatic and manual entry', async () => {
+    dom = new JSDOM('<html><body></body></html>', { url: 'https://example.com/' });
+    vi.stubGlobal('window', dom.window);
+    vi.stubGlobal('document', dom.window.document);
+    let finish!: () => void;
+    configStore.load = vi.fn(
+      () =>
+        new Promise<void>(resolve => {
+          finish = resolve;
+        })
+    );
+    const manager = {
+      check: vi.fn(() => ({ shouldEnable: false })),
+      setLaunchCallback: vi.fn(),
+      manualEnable: vi.fn(async () => {}),
+    };
+    mockGetAutoEnableManager.mockReturnValue(manager);
+    const bootstrap = await import('@/bootstrap');
+    const manual = bootstrap.manualEnable();
+    const automatic = bootstrap.initialize();
+    expect(configStore.load).toHaveBeenCalledTimes(1);
+    expect(manager.manualEnable).not.toHaveBeenCalled();
+    finish();
+    await Promise.all([automatic, manual]);
+    expect(manager.manualEnable).toHaveBeenCalledTimes(1);
+    expect(manager.check).not.toHaveBeenCalled();
+  });
+
+  it('does not parse after failed initialization and permits a manual retry', async () => {
+    dom = new JSDOM('<html><body></body></html>', { url: 'https://example.com/' });
+    vi.stubGlobal('window', dom.window);
+    vi.stubGlobal('document', dom.window.document);
+    configStore.load = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('load failed'))
+      .mockResolvedValue(undefined);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const manager = {
+      setLaunchCallback: vi.fn(),
+      manualEnable: vi.fn(async () => {}),
+    };
+    mockGetAutoEnableManager.mockReturnValue(manager);
+    const bootstrap = await import('@/bootstrap');
+    await bootstrap.manualEnable();
+    expect(manager.manualEnable).not.toHaveBeenCalled();
+    expect(mockDeactivateProtection).toHaveBeenCalled();
+    await bootstrap.manualEnable();
+    expect(configStore.load).toHaveBeenCalledTimes(2);
+    expect(manager.manualEnable).toHaveBeenCalledTimes(1);
+  });
+
   it('activates early protection for chapter-like URLs (conservative)', async () => {
     dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
       url: 'https://example.com/12345.html',
@@ -219,7 +269,7 @@ describe('bootstrap', () => {
     vi.stubGlobal('sessionStorage', dom.window.sessionStorage);
 
     const manager = {
-      check: vi.fn(async () => ({ shouldEnable: true })),
+      check: vi.fn(() => ({ shouldEnable: true })),
       setPromptCallback: vi.fn(),
       setLaunchCallback: vi.fn(),
       execute: vi.fn(async () => {}),
@@ -338,7 +388,7 @@ describe('bootstrap', () => {
         });
       }
       vi.spyOn(console, 'error').mockImplementation(() => {});
-      const manager = { check: vi.fn(async () => ({ shouldEnable: false })) };
+      const manager = { check: vi.fn(() => ({ shouldEnable: false })) };
       mockGetAutoEnableManager.mockReturnValue(manager);
       await import('@/bootstrap');
       await vi.waitFor(() => expect(manager.check).toHaveBeenCalledTimes(1));
@@ -359,7 +409,7 @@ describe('bootstrap', () => {
       targetUrl: 'https://example.com/chapter/2',
       cleanupHostOverlays: true,
     };
-    const manager = { check: vi.fn(async () => ({ shouldEnable: false })) };
+    const manager = { check: vi.fn(() => ({ shouldEnable: false })) };
     mockGetAutoEnableManager.mockReturnValue(manager);
     await import('@/bootstrap');
     await vi.waitFor(() => expect(manager.check).toHaveBeenCalledTimes(1));
@@ -383,8 +433,7 @@ describe('bootstrap', () => {
     });
 
     const ruleManager = {
-      initialize: vi.fn(async () => {}),
-      matchRule: vi.fn(async () => ({
+      matchRule: vi.fn(() => ({
         rule: {
           id: 'paged-section',
           version: 1,
@@ -398,7 +447,7 @@ describe('bootstrap', () => {
     mockGetRuleManager.mockReturnValue(ruleManager);
 
     const manager = {
-      check: vi.fn(async () => ({ shouldEnable: true, method: 'builtin-rule' })),
+      check: vi.fn(() => ({ shouldEnable: true, method: 'builtin-rule' })),
       setPromptCallback: vi.fn(),
       setLaunchCallback: vi.fn(),
       execute: vi.fn(async () => {}),
@@ -436,7 +485,7 @@ describe('bootstrap', () => {
     let launchCb: ((c: unknown, r?: unknown) => void) | null = null;
 
     const manager = {
-      check: vi.fn(async () => decision),
+      check: vi.fn(() => decision),
       setPromptCallback: vi.fn((cb: () => Promise<unknown>) => {
         promptCb = cb;
       }),
@@ -509,7 +558,7 @@ describe('bootstrap', () => {
       | ((chapter: unknown, rule?: unknown, stage?: 'initial' | 'update' | 'complete') => void)
       | null = null;
     const manager = {
-      check: vi.fn(async () => ({ shouldEnable: true, method: 'builtin-rule' })),
+      check: vi.fn(() => ({ shouldEnable: true, method: 'builtin-rule' })),
       setPromptCallback: vi.fn(),
       setLaunchCallback: vi.fn(
         (
@@ -573,7 +622,7 @@ describe('bootstrap', () => {
     let launchCb: ((c: unknown) => void) | null = null;
 
     const manager = {
-      check: vi.fn(async () => decision),
+      check: vi.fn(() => decision),
       setPromptCallback: vi.fn(),
       setLaunchCallback: vi.fn((cb: (c: unknown) => void) => {
         launchCb = cb;
@@ -632,7 +681,7 @@ describe('bootstrap', () => {
     };
     let launchCb: ((c: unknown) => void) | null = null;
     mockGetAutoEnableManager.mockReturnValue({
-      check: vi.fn(async () => ({ shouldEnable: true, method: 'detection' })),
+      check: vi.fn(() => ({ shouldEnable: true, method: 'detection' })),
       setPromptCallback: vi.fn(),
       setLaunchCallback: vi.fn((cb: (c: unknown) => void) => {
         launchCb = cb;
@@ -689,7 +738,7 @@ describe('bootstrap', () => {
     let launchCb: ((c: unknown, r?: unknown) => void) | null = null;
 
     const manager = {
-      check: vi.fn(async () => ({ shouldEnable: true, method: 'builtin-rule', rule })),
+      check: vi.fn(() => ({ shouldEnable: true, method: 'builtin-rule', rule })),
       setPromptCallback: vi.fn(),
       setLaunchCallback: vi.fn((cb: (c: unknown, r?: unknown) => void) => {
         launchCb = cb;
@@ -721,7 +770,7 @@ describe('bootstrap', () => {
     vi.stubGlobal('sessionStorage', dom.window.sessionStorage);
 
     const manager = {
-      check: vi.fn(async () => ({ shouldEnable: false })),
+      check: vi.fn(() => ({ shouldEnable: false })),
       setPromptCallback: vi.fn(),
       setLaunchCallback: vi.fn(),
       execute: vi.fn(async () => {}),
@@ -759,7 +808,7 @@ describe('bootstrap', () => {
 
     const launchError = new Error('parse failed');
     const manager = {
-      check: vi.fn(async () => ({ shouldEnable: false })),
+      check: vi.fn(() => ({ shouldEnable: false })),
       setPromptCallback: vi.fn(),
       setLaunchCallback: vi.fn(),
       execute: vi.fn(async () => {}),

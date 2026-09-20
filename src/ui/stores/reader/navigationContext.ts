@@ -5,13 +5,12 @@ import type { Ref } from 'vue';
 export interface NavigationContext {
   chapters: Ref<ChapterEntry[]>;
   currentChapterIndex: Ref<number>;
-  isLoading: Ref<boolean>;
   isLoadingNext: Ref<boolean>;
   isLoadingPrev: Ref<boolean>;
   pendingNextAbort: Ref<(() => void) | null>;
   pendingPrevAbort: Ref<(() => void) | null>;
   reloadAbort: Ref<(() => void) | null>;
-  loadedUrls: Ref<Set<string>>;
+  loadedUrls: Readonly<Ref<ReadonlySet<string>>>;
   vipBlockedUrls: Ref<Set<string>>;
   blockedNavUrls: Ref<Set<string>>;
   cachedContents: Ref<Map<string, CachedChapter>>;
@@ -31,5 +30,5 @@ export interface NavigationContext {
   showToast: (msg: string, type: 'info' | 'error', duration?: number) => void;
   setError: (msg: string) => void;
   applyConversionToChapterEntry: (entryId: string, mode: ConversionMode) => Promise<void>;
-  getPersistedCachedChapter: (url: string) => Promise<CachedChapter | null>;
+  getPersistedCachedChapter: (url: string) => CachedChapter | null;
 }

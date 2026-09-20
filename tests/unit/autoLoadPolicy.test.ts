@@ -15,7 +15,6 @@ function makeInput(overrides: Partial<AutoLoadPolicyInput> = {}): AutoLoadPolicy
     graceUntil: 0,
     hasChapter: true,
     hasNext: true,
-    isLoading: false,
     isLoadingNext: false,
     isLoadingPrev: false,
     isNavigating: false,

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { effectScope, ref } from 'vue';
 import { JSDOM } from 'jsdom';
-import { ref } from 'vue';
 
 import { useChapterNavigation } from '@/ui/composables/reader/useChapterNavigation';
 
@@ -83,13 +83,102 @@ describe('useChapterNavigation', () => {
     };
   }
 
+  describe('navigation ownership', () => {
+    it('a directory selection replaces the old scroll completion timer', async () => {
+      vi.useFakeTimers();
+      const mainEl = document.createElement('main');
+      Object.defineProperties(mainEl, {
+        clientHeight: { value: 800 },
+        scrollHeight: { value: 4000 },
+      });
+      mainEl.scrollBy = vi.fn();
+      mainEl.scrollTo = vi.fn();
+      const entry = makeChapterEntry('https://example.com/ch2');
+      const opts = createNavigationOptions({ mainRef: mainEl, chapters: [entry] });
+      opts.chapterRefs.set(entry.chapter.url, document.createElement('article'));
+      const scope = effectScope();
+      const nav = scope.run(() => useChapterNavigation(opts))!;
+      await nav.turnReaderPage('next');
+      vi.advanceTimersByTime(400);
+      await nav.jumpToCachedChapter(entry.chapter.url);
+      vi.advanceTimersByTime(250);
+      expect(opts.isNavigating.value).toBe(true);
+      expect(opts.onViewportSettled).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(400);
+      expect(opts.isNavigating.value).toBe(false);
+      expect(opts.onViewportSettled).toHaveBeenCalledOnce();
+      await nav.turnReaderPage('next');
+      scope.stop();
+      vi.runAllTimers();
+      expect(opts.onViewportSettled).toHaveBeenCalledOnce();
+    });
+
+    it('does not move or announce a viewport after the reader closes during loading', async () => {
+      const mainEl = document.createElement('main');
+      mainEl.scrollBy = vi.fn();
+      let resolve!: (value: boolean) => void;
+      const opts = createNavigationOptions({
+        mainRef: mainEl,
+        hasNext: true,
+        readerStore: {
+          loadNextChapter: vi.fn(
+            () =>
+              new Promise<boolean>(done => {
+                resolve = done;
+              })
+          ),
+        },
+      });
+      const scope = effectScope();
+      const nav = scope.run(() => useChapterNavigation(opts))!;
+      const pending = nav.loadBoundaryChapter('next');
+      expect(opts.isNavigating.value).toBe(true);
+      scope.stop();
+      resolve(true);
+      await expect(pending).resolves.toBe(false);
+      expect(mainEl.scrollBy).not.toHaveBeenCalled();
+      expect(opts.onViewportSettled).not.toHaveBeenCalled();
+      expect(opts.isNavigating.value).toBe(false);
+    });
+
+    it('an obsolete directory cache miss cannot navigate away from the latest selection', async () => {
+      const location = { href: 'https://example.com/current' };
+      vi.stubGlobal('window', { location });
+      const mainEl = document.createElement('main');
+      mainEl.scrollTo = vi.fn();
+      let resolveOld!: (value: boolean) => void;
+      const rebuild = vi
+        .fn()
+        .mockImplementationOnce(
+          () =>
+            new Promise<boolean>(done => {
+              resolveOld = done;
+            })
+        )
+        .mockResolvedValueOnce(true);
+      const opts = createNavigationOptions({
+        mainRef: mainEl,
+        readerStore: { rebuildChaptersAround: rebuild },
+      });
+      const nav = useChapterNavigation(opts);
+      const old = nav.jumpToCachedChapter('https://example.com/old');
+      await nav.jumpToCachedChapter('https://example.com/new');
+      resolveOld(false);
+      await old;
+      expect(location.href).toBe('https://example.com/current');
+      expect(mainEl.scrollTo).toHaveBeenCalledTimes(1);
+      expect(opts.onViewportSettled).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('jumpToCachedChapter', () => {
     it('scrolls to existing chapter in display list', async () => {
       const entry = makeChapterEntry('https://example.com/ch1');
       const chapterRefs = new Map();
-      const scrollIntoViewMock = vi.fn();
+      const mainEl = document.createElement('main');
+      mainEl.scrollTo = vi.fn();
       const el = document.createElement('div');
-      el.scrollIntoView = scrollIntoViewMock;
+
       chapterRefs.set('https://example.com/ch1', el);
 
       const readerStore = {
@@ -100,13 +189,15 @@ describe('useChapterNavigation', () => {
       const opts = createNavigationOptions({
         chapters: [entry],
         chapterRefs,
+        mainRef: mainEl,
         readerStore,
       });
       const { jumpToCachedChapter } = useChapterNavigation(opts);
 
       await jumpToCachedChapter('https://example.com/ch1');
       expect(readerStore.setCurrentChapter).toHaveBeenCalledWith(0);
-      expect(scrollIntoViewMock).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
+      expect(mainEl.scrollTo).toHaveBeenCalledWith({ behavior: 'smooth', top: 0 });
+      expect(opts.isNavigating.value).toBe(true);
     });
 
     it('rebuilds from cache when chapter is not in display list', async () => {
@@ -142,6 +233,7 @@ describe('useChapterNavigation', () => {
       };
       const opts = createNavigationOptions({
         chapters: [],
+        mainRef: document.createElement('main'),
         readerStore,
       });
       const { jumpToCachedChapter } = useChapterNavigation(opts);
@@ -720,7 +812,7 @@ describe('useChapterNavigation', () => {
       expect(mainEl.scrollTop).toBe(1_200);
       expect(mainEl.scrollBy).not.toHaveBeenCalled();
       expect(opts.isNavigating.value).toBe(false);
-      expect(opts.onViewportSettled).not.toHaveBeenCalled();
+      expect(opts.onViewportSettled).toHaveBeenCalledOnce();
     });
 
     it('restores the visible anchor when appending trims content above it', async () => {
@@ -764,7 +856,7 @@ describe('useChapterNavigation', () => {
 
       expect(mainEl.scrollTop).toBe(300);
       expect(mainEl.scrollBy).not.toHaveBeenCalled();
-      expect(opts.onViewportSettled).not.toHaveBeenCalled();
+      expect(opts.onViewportSettled).toHaveBeenCalledOnce();
     });
 
     it('preserves the current chapter when prepending at the top boundary', async () => {
@@ -808,7 +900,7 @@ describe('useChapterNavigation', () => {
 
       expect(mainEl.scrollTop).toBe(900);
       expect(mainEl.scrollBy).not.toHaveBeenCalled();
-      expect(opts.onViewportSettled).not.toHaveBeenCalled();
+      expect(opts.onViewportSettled).toHaveBeenCalledOnce();
     });
 
     it('releases the navigation lock without settling when loading fails', async () => {
@@ -832,6 +924,26 @@ describe('useChapterNavigation', () => {
 
       expect(opts.isNavigating.value).toBe(false);
       expect(opts.onViewportSettled).not.toHaveBeenCalled();
+    });
+
+    it('accepts the next boundary pull once content is committed, even before the next frame', async () => {
+      // A busy/background frame must not keep already loaded content navigation-locked.
+      vi.stubGlobal(
+        'requestAnimationFrame',
+        vi.fn(() => 1)
+      );
+      const opts = createNavigationOptions({
+        mainRef: document.createElement('div'),
+        hasNext: true,
+      });
+      const { loadBoundaryChapter } = useChapterNavigation(opts);
+      const first = loadBoundaryChapter('next');
+      await new Promise(resolve => setTimeout(resolve, 0));
+
+      expect(opts.isNavigating.value).toBe(false);
+      await expect(first).resolves.toBe(true);
+      await expect(loadBoundaryChapter('next')).resolves.toBe(true);
+      expect(opts.readerStore.loadNextChapter).toHaveBeenCalledTimes(2);
     });
 
     it('holds the navigation lock until an in-flight boundary load settles', async () => {

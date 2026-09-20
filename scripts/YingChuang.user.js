@@ -3,7 +3,7 @@
 // @name:zh-CN         萤窗
 // @name:zh-TW         螢窗
 // @namespace          https://github.com/JasonEX
-// @version            1.0.2
+// @version            1.0.3
 // @author             JasonEX
 // @description        萤窗：小说阅读脚本，智能正文识别、连续阅读、阅读位置恢复、简繁转换
 // @description:zh-CN  萤窗：小说阅读脚本，智能正文识别、连续阅读、阅读位置恢复、简繁转换
@@ -3346,6 +3346,10 @@
 		remove: "i.J_Num, .chapter span, #J_BookRead_WaterMark, .watermark"
 	};
 	var ciweimaoHooks = {
+		isVipChapter: (doc, url) => {
+			if (!/^https?:\/\/(?:www|wap)\.ciweimao\.com\/chapter\/\d+/i.test(url)) return null;
+			return doc.querySelector("#J_BookCnt, #J_BookRead") ? false : null;
+		},
 		beforeParse: ciweimaoBeforeParse,
 		fetchDocument: (url, context) => fetchCiweimaoApiDocument(url, {
 			bookTitle: context.bookTitle,
@@ -4866,10 +4870,10 @@
 	var RuleManager = class {
 		constructor() {
 			this.builtInRules = builtInRules;
-			this.initialized = false;
 			this.compiledCache = new WeakMap();
 			this.sectionUrlParsers = this.builtInRules.flatMap((rule) => rule.hooks?.parseSectionUrl ? [rule.hooks.parseSectionUrl] : []);
 			this.entryResolvers = this.builtInRules.flatMap((rule) => rule.hooks?.resolveEntryUrl ? [rule.hooks.resolveEntryUrl] : []);
+			this.vipClassifiers = [...new Set(this.builtInRules.flatMap((rule) => rule.hooks?.isVipChapter ? [rule.hooks.isVipChapter] : []))];
 			this.parseSectionUrl = (url) => {
 				for (const parse of this.sectionUrlParsers) {
 					const parsed = parse(url);
@@ -4878,9 +4882,12 @@
 				return null;
 			};
 		}
-		async initialize() {
-			if (this.initialized) return;
-			this.initialized = true;
+		isVipChapter(doc, url) {
+			for (const classify of this.vipClassifiers) {
+				const result = classify(doc, url);
+				if (result !== null) return result;
+			}
+			return null;
 		}
 		resolveEntryUrl(doc, url) {
 			for (const resolve of this.entryResolvers) {
@@ -4889,8 +4896,7 @@
 			}
 			return null;
 		}
-		async matchRule(url) {
-			if (!this.initialized) await this.initialize();
+		matchRule(url) {
 			for (const rule of this.builtInRules) if (this.matchesUrl(rule, url)) return {
 				rule,
 				source: "builtin",
@@ -6480,12 +6486,9 @@
 		return text.replace(/\s+/g, "").replace(/[\u3000]/g, "").replace(/[，。！？、""''（）()【】[\]<>《》:：;；·~…—-]/g, "").toLowerCase();
 	}
 	function isVipChapterPage(doc) {
-		try {
-			const url = doc._mnrUrl || doc.location?.href || doc.baseURI || "";
-			if (/^https?:\/\/(?:www|wap)\.ciweimao\.com\/chapter\/\d+/i.test(url)) {
-				if (!!doc.querySelector("#J_BookCnt, #J_BookRead")) return false;
-			}
-		} catch {}
+		const url = doc._mnrUrl || doc.location?.href || doc.baseURI || "";
+		const siteResult = getRuleManager().isVipChapter(doc, url);
+		if (siteResult !== null) return siteResult;
 		const rawText = doc.body?.textContent || "";
 		if (!rawText) return false;
 		const text = normalizeTextForVipDetection(rawText);
@@ -7775,9 +7778,7 @@
 		}
 		async parse(doc = document, explicitUrl) {
 			const url = explicitUrl || doc.location?.href || window.location.href;
-			const ruleManager = getRuleManager();
-			await ruleManager.initialize();
-			const ruleMatch = await ruleManager.matchRule(url);
+			const ruleMatch = getRuleManager().matchRule(url);
 			if (ruleMatch && !this.options.forceDetection) return await this.parseWithRule(doc, url, ruleMatch);
 			return await this.parseWithDetection(doc, url);
 		}
@@ -8556,6 +8557,8 @@
 		}
 		constructor(options = {}) {
 			this.hasRun = false;
+			this.launchVersion = 0;
+			this.pendingLaunch = null;
 			this.options = {
 				...DEFAULT_OPTIONS,
 				...options
@@ -8580,7 +8583,7 @@
 		setLaunchCallback(callback) {
 			this.launchCallback = callback;
 		}
-		async check(doc = document) {
+		check(doc = document) {
 			const url = doc.location?.href || window.location.href;
 			const decide = (decision) => this.recordDecision(url, decision);
 			const blockReason = getChapterDocumentBlockReason(doc);
@@ -8633,9 +8636,7 @@
 				});
 			}
 			if (!this.options.forceDetection) {
-				const ruleManager = getRuleManager();
-				await ruleManager.initialize();
-				const ruleMatch = await ruleManager.matchRule(url);
+				const ruleMatch = getRuleManager().matchRule(url);
 				if (ruleMatch) {
 					if (sitePreference?.enabled === false) return decide({
 						shouldEnable: false,
@@ -8698,45 +8699,56 @@
 			if (this.hasRun) return;
 			this.hasRun = true;
 			const currentUrl = doc.location?.href || window.location.href;
-			const decision = this.currentDecision && this.currentDecisionUrl === currentUrl ? this.currentDecision : await this.check(doc);
+			const decision = this.currentDecision && this.currentDecisionUrl === currentUrl ? this.currentDecision : this.check(doc);
 			if (!decision.shouldEnable) {
 				this.deactivateProtection();
 				return;
 			}
 			if (decision.method === "builtin-rule" || decision.confidence >= (this.options.autoLaunchThreshold || .9)) {
-				await this.launch(doc, decision);
+				await this.launch(doc, decision.rule);
 				return;
 			}
 			if (this.promptCallback) {
 				this.deactivateProtection();
+				const launchVersion = this.launchVersion;
 				const response = await this.promptCallback();
+				if (launchVersion !== this.launchVersion) return;
 				if (response.accepted) {
-					if (await this.launch(doc, decision) && response.rememberForSite) this.rememberSiteEnabled(doc);
+					if (await this.launch(doc, decision.rule) && response.rememberForSite) this.rememberSiteEnabled(doc);
 				}
 				return;
 			}
 			this.deactivateProtection();
 		}
-		async launch(doc, decision) {
+		launch(doc, rule) {
+			if (!this.pendingLaunch) {
+				this.launchVersion++;
+				this.pendingLaunch = this.parseAndLaunch(doc, rule).finally(() => {
+					this.pendingLaunch = null;
+				});
+			}
+			return this.pendingLaunch;
+		}
+		async parseAndLaunch(doc, rule) {
 			this.activateProtection();
 			let launchedEarly = false;
 			try {
 				const currentUrl = doc.location?.href || window.location.href;
 				const chapter = await this.sectionMerger.merge(doc, currentUrl, { onFirstPage: (firstPage) => {
 					if (!this.launchCallback) return;
-					this.launchCallback(firstPage, decision.rule || firstPage.rule, "initial");
+					this.launchCallback(firstPage, rule || firstPage.rule, "initial");
 					launchedEarly = true;
 				} });
 				if (chapter && this.launchCallback) {
-					this.launchCallback(chapter, decision.rule || chapter.rule, launchedEarly ? "update" : "complete");
-					return true;
+					this.launchCallback(chapter, rule || chapter.rule, launchedEarly ? "update" : "complete");
+					return "complete";
 				}
-				if (launchedEarly) return true;
+				if (launchedEarly) return "initial";
 				this.deactivateProtection();
 				return false;
 			} catch (e) {
 				console.error("[AutoEnableManager] Parse error:", e);
-				if (launchedEarly) return true;
+				if (launchedEarly) return "initial";
 				this.deactivateProtection();
 				return false;
 			}
@@ -8774,25 +8786,7 @@
 				this.deactivateProtection();
 				return;
 			}
-			this.activateProtection();
-			let launched = false;
-			try {
-				const currentUrl = doc.location?.href || window.location.href;
-				const chapter = await this.sectionMerger.merge(doc, currentUrl, { onFirstPage: (firstPage) => {
-					if (!this.launchCallback) return;
-					this.launchCallback(firstPage, firstPage.rule, "initial");
-					launched = true;
-				} });
-				if (chapter && this.launchCallback) {
-					this.launchCallback(chapter, chapter.rule, launched ? "update" : "complete");
-					this.rememberSiteEnabled(doc);
-					launched = true;
-				}
-			} catch (e) {
-				console.error("[AutoEnableManager] Manual enable error:", e);
-			} finally {
-				if (!launched) this.deactivateProtection();
-			}
+			if (await this.launch(doc) === "complete") this.rememberSiteEnabled(doc);
 		}
 	};
 	var managerInstance = null;
@@ -8801,8 +8795,8 @@
 		else if (options) managerInstance.updateOptions(options);
 		return managerInstance;
 	}
-	var VERSION = "1.0.2";
-	var BUILD_DATE = "2026-09-19";
+	var VERSION = "1.0.3";
+	var BUILD_DATE = "2026-09-20";
 	var SENSITIVE_QUERY_KEY = /(?:^|[_-])(?:token|auth|session|sid|key|sign|signature|ticket|password|passwd|pwd|jwt|credential|access|refresh|challenge|chl)(?:[_-]|$)|^__cf_/i;
 	function redactUrl(url) {
 		if (!url) return null;
@@ -11251,40 +11245,6 @@
 		} else ret = [];
 		if (cache) cache[index] = ret;
 		return ret;
-	}
-	function renderSlot(slots, name, props, fallback, noSlotted, branchKey) {
-		if (props == null) props = {};
-		if (currentRenderingInstance.ce || currentRenderingInstance.parent && isAsyncWrapper(currentRenderingInstance.parent) && currentRenderingInstance.parent.ce) {
-			const slotProps = branchKey != null && props.key == null ? extend({}, props, { key: branchKey }) : props;
-			const hasProps = Object.keys(slotProps).length > 0;
-			if (name !== "default") slotProps.name = name;
-			return openBlock(), createBlock(Fragment, null, [createVNode("slot", slotProps, fallback && fallback())], hasProps ? -2 : 64);
-		}
-		let slot = slots[name];
-		if (slot && slot._c) slot._d = false;
-		const prevStackSize = blockStack.length;
-		openBlock();
-		let rendered;
-		try {
-			const validSlotContent = slot && ensureValidVNode(slot(props));
-			const slotKey = props.key || branchKey || validSlotContent && validSlotContent.key;
-			rendered = createBlock(Fragment, { key: (slotKey && !isSymbol(slotKey) ? slotKey : `_${name}`) + (!validSlotContent && fallback ? "_fb" : "") }, validSlotContent || (fallback ? fallback() : []), validSlotContent && slots._ === 1 ? 64 : -2);
-		} catch (err) {
-			for (let i = blockStack.length; i > prevStackSize; i--) closeBlock();
-			throw err;
-		} finally {
-			if (slot && slot._c) slot._d = true;
-		}
-		if (!noSlotted && rendered.scopeId) rendered.slotScopeIds = [rendered.scopeId + "-s"];
-		return rendered;
-	}
-	function ensureValidVNode(vnodes) {
-		return vnodes.some((child) => {
-			if (!isVNode(child)) return true;
-			if (child.type === Comment) return false;
-			if (child.type === Fragment && !ensureValidVNode(child.children)) return false;
-			return true;
-		}) ? vnodes : null;
 	}
 	var getPublicInstance = (i) => {
 		if (!i) return null;
@@ -13793,8 +13753,8 @@
 		while (active instanceof window.HTMLElement && active.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
 		return active instanceof window.HTMLElement ? active : null;
 	}
-	var _hoisted_1$8 = { class: "mnr-entry-preference" };
-	var _hoisted_2$6 = { class: "mnr-entry-prompt-actions" };
+	var _hoisted_1$7 = { class: "mnr-entry-preference" };
+	var _hoisted_2$5 = { class: "mnr-entry-prompt-actions" };
 	var ReaderEntryPrompt_default = _plugin_vue_export_helper_default(defineComponent({
 		__name: "ReaderEntryPrompt",
 		props: { visible: { type: Boolean } },
@@ -13884,11 +13844,11 @@
 							createBaseVNode("path", { d: "M3 18h6a3 3 0 0 1 3 3" }),
 							createBaseVNode("path", { d: "M21 18h-6a3 3 0 0 0-3 3" })
 						])]), createBaseVNode("div", null, [createBaseVNode("h3", { id: "mnr-entry-prompt-title" }, "检测到小说正文"), createBaseVNode("p", { id: "mnr-entry-prompt-description" }, " 是否使用阅读模式打开本章？正文将采用统一排版并支持连续滚动阅读。 ")])], -1)),
-						createBaseVNode("label", _hoisted_1$8, [withDirectives(createBaseVNode("input", {
+						createBaseVNode("label", _hoisted_1$7, [withDirectives(createBaseVNode("input", {
 							"onUpdate:modelValue": _cache[0] || (_cache[0] = ($event) => rememberForSite.value = $event),
 							type: "checkbox"
 						}, null, 512), [[vModelCheckbox, rememberForSite.value]]), _cache[1] || (_cache[1] = createBaseVNode("span", null, [createBaseVNode("strong", null, "以后在本站自动进入"), createBaseVNode("small", null, "下次打开本站章节时直接进入阅读模式")], -1))]),
-						createBaseVNode("div", _hoisted_2$6, [createBaseVNode("button", {
+						createBaseVNode("div", _hoisted_2$5, [createBaseVNode("button", {
 							type: "button",
 							class: "mnr-entry-button secondary",
 							onClick: handleDismiss
@@ -19126,7 +19086,7 @@ ul, ol {
 		return fetchResult.doc;
 	}
 	async function loadRuleApiDocument(url, reference) {
-		const fetchDocument = (await getRuleManager().matchRule(url))?.rule.hooks?.fetchDocument;
+		const fetchDocument = getRuleManager().matchRule(url)?.rule.hooks?.fetchDocument;
 		if (!fetchDocument) return null;
 		return fetchDocument(url, {
 			bookTitle: reference.bookTitle,
@@ -19286,8 +19246,7 @@ ul, ol {
 					if (!isCurrent()) return;
 					if (ctx.tocOriginal.value.length === 0) return;
 				}
-				await ctx.restoreCache();
-				if (!isCurrent()) return;
+				ctx.restoreCache();
 				const persistedSet = new Set(ctx.persistedUrls.value);
 				const cacheBook = getCurrentBookCacheKey(ctx.chapter.value?.indexUrl);
 				const indexUrlKey = cacheBook ? normalizeUrlForBlock(cacheBook.indexUrl) : null;
@@ -19324,8 +19283,7 @@ ul, ol {
 							ctx.showToast("目录中没有可缓存的章节", "info");
 							return;
 						}
-						await ctx.persistCache();
-						if (!isCurrent()) return;
+						ctx.persistCache();
 						ctx.showToast("本书章节已全部缓存", "info");
 					}
 					return;
@@ -19465,8 +19423,7 @@ ul, ol {
 				}
 				if (!isCurrent() || !ctx.cacheProgress.value.running) return;
 				if (cacheBook && persistedSet.size > 0) ctx.persistedUrls.value = persistedSet;
-				await ctx.persistCache(writtenUrls);
-				if (!isCurrent()) return;
+				ctx.persistCache(writtenUrls);
 				if (ctx.cacheProgress.value.failed > 0) ctx.showToast(`缓存完成，${ctx.cacheProgress.value.failed} 章失败`, "error", 3500);
 				else ctx.showToast("离线缓存完成", "info", 2500);
 			} catch (error) {
@@ -19527,7 +19484,6 @@ ul, ol {
 			ctx.chapters.value.unshift(entry);
 			ctx.currentChapterIndex.value++;
 		}
-		ctx.loadedUrls.value.add(entry.chapter.url);
 		ctx.originalContents.value.set(id, cached.chapter.content);
 		ctx.originalTitles.value.set(id, {
 			title: cached.chapter.title,
@@ -19552,7 +19508,6 @@ ul, ol {
 			ctx.chapters.value.unshift(entry);
 			ctx.currentChapterIndex.value++;
 		}
-		ctx.loadedUrls.value.add(parsed.url);
 		ctx.originalContents.value.set(id, parsed.content);
 		ctx.originalTitles.value.set(id, {
 			title: parsed.title,
@@ -19573,11 +19528,10 @@ ul, ol {
 		trimDisplayChapters(ctx, load.isNext);
 		return true;
 	}
-	async function rebuildChaptersFromCache(ctx, cached, url) {
+	async function rebuildChaptersFromCache(ctx, cached) {
 		const runId = ctx.runtime.viewId();
 		ctx.chapters.value = [];
 		ctx.currentChapterIndex.value = 0;
-		ctx.loadedUrls.value.clear();
 		ctx.originalContents.value.clear();
 		ctx.originalTitles.value.clear();
 		const id = `chapter-${Date.now()}-jump-0`;
@@ -19586,7 +19540,6 @@ ul, ol {
 			rule: cached.rule,
 			id
 		});
-		ctx.loadedUrls.value.add(url);
 		ctx.originalContents.value.set(id, cached.chapter.content);
 		ctx.originalTitles.value.set(id, {
 			title: cached.chapter.title,
@@ -19601,7 +19554,6 @@ ul, ol {
 		if (isAppend && ctx.currentChapterIndex.value > 2) {
 			const removed = ctx.chapters.value.shift();
 			if (removed) {
-				ctx.loadedUrls.value.delete(removed.chapter.url);
 				ctx.originalContents.value.delete(removed.id);
 				ctx.originalTitles.value.delete(removed.id);
 				ctx.currentChapterIndex.value = Math.max(0, ctx.currentChapterIndex.value - 1);
@@ -19611,7 +19563,6 @@ ul, ol {
 		if (!isAppend) {
 			const removed = ctx.chapters.value.pop();
 			if (removed) {
-				ctx.loadedUrls.value.delete(removed.chapter.url);
 				ctx.originalContents.value.delete(removed.id);
 				ctx.originalTitles.value.delete(removed.id);
 			}
@@ -19688,8 +19639,7 @@ ul, ol {
 				const cached = ctx.cachedContents.value.get(load.targetUrl);
 				if (cached) return await insertCachedChapter(ctx, cached, load.isNext ? "append" : "prepend");
 				if (ctx.persistedUrls.value.has(load.targetUrl)) {
-					const persisted = await ctx.getPersistedCachedChapter(load.targetUrl);
-					if (ctx.runtime.isViewStale(runId)) return false;
+					const persisted = ctx.getPersistedCachedChapter(load.targetUrl);
 					if (persisted) {
 						const sessionCached = {
 							...persisted,
@@ -19814,7 +19764,7 @@ ul, ol {
 			return loadChapter("prev", source);
 		}
 		async function rebuildChaptersAround(targetUrl) {
-			const runId = ctx.runtime.bumpView();
+			ctx.runtime.bumpView();
 			const url = normalizeUrlForFetch(targetUrl);
 			ctx.pendingNextAbort.value?.();
 			ctx.pendingNextAbort.value = null;
@@ -19822,13 +19772,11 @@ ul, ol {
 			ctx.pendingPrevAbort.value = null;
 			ctx.reloadAbort.value?.();
 			ctx.reloadAbort.value = null;
-			ctx.isLoading.value = false;
 			ctx.isLoadingPrev.value = false;
 			ctx.isLoadingNext.value = false;
 			let cached = ctx.cachedContents.value.get(url);
 			if (!cached && ctx.persistedUrls.value.has(url)) {
-				const persisted = await ctx.getPersistedCachedChapter(url);
-				if (ctx.runtime.isViewStale(runId)) return false;
+				const persisted = ctx.getPersistedCachedChapter(url);
 				if (persisted) {
 					cached = {
 						...persisted,
@@ -19839,8 +19787,7 @@ ul, ol {
 				}
 			}
 			if (!cached) return false;
-			if (ctx.runtime.isViewStale(runId)) return false;
-			return rebuildChaptersFromCache(ctx, cached, url);
+			return rebuildChaptersFromCache(ctx, cached);
 		}
 		async function reloadCurrentChapter() {
 			const runId = ctx.runtime.viewId();
@@ -19938,7 +19885,6 @@ ul, ol {
 	}
 	var useReaderStore = defineStore("reader", () => {
 		const isActive = ref(false);
-		const isLoading = ref(false);
 		const isLoadingPrev = ref(false);
 		const isLoadingNext = ref(false);
 		const chapters = ref([]);
@@ -19948,7 +19894,7 @@ ul, ol {
 		const toastTimer = ref(null);
 		const scrollPercent = ref(0);
 		const history = ref([]);
-		const loadedUrls = ref(new Set());
+		const loadedUrls = computed(() => new Set(chapters.value.map((entry) => entry.chapter.url)));
 		const vipBlockedUrls = ref(new Set());
 		const blockedNavUrls = ref(new Set());
 		const originalContents = ref(new Map());
@@ -20030,15 +19976,7 @@ ul, ol {
 			syncHostPageToChapter(chapter.value, currentChapterIndex.value);
 		}
 		function setError(msg) {
-			recordDebugEvent("reader.error", { message: msg }, "error");
-			error.value = msg;
-			toastType.value = "error";
-			isLoading.value = false;
-			if (toastTimer.value) window.clearTimeout(toastTimer.value);
-			toastTimer.value = window.setTimeout(() => {
-				error.value = null;
-				toastTimer.value = null;
-			}, 3e3);
+			showToast(msg, "error", 3e3);
 		}
 		function showToast(msg, type = "info", duration = 2e3) {
 			recordDebugEvent("reader.toast", {
@@ -20088,31 +20026,27 @@ ul, ol {
 			if (!isCurrent()) return;
 			syncCurrentHostPage();
 		}
-		async function getPersistedCachedChapterForCurrentBook(url) {
+		function getPersistedCachedChapterForCurrentBook(url) {
 			const cacheBook = getCurrentBookCacheKey(chapter.value?.indexUrl);
 			if (!cacheBook) return null;
 			return getPersistedCachedChapter(cacheBook, url);
 		}
-		async function persistCache$1(skipChapterUrls) {
-			const runId = runtime.sessionId();
+		function persistCache$1(skipChapterUrls) {
 			const cacheBook = getCurrentBookCacheKey(chapter.value?.indexUrl);
 			if (!cacheBook) return;
-			const result = persistCache(cacheBook, cachedContents.value, persistedUrls.value, skipChapterUrls);
-			if (!runtime.isSessionStale(runId)) persistedUrls.value = result;
+			persistedUrls.value = persistCache(cacheBook, cachedContents.value, persistedUrls.value, skipChapterUrls);
 		}
-		async function restoreCache$1() {
-			const runId = runtime.sessionId();
+		function restoreCache$1() {
 			const cacheBook = getCurrentBookCacheKey(chapter.value?.indexUrl);
 			if (!cacheBook) return;
 			const restored = restoreCache(cacheBook);
-			if (runtime.isSessionStale(runId)) return;
 			if (restored) {
 				persistedUrls.value = restored;
 				touchPersistedCache(cacheBook);
 			}
 			cleanupExpiredCaches({ currentBookId: cacheBook.bookId });
 		}
-		async function clearPersistedCache$1() {
+		function clearPersistedCache$1() {
 			const cacheBook = getCurrentBookCacheKey(chapter.value?.indexUrl);
 			if (!cacheBook) return;
 			clearPersistedCache(cacheBook, persistedUrls.value);
@@ -20121,7 +20055,6 @@ ul, ol {
 		const nav = createNavigation({
 			chapters,
 			currentChapterIndex,
-			isLoading,
 			isLoadingNext,
 			isLoadingPrev,
 			pendingNextAbort,
@@ -20185,7 +20118,6 @@ ul, ol {
 			reloadAbort.value = null;
 			tocAbort.value?.();
 			tocAbort.value = null;
-			isLoading.value = false;
 			isLoadingPrev.value = false;
 			isLoadingNext.value = false;
 			tocLoading.value = false;
@@ -20201,8 +20133,7 @@ ul, ol {
 		function clearAllData() {
 			chapters.value = [];
 			currentChapterIndex.value = 0;
-			error.value = null;
-			loadedUrls.value.clear();
+			clearError();
 			vipBlockedUrls.value.clear();
 			blockedNavUrls.value.clear();
 			navFailures.clear();
@@ -20216,7 +20147,7 @@ ul, ol {
 		function activate() {
 			recordDebugEvent("reader.activate");
 			isActive.value = true;
-			error.value = null;
+			clearError();
 		}
 		function deactivate() {
 			recordDebugEvent("reader.deactivate");
@@ -20233,8 +20164,7 @@ ul, ol {
 			});
 			runtime.bumpSession();
 			cancelAllInFlight();
-			toc.value = [];
-			tocOriginal.value = [];
+			clearAllData();
 			const effectiveRule = newRule || newChapter.rule;
 			if (newChapter.url) newChapter.url = normalizeUrlForFetch(newChapter.url);
 			if (newChapter.prevUrl) newChapter.prevUrl = normalizeUrlForFetch(newChapter.prevUrl);
@@ -20246,18 +20176,7 @@ ul, ol {
 				rule: effectiveRule,
 				id
 			}];
-			currentChapterIndex.value = 0;
-			error.value = null;
-			loadedUrls.value.clear();
-			loadedUrls.value.add(newChapter.url);
-			vipBlockedUrls.value.clear();
-			blockedNavUrls.value.clear();
-			navFailures.clear();
-			cachedContents.value.clear();
-			persistedUrls.value.clear();
-			originalContents.value.clear();
 			originalContents.value.set(id, newChapter.content);
-			originalTitles.value.clear();
 			originalTitles.value.set(id, {
 				title: newChapter.title,
 				bookTitle: newChapter.bookTitle
@@ -20377,7 +20296,6 @@ ul, ol {
 			return {
 				active: isActive.value,
 				loading: {
-					main: isLoading.value,
 					prev: isLoadingPrev.value,
 					next: isLoadingNext.value,
 					toc: tocLoading.value,
@@ -20496,7 +20414,6 @@ ul, ol {
 		}
 		return {
 			isActive,
-			isLoading,
 			isLoadingPrev,
 			isLoadingNext,
 			chapters,
@@ -20707,32 +20624,17 @@ ul, ol {
 	var SCROLL_THROTTLE_MS = 16;
 	var SCROLL_SETTLE_CHECK_MS = 180;
 	var POSITION_SAVE_INTERVAL_MS = 500;
-	function throttle(fn, delay) {
-		let lastCall = 0;
-		let timeoutId = null;
-		return ((...args) => {
-			const now = Date.now();
-			const remaining = delay - (now - lastCall);
-			if (remaining <= 0) {
-				if (timeoutId) clearTimeout(timeoutId);
-				timeoutId = null;
-				lastCall = now;
-				fn(...args);
-				return;
-			}
-			if (timeoutId) return;
-			timeoutId = setTimeout(() => {
-				timeoutId = null;
-				lastCall = Date.now();
-				fn(...args);
-			}, remaining);
-		});
-	}
 	function useReaderScroll(options) {
 		const { mainRef, chapterRefs, readerStore, autoHideHeader, showControls, isNavigating, scheduleAutoLoadNext } = options;
+		let lastScrollCall = 0;
+		let pendingScrollTimer = null;
 		let lastScrollTop = 0;
 		let lastPositionSaveAt = 0;
 		let pendingScrollSettleTimer = null;
+		onScopeDispose(() => {
+			if (pendingScrollTimer) clearTimeout(pendingScrollTimer);
+			if (pendingScrollSettleTimer) clearTimeout(pendingScrollSettleTimer);
+		}, true);
 		function queueScrollSettledAutoLoadCheck() {
 			if (pendingScrollSettleTimer) clearTimeout(pendingScrollSettleTimer);
 			pendingScrollSettleTimer = setTimeout(() => {
@@ -20810,7 +20712,20 @@ ul, ol {
 			}
 			queueScrollSettledAutoLoadCheck();
 		}
-		return { handleScroll: throttle(handleScrollCore, SCROLL_THROTTLE_MS) };
+		function handleScroll() {
+			const remaining = SCROLL_THROTTLE_MS - (Date.now() - lastScrollCall);
+			if (remaining <= 0) {
+				if (pendingScrollTimer) clearTimeout(pendingScrollTimer);
+				pendingScrollTimer = null;
+				lastScrollCall = Date.now();
+				handleScrollCore();
+			} else if (!pendingScrollTimer) pendingScrollTimer = setTimeout(() => {
+				pendingScrollTimer = null;
+				lastScrollCall = Date.now();
+				handleScrollCore();
+			}, remaining);
+		}
+		return { handleScroll };
 	}
 	var INTERSECTION_ROOT_MARGIN_PX = 1600;
 	function isViewportNearBottom(scrollHeight, scrollTop, clientHeight, marginPx = INTERSECTION_ROOT_MARGIN_PX) {
@@ -20839,7 +20754,7 @@ ul, ol {
 		return { type: "start" };
 	}
 	function canAutoLoadBase(input) {
-		return input.enabled && input.hasChapter && input.hasNext && !input.isLoadingNext && !input.isLoadingPrev && !input.isLoading && !input.isNavigating && !input.autoLoadInFlight && !input.pageHidden && (input.unreadBufferState === "empty" || input.unreadBufferState === "short");
+		return input.enabled && input.hasChapter && input.hasNext && !input.isLoadingNext && !input.isLoadingPrev && !input.isNavigating && !input.autoLoadInFlight && !input.pageHidden && (input.unreadBufferState === "empty" || input.unreadBufferState === "short");
 	}
 	function shouldRetryAfterCooldown(reason) {
 		return reason !== "state";
@@ -21032,7 +20947,6 @@ ul, ol {
 				graceUntil,
 				hasChapter: readerStore.chapters.length > 0,
 				hasNext: readerStore.hasNext,
-				isLoading: readerStore.isLoading,
 				isLoadingNext: readerStore.isLoadingNext,
 				isLoadingPrev: readerStore.isLoadingPrev,
 				isNavigating: isNavigating.value,
@@ -21075,10 +20989,9 @@ ul, ol {
 		watch(() => [
 			readerStore.isLoadingNext,
 			readerStore.isLoadingPrev,
-			readerStore.isLoading,
 			isNavigating.value
-		], ([loadingNext, loadingPrev, loading, navigating]) => {
-			if (loadingNext || loadingPrev || loading || navigating) return;
+		], ([loadingNext, loadingPrev, navigating]) => {
+			if (loadingNext || loadingPrev || navigating) return;
 			scheduleAutoLoadNext("state");
 		});
 		watch(() => configStore.behavior.preloadNext, (enabled) => {
@@ -21249,26 +21162,54 @@ ul, ol {
 	var LINE_SCROLL_STEP_PX = 150;
 	function useChapterNavigation(options) {
 		const { mainRef, chapterRefs, readerStore, isNavigating, onViewportSettled } = options;
-		function scrollByPage(mainEl, direction) {
+		let navigationId = 0;
+		let settleTimer;
+		function clearSettleTimer() {
+			clearTimeout(settleTimer);
+			settleTimer = void 0;
+		}
+		onScopeDispose(() => {
+			navigationId += 1;
+			clearSettleTimer();
+			isNavigating.value = false;
+		}, true);
+		async function runNavigation(action, replace = false) {
+			const mainEl = mainRef.value;
+			if (!mainEl || isNavigating.value && !replace) return false;
+			const id = ++navigationId;
+			const isCurrent = () => id === navigationId;
+			clearSettleTimer();
 			isNavigating.value = true;
-			mainEl.scrollBy({
-				top: mainEl.clientHeight * PAGE_SCROLL_RATIO * (direction === "next" ? 1 : -1),
-				behavior: "smooth"
-			});
-			setTimeout(() => {
+			let behavior = void 0;
+			const finish = () => {
+				if (!isCurrent()) return;
+				clearSettleTimer();
 				isNavigating.value = false;
-				onViewportSettled();
-			}, SMOOTH_NAVIGATION_LOCK_MS);
+				if (behavior) onViewportSettled();
+			};
+			try {
+				behavior = await action(mainEl, isCurrent);
+				return isCurrent() && behavior !== void 0;
+			} finally {
+				if (isCurrent()) {
+					if (behavior === "smooth") settleTimer = setTimeout(finish, SMOOTH_NAVIGATION_LOCK_MS);
+					else finish();
+				}
+			}
 		}
-		function scrollByLine(mainEl, direction) {
-			mainEl.scrollBy({
-				top: LINE_SCROLL_STEP_PX * (direction === "next" ? 1 : -1),
-				behavior: "auto"
-			});
-		}
-		async function waitForLayout() {
+		async function scrollToChapter(mainEl, url, behavior, isCurrent) {
 			await nextTick();
-			await new Promise((resolve) => globalThis.requestAnimationFrame(() => resolve()));
+			if (!isCurrent()) return;
+			const index = readerStore.chapters.findIndex((entry) => entry.chapter.url === url);
+			const targetEl = chapterRefs.get(url);
+			if (index < 0 || !targetEl) return;
+			const top = targetEl.getBoundingClientRect().top - mainEl.getBoundingClientRect().top + mainEl.scrollTop;
+			mainEl.scrollTo({
+				top,
+				behavior
+			});
+			readerStore.setCurrentChapter(index);
+			return behavior;
 		}
 		function captureViewportAnchor(mainEl, direction) {
 			const entries = readerStore.chapters;
@@ -21316,15 +21257,16 @@ ul, ol {
 			const fallback = direction === "next" ? "已经是最后一章了" : "已经是第一章了";
 			readerStore.showToast(readerStore.getVipBlockedToast(direction) || fallback, "info");
 		}
-		async function loadAtBoundary(mainEl, direction) {
+		async function loadAtBoundary(mainEl, direction, isCurrent) {
 			if (!(direction === "next" ? readerStore.hasNext : readerStore.hasPrev)) {
 				showBoundaryEnd(direction);
 				return false;
 			}
 			const anchor = captureViewportAnchor(mainEl, direction);
 			try {
-				if (!(direction === "next" ? await readerStore.loadNextChapter("manual") : await readerStore.loadPrevChapter("manual"))) return false;
-				await waitForLayout();
+				if (!(direction === "next" ? await readerStore.loadNextChapter("manual") : await readerStore.loadPrevChapter("manual")) || !isCurrent()) return false;
+				await nextTick();
+				if (!isCurrent()) return false;
 				restoreViewportAnchor(mainEl, anchor);
 				return true;
 			} catch (error) {
@@ -21333,92 +21275,52 @@ ul, ol {
 			}
 		}
 		async function loadBoundaryChapter(direction) {
-			const mainEl = mainRef.value;
-			if (!mainEl) return false;
-			if (isNavigating.value || readerStore.isLoadingPrev || readerStore.isLoadingNext) return false;
-			isNavigating.value = true;
-			try {
-				return await loadAtBoundary(mainEl, direction);
-			} finally {
-				isNavigating.value = false;
-			}
+			if (readerStore.isLoadingPrev || readerStore.isLoadingNext) return false;
+			return runNavigation(async (mainEl, isCurrent) => {
+				if (await loadAtBoundary(mainEl, direction, isCurrent)) return "auto";
+			});
 		}
 		async function jumpToCachedChapter(url) {
-			const existingIndex = readerStore.chapters.findIndex((entry) => entry.chapter.url === url);
-			if (existingIndex >= 0) {
-				readerStore.setCurrentChapter(existingIndex);
-				chapterRefs.get(url)?.scrollIntoView({
-					behavior: "smooth",
-					block: "start"
+			await runNavigation(async (mainEl, isCurrent) => {
+				if (readerStore.chapters.some((entry) => entry.chapter.url === url)) return scrollToChapter(mainEl, url, "smooth", isCurrent);
+				const success = await readerStore.rebuildChaptersAround(url);
+				if (!isCurrent()) return;
+				if (!success) {
+					window.location.href = url;
+					return;
+				}
+				await nextTick();
+				if (!isCurrent()) return;
+				mainEl.scrollTo({
+					top: 0,
+					behavior: "auto"
 				});
-				return;
-			}
-			if (await readerStore.rebuildChaptersAround(url)) mainRef.value?.scrollTo({
-				top: 0,
-				behavior: "auto"
-			});
-			else window.location.href = url;
+				return "auto";
+			}, true);
 		}
 		async function jumpToChapter(index, behavior = "smooth") {
-			const mainEl = mainRef.value;
-			if (!mainEl) return;
-			if (index < 0 || index >= readerStore.chapters.length) return;
-			isNavigating.value = true;
-			await waitForLayout();
 			const url = readerStore.chapters[index]?.chapter.url;
-			if (!url) {
-				isNavigating.value = false;
-				return;
-			}
-			const targetEl = chapterRefs.get(url);
-			if (!targetEl) {
-				isNavigating.value = false;
-				return;
-			}
-			const containerRect = mainEl.getBoundingClientRect();
-			const targetOffset = targetEl.getBoundingClientRect().top - containerRect.top + mainEl.scrollTop;
-			mainEl.scrollTo({
-				top: targetOffset,
-				behavior
-			});
-			readerStore.setCurrentChapter(index);
-			if (behavior === "smooth") setTimeout(() => {
-				isNavigating.value = false;
-			}, SMOOTH_NAVIGATION_LOCK_MS);
-			else globalThis.requestAnimationFrame(() => {
-				isNavigating.value = false;
-			});
+			if (!url) return;
+			await runNavigation((mainEl, isCurrent) => scrollToChapter(mainEl, url, behavior, isCurrent));
 		}
 		async function moveReader(direction, mode) {
-			const mainEl = mainRef.value;
-			if (!mainEl) return;
-			if (isNavigating.value) return;
-			if (!(direction === "next" ? isAtBottom(mainEl) : isAtTop(mainEl))) {
-				if (mode === "page") scrollByPage(mainEl, direction);
-				else scrollByLine(mainEl, direction);
-				return;
-			}
-			if (readerStore.isLoadingPrev || readerStore.isLoadingNext) return;
-			if (!(direction === "next" ? readerStore.hasNext : readerStore.hasPrev)) {
-				if (mode === "page") showBoundaryEnd(direction);
-				return;
-			}
-			isNavigating.value = true;
-			let loaded = false;
-			let pageScrollStarted = false;
-			try {
-				loaded = await loadAtBoundary(mainEl, direction);
-				if (!loaded) return;
-				if (mode === "page") {
-					scrollByPage(mainEl, direction);
-					pageScrollStarted = true;
-				} else scrollByLine(mainEl, direction);
-			} finally {
-				if (!pageScrollStarted) {
-					isNavigating.value = false;
-					if (loaded) onViewportSettled();
+			await runNavigation(async (mainEl, isCurrent) => {
+				if (direction === "next" ? isAtBottom(mainEl) : isAtTop(mainEl)) {
+					if (readerStore.isLoadingPrev || readerStore.isLoadingNext) return;
+					if (!(direction === "next" ? readerStore.hasNext : readerStore.hasPrev)) {
+						if (mode === "page") showBoundaryEnd(direction);
+						return;
+					}
+					if (!await loadAtBoundary(mainEl, direction, isCurrent)) return;
+					if (!isCurrent()) return;
 				}
-			}
+				const behavior = mode === "page" ? "smooth" : "auto";
+				mainEl.scrollBy({
+					top: (mode === "page" ? mainEl.clientHeight * PAGE_SCROLL_RATIO : LINE_SCROLL_STEP_PX) * (direction === "next" ? 1 : -1),
+					behavior
+				});
+				return behavior;
+			});
 		}
 		function turnReaderPage(direction) {
 			return moveReader(direction, "page");
@@ -21437,24 +21339,21 @@ ul, ol {
 			}
 		}
 		async function navigateChapter(direction) {
-			if (!mainRef.value) return;
-			const currentIdx = readerStore.currentChapterIndex;
-			const chaptersCount = readerStore.chapters.length;
-			if (isNavigating.value) return;
-			const targetIndex = currentIdx + (direction === "next" ? 1 : -1);
-			if (targetIndex >= 0 && targetIndex < chaptersCount) {
+			const targetIndex = readerStore.currentChapterIndex + (direction === "next" ? 1 : -1);
+			if (readerStore.chapters[targetIndex]) {
 				await jumpToChapter(targetIndex);
 				return;
 			}
-			if (!(direction === "next" ? readerStore.hasNext : readerStore.hasPrev)) {
-				showBoundaryEnd(direction);
-				return;
-			}
-			if (direction === "next" ? readerStore.isLoadingNext : readerStore.isLoadingPrev) return;
-			if (!(direction === "next" ? await readerStore.loadNextChapter("manual") : await readerStore.loadPrevChapter("manual"))) return;
-			const loadedIndex = direction === "next" ? readerStore.chapters.length - 1 : 0;
-			const behavior = direction === "next" ? "smooth" : "auto";
-			globalThis.requestAnimationFrame(() => void jumpToChapter(loadedIndex, behavior));
+			await runNavigation(async (mainEl, isCurrent) => {
+				if (!(direction === "next" ? readerStore.hasNext : readerStore.hasPrev)) {
+					showBoundaryEnd(direction);
+					return;
+				}
+				if (readerStore.isLoadingPrev || readerStore.isLoadingNext) return;
+				if (!(direction === "next" ? await readerStore.loadNextChapter("manual") : await readerStore.loadPrevChapter("manual")) || !isCurrent()) return;
+				const entry = direction === "next" ? readerStore.chapters[readerStore.chapters.length - 1] : readerStore.chapters[0];
+				if (entry) return scrollToChapter(mainEl, entry.chapter.url, direction === "next" ? "smooth" : "auto", isCurrent);
+			});
 		}
 		function scrollReader(direction) {
 			return moveReader(direction === "down" ? "next" : "prev", "line");
@@ -21518,8 +21417,8 @@ ul, ol {
 			toggleSettings
 		};
 	}
-	var _hoisted_1$7 = ["aria-valuenow"];
-	var _hoisted_2$5 = {
+	var _hoisted_1$6 = ["aria-valuenow"];
+	var _hoisted_2$4 = {
 		key: 0,
 		class: "mnr-progress-text"
 	};
@@ -21577,11 +21476,11 @@ ul, ol {
 				}, [createBaseVNode("div", {
 					class: "mnr-progress-bar",
 					style: normalizeStyle({ width: `${percent.value}%` })
-				}, null, 4), __props.showText ? (openBlock(), createElementBlock("span", _hoisted_2$5, toDisplayString(percent.value) + "%", 1)) : createCommentVNode("", true)], 10, _hoisted_1$7);
+				}, null, 4), __props.showText ? (openBlock(), createElementBlock("span", _hoisted_2$4, toDisplayString(percent.value) + "%", 1)) : createCommentVNode("", true)], 10, _hoisted_1$6);
 			};
 		}
 	}), [["__scopeId", "data-v-fb6f172c"]]);
-	var _hoisted_1$6 = { class: "mnr-floating-toolbar" };
+	var _hoisted_1$5 = { class: "mnr-floating-toolbar" };
 	var FloatingToolbar_default = _plugin_vue_export_helper_default(defineComponent({
 		__name: "FloatingToolbar",
 		props: { visible: {
@@ -21592,7 +21491,7 @@ ul, ol {
 		setup(__props) {
 			return (_ctx, _cache) => {
 				return openBlock(), createBlock(Transition, { name: "mnr-fade-slide" }, {
-					default: withCtx(() => [withDirectives(createBaseVNode("div", _hoisted_1$6, [createBaseVNode("button", {
+					default: withCtx(() => [withDirectives(createBaseVNode("div", _hoisted_1$5, [createBaseVNode("button", {
 						class: "mnr-fab",
 						title: "目录 (Tab)",
 						"aria-label": "打开目录",
@@ -21629,7 +21528,7 @@ ul, ol {
 			};
 		}
 	}), [["__scopeId", "data-v-c925c262"]]);
-	var _hoisted_1$5 = ["role"];
+	var _hoisted_1$4 = ["role"];
 	var MnrToast_default = _plugin_vue_export_helper_default(defineComponent({
 		__name: "MnrToast",
 		props: {
@@ -21646,36 +21545,12 @@ ul, ol {
 						class: normalizeClass(["mnr-toast", { "mnr-toast--error": __props.type === "error" }]),
 						role: __props.type === "error" ? "alert" : "status",
 						onClick: _cache[0] || (_cache[0] = ($event) => _ctx.$emit("dismiss"))
-					}, toDisplayString(__props.message), 11, _hoisted_1$5)) : createCommentVNode("", true)]),
+					}, toDisplayString(__props.message), 11, _hoisted_1$4)) : createCommentVNode("", true)]),
 					_: 1
 				});
 			};
 		}
 	}), [["__scopeId", "data-v-baea3e69"]]);
-	var _hoisted_1$4 = {
-		key: 0,
-		class: "mnr-loading-overlay",
-		role: "alert",
-		"aria-busy": "true"
-	};
-	var _hoisted_2$4 = {
-		key: 1,
-		class: "mnr-loading-overlay--inline",
-		role: "alert",
-		"aria-busy": "true"
-	};
-	var MnrLoadingOverlay_default = _plugin_vue_export_helper_default(defineComponent({
-		__name: "MnrLoadingOverlay",
-		props: { inline: {
-			type: Boolean,
-			default: false
-		} },
-		setup(__props) {
-			return (_ctx, _cache) => {
-				return !__props.inline ? (openBlock(), createElementBlock("div", _hoisted_1$4, [createVNode(MnrSpinner_default, { size: "medium" }), renderSlot(_ctx.$slots, "default", {}, void 0, true)])) : (openBlock(), createElementBlock("div", _hoisted_2$4, [createVNode(MnrSpinner_default, { size: "medium" }), renderSlot(_ctx.$slots, "default", {}, void 0, true)]));
-			};
-		}
-	}), [["__scopeId", "data-v-01971069"]]);
 	var _hoisted_1$3 = ["aria-hidden", "inert"];
 	var _hoisted_2$3 = { class: "mnr-drawer-header" };
 	var _hoisted_3$3 = { class: "mnr-drawer-heading" };
@@ -22746,7 +22621,7 @@ ul, ol {
 				isNavigating,
 				onViewportSettled: handleScroll
 			});
-			const gesturesIdle = computed(() => !hasOpenPanel.value && !readerStore.isLoading && !readerStore.isLoadingPrev && !readerStore.isLoadingNext && !isNavigating.value);
+			const gesturesIdle = computed(() => !hasOpenPanel.value && !readerStore.isLoadingPrev && !readerStore.isLoadingNext && !isNavigating.value);
 			const { boundaryGestureDirection, boundaryGestureHint, handleTouchStart, handleTouchMove, handleTouchEnd, handleTouchCancel } = useTouchGestures({
 				swipeEnabled: computed(() => configStore.behavior.swipeGestures && gesturesIdle.value),
 				getBoundaryDirection,
@@ -22801,9 +22676,9 @@ ul, ol {
 				if (remaining > 0 && !window.confirm(`预计缓存 ${remaining} 章，过程可能需要一些时间。是否继续？`)) return;
 				readerStore.startCacheAll();
 			}
-			async function handleClearCache() {
+			function handleClearCache() {
 				if (!window.confirm("确定要清除本书的离线缓存吗？")) return;
-				await readerStore.clearPersistedCache();
+				readerStore.clearPersistedCache();
 				readerStore.showToast("离线缓存已清除", "info");
 			}
 			function handleSiteAutoEnableChange(enabled) {
@@ -23054,10 +22929,6 @@ ul, ol {
 						"onClose",
 						"onTextConversionChange"
 					]),
-					unref(readerStore).isLoading ? (openBlock(), createBlock(unref(MnrLoadingOverlay_default), { key: 2 }, {
-						default: withCtx(() => [..._cache[6] || (_cache[6] = [createBaseVNode("span", null, "加载中...", -1)])]),
-						_: 1
-					})) : createCommentVNode("", true),
 					createVNode(unref(MnrToast_default), {
 						message: unref(readerStore).error ?? "",
 						type: unref(readerStore).toastType,
@@ -23072,7 +22943,7 @@ ul, ol {
 				], 32);
 			};
 		}
-	}), [["__scopeId", "data-v-cb73e76a"]]);
+	}), [["__scopeId", "data-v-ce31caf8"]]);
 	var EXIT_NAVIGATION_KEY = "mnr_exit_navigation";
 	var hasTabStorage = typeof GM_getTab === "function" && typeof GM_saveTab === "function";
 	var appState = {
@@ -23086,6 +22957,7 @@ ul, ol {
 	};
 	var app = null;
 	var pinia = null;
+	var initialization = null;
 	var readerCleanup = null;
 	var readerEntryApp = null;
 	var readerEntryCleanup = null;
@@ -23122,31 +22994,34 @@ ul, ol {
 	}
 	async function initialize() {
 		await ensureInitialized();
-		if (!appState.isInitialized) {
-			getSiteProtection().deactivate();
-			return;
-		}
-		if (appState.autoEnableDone) return;
+		if (!appState.isInitialized) return;
+		if (appState.autoEnableDone || appState.isActive) return;
 		appState.autoEnableDone = true;
 		await runAutoEnable();
 	}
 	async function ensureInitialized() {
 		if (appState.isInitialized) return;
-		console.log(`[MNR] YingChuang v${VERSION} (${BUILD_DATE})`);
-		try {
-			pinia = createPinia();
-			await useConfigStore(pinia).load();
-			appState.isInitialized = true;
-		} catch (e) {
-			console.error("[MNR] Initialization error:", e);
-		}
+		if (!initialization) initialization = (async () => {
+			console.log(`[MNR] YingChuang v${VERSION} (${BUILD_DATE})`);
+			try {
+				const stores = createPinia();
+				await useConfigStore(stores).load();
+				pinia = stores;
+				appState.isInitialized = true;
+			} catch (e) {
+				console.error("[MNR] Initialization error:", e);
+				getSiteProtection().deactivate();
+			}
+		})();
+		await initialization;
+		initialization = null;
 	}
 	async function runAutoEnable() {
 		const manager = getAutoEnableManager({
 			enableProtection: true,
 			protectionOptions: toProtectionOptions(useConfigStore(pinia).protection)
 		});
-		const decision = await manager.check(document);
+		const decision = manager.check(document);
 		appState.currentDecision = decision;
 		if (decision.method === "user-disabled" || decision.showManualEntry) {
 			getSiteProtection().deactivate();
@@ -23418,7 +23293,8 @@ ul, ol {
 		hideReaderEntry();
 		try {
 			await ensureInitialized();
-			if (!pinia) return;
+			if (!pinia || appState.isActive) return;
+			appState.autoEnableDone = true;
 			const manager = getAutoEnableManager({
 				enableProtection: true,
 				protectionOptions: toProtectionOptions(useConfigStore(pinia).protection)
@@ -23426,7 +23302,7 @@ ul, ol {
 			manager.setLaunchCallback(launchReader);
 			await manager.manualEnable(document);
 		} finally {
-			if (!appState.isActive && await shouldShowManualEntryForPage(currentUrl, document)) showReaderEntry();
+			if (!appState.isActive && isReaderEntryPage(currentUrl, document)) showReaderEntry();
 		}
 	}
 	function getAppDebugSnapshot() {
@@ -23490,7 +23366,7 @@ ul, ol {
 		if (appState.isActive) return;
 		if (await consumeExitNavigation()) return;
 		const url = window.location.href;
-		if (!await shouldBootstrapForPage(url, document)) {
+		if (!isReaderEntryPage(url, document)) {
 			getSiteProtection().deactivate();
 			return;
 		}
@@ -23506,29 +23382,14 @@ ul, ol {
 		}
 		await initialize();
 	}
-	async function shouldBootstrapForPage(url, doc) {
+	function isReaderEntryPage(url, doc) {
 		const urlKind = getPageKindFromUrl(url);
 		if (urlKind === "chapter") return true;
 		if (urlKind === "toc") return false;
 		try {
-			const manager = getRuleManager();
-			await manager.initialize();
-			if (await manager.matchRule(url) !== null) return true;
+			if (getRuleManager().matchRule(url) !== null) return true;
 		} catch (e) {
-			console.debug("[MNR] Failed to match bootstrap rule:", e);
-		}
-		return getPageKind(url, doc) === "chapter";
-	}
-	async function shouldShowManualEntryForPage(url, doc = document) {
-		const urlKind = getPageKindFromUrl(url);
-		if (urlKind === "chapter") return true;
-		if (urlKind === "toc") return false;
-		try {
-			const manager = getRuleManager();
-			await manager.initialize();
-			if (await manager.matchRule(url) !== null) return true;
-		} catch (e) {
-			console.debug("[MNR] Failed to match manual-entry rule:", e);
+			console.debug("[MNR] Failed to match reader entry rule:", e);
 		}
 		return getPageKind(url, doc) === "chapter";
 	}
@@ -23556,6 +23417,6 @@ ul, ol {
 			} catch (e) {
 				console.error("[MNR] CSS injection error:", e);
 			}
-		})(".mnr-reader-entry[data-v-e6dad6e3]{right:max(20px, env(safe-area-inset-right));bottom:max(20px, env(safe-area-inset-bottom));z-index:2147483646;background:var(--mnr-link,#1976d2);min-width:48px;height:48px;color:var(--mnr-on-link,#fff);cursor:pointer;-webkit-tap-highlight-color:transparent;border:0;border-radius:24px;justify-content:center;align-items:center;gap:8px;margin:0;padding:0 16px;font-size:14px;font-weight:600;line-height:1;transition:transform .18s,filter .18s,box-shadow .18s;animation:.2s ease-out mnr-entry-in-e6dad6e3;display:flex;position:fixed;box-shadow:0 6px 18px #0003}.mnr-reader-entry svg[data-v-e6dad6e3]{fill:none;stroke:currentColor;stroke-width:1.8px;stroke-linecap:round;stroke-linejoin:round;flex:0 0 24px;width:24px;height:24px}.mnr-reader-entry span[data-v-e6dad6e3]{white-space:nowrap}.mnr-reader-entry[data-v-e6dad6e3]:active{transform:scale(.96)}.mnr-reader-entry[data-v-e6dad6e3]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 48%, #fff);outline-offset:3px}@media (hover:hover){.mnr-reader-entry[data-v-e6dad6e3]:hover{filter:brightness(.94);transform:translateY(-2px);box-shadow:0 8px 22px #0000003d}}@media (width<=480px){.mnr-reader-entry[data-v-e6dad6e3]{width:48px;padding:0}.mnr-reader-entry span[data-v-e6dad6e3]{display:none}}@keyframes mnr-entry-in-e6dad6e3{0%{opacity:0;transform:translateY(8px)scale(.96)}}@media (prefers-reduced-motion:reduce){.mnr-reader-entry[data-v-e6dad6e3]{transition:none;animation:none}}.mnr-entry-prompt-overlay[data-v-2c14cbfa]{z-index:2147483647;padding:max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));background:#00000085;justify-content:center;align-items:center;display:flex;position:fixed;inset:0}.mnr-entry-prompt-card[data-v-2c14cbfa]{border:1px solid var(--mnr-border,#e0e0e0);background:var(--mnr-bg,#fff);width:min(100%,400px);max-height:calc(100dvh - 32px);color:var(--mnr-text,#333);border-radius:14px;padding:24px;animation:.24s ease-out mnr-entry-prompt-in-2c14cbfa;overflow:auto;box-shadow:0 18px 50px #00000047}.mnr-entry-prompt-header[data-v-2c14cbfa]{align-items:flex-start;gap:14px;display:flex}.mnr-entry-prompt-icon[data-v-2c14cbfa]{background:color-mix(in srgb, var(--mnr-link,#1976d2) 12%, transparent);width:44px;height:44px;color:var(--mnr-link,#1976d2);border-radius:12px;flex:0 0 44px;place-items:center;display:grid}.mnr-entry-prompt-icon svg[data-v-2c14cbfa]{fill:none;stroke:currentColor;stroke-width:1.8px;stroke-linecap:round;stroke-linejoin:round;width:26px;height:26px}.mnr-entry-prompt-header h3[data-v-2c14cbfa]{margin:1px 0 6px;font-size:18px;font-weight:700;line-height:1.4}.mnr-entry-prompt-header p[data-v-2c14cbfa]{opacity:.76;margin:0;font-size:14px;line-height:1.65}.mnr-entry-preference[data-v-2c14cbfa]{border:1px solid var(--mnr-border,#e0e0e0);background:color-mix(in srgb, var(--mnr-border,#e0e0e0) 34%, transparent);cursor:pointer;border-radius:10px;align-items:flex-start;gap:10px;margin:22px 0;padding:13px 14px;display:flex}.mnr-entry-preference input[data-v-2c14cbfa]{width:20px;height:20px;accent-color:var(--mnr-link,#1976d2);flex:0 0 20px;margin:1px 0 0}.mnr-entry-preference span[data-v-2c14cbfa],.mnr-entry-preference strong[data-v-2c14cbfa],.mnr-entry-preference small[data-v-2c14cbfa]{display:block}.mnr-entry-preference strong[data-v-2c14cbfa]{font-size:14px;font-weight:600}.mnr-entry-preference small[data-v-2c14cbfa]{opacity:.68;margin-top:3px;font-size:12px;line-height:1.5}.mnr-entry-prompt-actions[data-v-2c14cbfa]{grid-template-columns:1fr 1.25fr;gap:10px;display:grid}.mnr-entry-button[data-v-2c14cbfa]{cursor:pointer;border:1px solid #0000;border-radius:9px;min-height:44px;padding:10px 14px;font-size:14px;font-weight:600;transition:filter .18s,background .18s}.mnr-entry-button.secondary[data-v-2c14cbfa]{border-color:var(--mnr-border,#ddd);color:var(--mnr-text,#555);background:0 0}.mnr-entry-button.primary[data-v-2c14cbfa]{background:var(--mnr-link,#1976d2);color:var(--mnr-on-link,#fff)}.mnr-entry-button[data-v-2c14cbfa]:focus-visible,.mnr-entry-preference input[data-v-2c14cbfa]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}@media (hover:hover){.mnr-entry-button[data-v-2c14cbfa]:hover{filter:brightness(.94)}.mnr-entry-button.secondary[data-v-2c14cbfa]:hover{background:var(--mnr-border,#f0f0f0)}}.mnr-entry-prompt-fade-enter-active[data-v-2c14cbfa],.mnr-entry-prompt-fade-leave-active[data-v-2c14cbfa]{transition:opacity .24s}.mnr-entry-prompt-fade-enter-from[data-v-2c14cbfa],.mnr-entry-prompt-fade-leave-to[data-v-2c14cbfa]{opacity:0}@keyframes mnr-entry-prompt-in-2c14cbfa{0%{opacity:0;transform:translateY(12px)scale(.98)}}@media (width<=480px){.mnr-entry-prompt-card[data-v-2c14cbfa]{padding:20px}.mnr-entry-prompt-header[data-v-2c14cbfa]{gap:12px}.mnr-entry-prompt-icon[data-v-2c14cbfa]{flex-basis:40px;width:40px;height:40px}}@media (prefers-reduced-motion:reduce){.mnr-entry-prompt-card[data-v-2c14cbfa],.mnr-entry-button[data-v-2c14cbfa],.mnr-entry-prompt-fade-enter-active[data-v-2c14cbfa],.mnr-entry-prompt-fade-leave-active[data-v-2c14cbfa]{transition:none;animation:none}}.mnr-progress[data-v-fb6f172c]{z-index:1000;height:3px;transition:opacity .3s;position:fixed;top:0;left:0;right:0}.mnr-progress.hidden[data-v-fb6f172c]{opacity:0}.mnr-progress-bar[data-v-fb6f172c]{background:var(--mnr-link,#1976d2);height:100%;transition:width .1s ease-out}.mnr-progress-text[data-v-fb6f172c]{color:#fff;background:#000000b3;border-radius:4px;padding:4px 8px;font-size:12px;position:absolute;top:8px;right:8px}@media (prefers-reduced-motion:reduce){.mnr-progress[data-v-fb6f172c],.mnr-progress-bar[data-v-fb6f172c]{transition:none}}.mnr-floating-toolbar[data-v-99e4013e]{top:max(12px, env(safe-area-inset-top));left:max(12px, env(safe-area-inset-left));right:max(12px, env(safe-area-inset-right));pointer-events:none;z-index:100;justify-content:space-between;display:flex;position:fixed}.mnr-fab[data-v-99e4013e]{pointer-events:auto;background:var(--mnr-bg,#fff);width:44px;height:44px;color:var(--mnr-text,#333);border:1px solid var(--mnr-border,#e5e5e5);cursor:pointer;-webkit-tap-highlight-color:transparent;border-radius:50%;justify-content:center;align-items:center;padding:0;font-size:18px;transition:all .2s cubic-bezier(.25,.8,.25,1);display:flex;position:relative;box-shadow:0 4px 12px #00000026}.mnr-fab[data-v-99e4013e]:hover{background:var(--mnr-border,#f0f0f0);transform:translateY(-2px);box-shadow:0 6px 16px #0003}.mnr-fab[data-v-99e4013e]:active{transform:scale(.95)}.mnr-fab[data-v-99e4013e]:disabled{opacity:.6;cursor:not-allowed;box-shadow:none;transform:none}.mnr-icon[data-v-99e4013e]{fill:none;stroke:currentColor;stroke-width:1.8px;stroke-linecap:round;stroke-linejoin:round;flex:none;width:22px;height:22px;display:block}.mnr-fab[data-v-99e4013e]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}.mnr-fade-slide-enter-active[data-v-99e4013e],.mnr-fade-slide-leave-active[data-v-99e4013e]{transition:opacity .3s,transform .3s}.mnr-fade-slide-enter-from[data-v-99e4013e],.mnr-fade-slide-leave-to[data-v-99e4013e]{opacity:0;transform:translateY(-20px)}@media (prefers-reduced-motion:reduce){.mnr-fab[data-v-99e4013e],.mnr-fade-slide-enter-active[data-v-99e4013e],.mnr-fade-slide-leave-active[data-v-99e4013e]{transition:none}}.mnr-spinner[data-v-c925c262]{border-radius:50%;animation:.8s cubic-bezier(.4,0,.2,1) infinite mnr-spin-c925c262}.mnr-spinner.small[data-v-c925c262]{border:2px solid var(--mnr-border,#e0e0e0);border-top-color:var(--mnr-link,#1976d2);width:24px;height:24px;animation-duration:1s;animation-timing-function:linear}.mnr-spinner.medium[data-v-c925c262]{border:4px solid var(--mnr-border,#e0e0e0);border-top-color:var(--mnr-link,#1976d2);width:48px;height:48px}.mnr-spinner.large[data-v-c925c262]{border:4px solid var(--mnr-border,#e0e0e0);border-top-color:var(--mnr-link,#1976d2);width:64px;height:64px}@keyframes mnr-spin-c925c262{to{transform:rotate(360deg)}}.mnr-toast[data-v-baea3e69]{bottom:max(32px, env(safe-area-inset-bottom));-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);color:#fff;cursor:pointer;z-index:1001;white-space:nowrap;text-overflow:ellipsis;background:#1e1e1ee6;border-radius:50px;align-items:center;gap:8px;max-width:90vw;padding:14px 28px;font-size:15px;font-weight:500;display:flex;position:fixed;left:50%;overflow:hidden;transform:translate(-50%);box-shadow:0 8px 24px #0003}.mnr-toast--error[data-v-baea3e69]{background:#d32f2ff2}.mnr-toast-enter-active[data-v-baea3e69],.mnr-toast-leave-active[data-v-baea3e69]{transition:all .4s cubic-bezier(.175,.885,.32,1.275)}.mnr-toast-enter-from[data-v-baea3e69],.mnr-toast-leave-to[data-v-baea3e69]{opacity:0;transform:translate(-50%)translateY(40px)scale(.9)}@media (prefers-reduced-motion:reduce){.mnr-toast-enter-active[data-v-baea3e69],.mnr-toast-leave-active[data-v-baea3e69]{transition:none}}.mnr-loading-overlay[data-v-01971069]{-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);color:#333;z-index:1000;background:#fffc;flex-direction:column;justify-content:center;align-items:center;gap:16px;transition:opacity .3s;display:flex;position:fixed;inset:0}@media (prefers-color-scheme:dark){.mnr-loading-overlay[data-v-01971069]{color:#fff;background:#0009}}.mnr-loading-overlay--inline[data-v-01971069]{color:#333;flex-direction:column;justify-content:center;align-items:center;gap:16px;padding:40px 20px;display:flex}.mnr-drawer[data-v-9f97c115]{z-index:1001;width:min(88%,340px);padding-left:env(safe-area-inset-left);background:var(--mnr-bg,#fff);color:var(--mnr-text,#333);flex-direction:column;transition:transform .24s;display:flex;position:fixed;inset:0 auto 0 0;transform:translate(-105%);box-shadow:4px 0 20px #00000026}.mnr-drawer.open[data-v-9f97c115]{transform:translate(0)}.mnr-drawer-overlay[data-v-9f97c115]{z-index:1000;background:#00000080;position:fixed;inset:0}.mnr-drawer-header[data-v-9f97c115]{padding:max(16px, env(safe-area-inset-top)) 16px 14px;border-bottom:1px solid var(--mnr-border,#e5e5e5);flex-shrink:0;justify-content:space-between;align-items:center;gap:12px;display:flex}.mnr-drawer-heading[data-v-9f97c115]{min-width:0}.mnr-drawer-title[data-v-9f97c115]{overflow-wrap:anywhere;-webkit-line-clamp:2;-webkit-box-orient:vertical;margin:0;font-size:16px;font-weight:600;line-height:1.5;display:-webkit-box;overflow:hidden}.mnr-drawer-position[data-v-9f97c115]{color:var(--mnr-text,#666);opacity:.72;margin-top:3px;font-size:12px;display:block}.mnr-drawer-close[data-v-9f97c115]{width:36px;height:36px;color:inherit;cursor:pointer;background:0 0;border:0;border-radius:50%;flex:0 0 36px;place-items:center;padding:0;display:grid}.mnr-drawer-close svg[data-v-9f97c115]{fill:none;stroke:currentColor;stroke-width:2px;stroke-linecap:round;width:20px;height:20px}.mnr-drawer-search[data-v-9f97c115]{flex-shrink:0;padding:10px 12px 6px}.mnr-drawer-search input[data-v-9f97c115]{border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);width:100%;color:var(--mnr-text,#333);border-radius:8px;padding:9px 12px;font-size:14px}.mnr-offline-section[data-v-9f97c115]{border-bottom:1px solid var(--mnr-border,#e5e5e5);flex-shrink:0;padding:10px 12px 12px}.mnr-offline-main[data-v-9f97c115]{justify-content:space-between;align-items:center;gap:12px;display:flex}.mnr-offline-copy[data-v-9f97c115]{min-width:0}.mnr-offline-copy strong[data-v-9f97c115],.mnr-offline-copy span[data-v-9f97c115]{display:block}.mnr-offline-copy strong[data-v-9f97c115]{font-size:13px;font-weight:600}.mnr-offline-copy span[data-v-9f97c115]{color:var(--mnr-text,#666);opacity:.7;margin-top:2px;font-size:12px}.mnr-offline-action[data-v-9f97c115]{border:1px solid var(--mnr-border,#ddd);min-height:36px;color:var(--mnr-link,#1976d2);cursor:pointer;background:0 0;border-radius:8px;padding:6px 11px;font-size:12px;font-weight:600}.mnr-offline-action[data-v-9f97c115]:disabled{cursor:wait;opacity:.6}.mnr-offline-action.primary[data-v-9f97c115]{border-color:var(--mnr-link,#1976d2);background:var(--mnr-link,#1976d2);color:var(--mnr-on-link,#fff);flex:none}.mnr-offline-action.danger[data-v-9f97c115]{color:var(--mnr-text,#555)}.mnr-offline-secondary[data-v-9f97c115]{flex-wrap:wrap;gap:6px;margin-top:8px;display:flex}.mnr-drawer-state[data-v-9f97c115]{color:var(--mnr-text,#666);text-align:center;opacity:.78;flex:1;justify-content:center;align-items:center;gap:10px;padding:40px 20px;display:flex}.mnr-drawer-content[data-v-9f97c115]{overscroll-behavior:contain;-webkit-overflow-scrolling:touch;flex:1;position:relative;overflow-y:auto}.mnr-cache-progress-track[data-v-9f97c115]{background:var(--mnr-border,#e0e0e0);border-radius:2px;height:4px;margin-top:10px;overflow:hidden}.mnr-cache-progress-fill[data-v-9f97c115]{background:var(--mnr-link,#1976d2);height:100%;transition:width .2s}.mnr-chapter-list[data-v-9f97c115]{margin:0;padding-left:0;padding-right:0;list-style:none}.mnr-chapter-list li[data-v-9f97c115]{height:44px}.mnr-chapter-button[data-v-9f97c115]{width:100%;height:44px;color:inherit;text-align:left;cursor:pointer;background:0 0;border:0;border-left:3px solid #0000;align-items:center;gap:6px;padding:0 14px;font-size:14px;display:flex;overflow:hidden}.mnr-chapter-title-text[data-v-9f97c115]{text-overflow:ellipsis;white-space:nowrap;overflow:hidden}.mnr-chapter-button.active[data-v-9f97c115]{border-left-color:var(--mnr-link,#1976d2);background:color-mix(in srgb, var(--mnr-link,#1976d2) 10%, transparent);color:var(--mnr-link,#1976d2);font-weight:600}.mnr-chapter-button.persisted[data-v-9f97c115],.mnr-cache-mark[data-v-9f97c115]{color:#388e3c}.mnr-cache-mark[data-v-9f97c115]{flex:none;width:14px;height:14px}.mnr-cache-mark svg[data-v-9f97c115]{fill:none;stroke:currentColor;stroke-width:2px;stroke-linecap:round;stroke-linejoin:round;width:100%;height:100%;display:block}.mnr-drawer-close[data-v-9f97c115]:hover,.mnr-chapter-button[data-v-9f97c115]:hover,.mnr-offline-action[data-v-9f97c115]:hover{background:var(--mnr-border,#f0f0f0)}.mnr-offline-action.primary[data-v-9f97c115]:hover{background:var(--mnr-link,#1976d2);filter:brightness(.94)}.mnr-drawer-close[data-v-9f97c115]:focus-visible,.mnr-drawer-search input[data-v-9f97c115]:focus-visible,.mnr-offline-action[data-v-9f97c115]:focus-visible,.mnr-chapter-button[data-v-9f97c115]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:-3px}.mnr-visually-hidden[data-v-9f97c115]{clip:rect(0 0 0 0);white-space:nowrap;clip-path:inset(50%);width:1px;height:1px;position:absolute;overflow:hidden}.mnr-fade-enter-active[data-v-9f97c115],.mnr-fade-leave-active[data-v-9f97c115]{transition:opacity .24s}.mnr-fade-enter-from[data-v-9f97c115],.mnr-fade-leave-to[data-v-9f97c115]{opacity:0}@media (prefers-reduced-motion:reduce){.mnr-drawer[data-v-9f97c115],.mnr-fade-enter-active[data-v-9f97c115],.mnr-fade-leave-active[data-v-9f97c115],.mnr-cache-progress-fill[data-v-9f97c115]{transition:none}}.mnr-reading-control[data-v-e6745e69]{margin-top:18px}.mnr-reading-control-header[data-v-e6745e69]{justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:4px;display:flex}.mnr-reading-control-header label[data-v-e6745e69]{color:var(--mnr-text,#333);font-size:14px;font-weight:600}.mnr-reading-control-header output[data-v-e6745e69]{color:var(--mnr-text,#666);opacity:.78;font-size:13px}.mnr-reading-slider-row[data-v-e6745e69]{align-items:center;gap:10px;display:flex}.mnr-reading-slider-row span[data-v-e6745e69]{color:var(--mnr-text,#666);text-align:center;flex:0 0 24px;font-size:13px}.mnr-reading-slider-row input[data-v-e6745e69]{appearance:none;cursor:pointer;touch-action:pan-y;background:0 0;flex:1;min-width:0;height:32px;margin:0}.mnr-reading-slider-row input[data-v-e6745e69]::-webkit-slider-runnable-track{background:var(--mnr-border,#e0e0e0);border-radius:2px;height:4px}.mnr-reading-slider-row input[data-v-e6745e69]::-webkit-slider-thumb{appearance:none;background:var(--mnr-link,#1976d2);border:0;border-radius:50%;width:24px;height:24px;margin-top:-10px}.mnr-reading-slider-row input[data-v-e6745e69]::-moz-range-track{background:var(--mnr-border,#e0e0e0);border-radius:2px;height:4px}.mnr-reading-slider-row input[data-v-e6745e69]::-moz-range-thumb{background:var(--mnr-link,#1976d2);border:0;border-radius:50%;width:24px;height:24px}.mnr-reading-slider-row input[data-v-e6745e69]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}.mnr-settings-overlay[data-v-2853a120]{z-index:1000;background:#00000080;justify-content:flex-end;display:flex;position:fixed;inset:0}.mnr-settings-panel[data-v-2853a120]{width:min(100%,380px);height:100%;padding-right:env(safe-area-inset-right);background:var(--mnr-bg,#fff);color:var(--mnr-text,#333);flex-direction:column;display:flex;box-shadow:-4px 0 20px #00000026}.mnr-settings-header[data-v-2853a120]{padding:max(16px, env(safe-area-inset-top)) 16px 16px;border-bottom:1px solid var(--mnr-border,#e0e0e0);flex-shrink:0;justify-content:space-between;align-items:center;display:flex}.mnr-settings-header h3[data-v-2853a120],.mnr-settings-section h4[data-v-2853a120],.mnr-field-label[data-v-2853a120]{color:var(--mnr-text,#333);margin:0}.mnr-settings-header h3[data-v-2853a120]{border-radius:4px;font-size:18px}.mnr-close-btn[data-v-2853a120]{width:36px;height:36px;color:inherit;cursor:pointer;background:0 0;border:0;border-radius:50%;place-items:center;padding:0;display:grid}.mnr-close-btn svg[data-v-2853a120]{fill:none;stroke:currentColor;stroke-width:2px;stroke-linecap:round;width:20px;height:20px}.mnr-settings-content[data-v-2853a120]{overscroll-behavior:contain;flex:1;padding:18px 16px 24px;overflow:auto}.mnr-settings-section h4[data-v-2853a120],.mnr-field-label[data-v-2853a120],.mnr-settings-fieldset legend[data-v-2853a120]{margin-bottom:10px;font-size:14px;font-weight:600;display:block}.mnr-theme-grid[data-v-2853a120]{grid-template-columns:repeat(3,1fr);gap:8px;display:grid}.mnr-theme-btn[data-v-2853a120]{cursor:pointer;border:2px solid #0000;border-radius:8px;min-width:0;min-height:42px;padding:8px 4px;font-size:12px}.mnr-reading-preview[data-v-2853a120]{border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);color:var(--mnr-text,#333);border-radius:8px;margin-top:16px;padding:12px 14px;display:none}.mnr-reading-preview span[data-v-2853a120]{opacity:.65;margin-bottom:4px;font-size:12px;display:block}.mnr-reading-preview p[data-v-2853a120]{font-family:var(--mnr-font-family,system-ui, sans-serif);font-size:var(--mnr-font-size,18px);line-height:var(--mnr-line-height,1.8);letter-spacing:var(--mnr-letter-spacing,0);text-indent:var(--mnr-paragraph-indent,2em);margin:0}.mnr-field-label[data-v-2853a120]{margin-top:18px}.mnr-select[data-v-2853a120]{border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);width:100%;min-height:42px;color:var(--mnr-text,#333);border-radius:8px;padding:9px 12px;font-size:14px}.mnr-settings-fieldset[data-v-2853a120]{border:0;min-width:0;margin:18px 0 0;padding:0}.mnr-segmented-control[data-v-2853a120]{border:1px solid var(--mnr-border,#ddd);border-radius:8px;display:flex;overflow:hidden}.mnr-segment[data-v-2853a120]{border:0;border-right:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);min-height:42px;color:var(--mnr-text,#666);cursor:pointer;flex:1;padding:9px 12px;font-size:14px}.mnr-segment[data-v-2853a120]:last-child{border-right:0}.mnr-segment.active[data-v-2853a120]{background:var(--mnr-link,#1976d2);color:var(--mnr-on-link,#fff)}.mnr-secondary-action[data-v-2853a120]{border:1px solid var(--mnr-border,#ddd);width:100%;min-height:42px;color:var(--mnr-text,#333);cursor:pointer;background:0 0;border-radius:8px;margin-top:16px;padding:9px 12px;font-size:14px}.mnr-settings-group[data-v-2853a120]{border-top:1px solid var(--mnr-border,#ddd);margin-top:18px}.mnr-settings-group summary[data-v-2853a120]{min-height:48px;color:var(--mnr-text,#333);cursor:pointer;padding:14px 0;font-size:14px;font-weight:600}.mnr-settings-group-content[data-v-2853a120]{padding-bottom:4px}.mnr-settings-group-content[data-v-2853a120]>:first-child{margin-top:0}.mnr-switch-row[data-v-2853a120]{min-height:44px;color:var(--mnr-text,#333);cursor:pointer;justify-content:space-between;align-items:center;gap:16px;display:flex}.mnr-switch-row input[data-v-2853a120]{width:22px;height:22px;accent-color:var(--mnr-link,#1976d2);flex:none}.mnr-custom-css[data-v-2853a120]{box-sizing:border-box;resize:vertical;border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);width:100%;min-height:110px;color:var(--mnr-text,#333);border-radius:8px;padding:10px 12px;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}.mnr-cleanup-fields[data-v-2853a120]{gap:10px;margin-top:8px;display:grid}.mnr-cleanup-fields .mnr-field-label[data-v-2853a120],.mnr-cleanup-fields .mnr-field-help[data-v-2853a120],.mnr-cleanup-fields .mnr-field-error[data-v-2853a120]{margin:0}.mnr-cleanup-editor-label[data-v-2853a120],.mnr-cleanup-guide[data-v-2853a120]{font-size:12px;line-height:1.6}.mnr-cleanup-guide[data-v-2853a120]{color:var(--mnr-text,#333)}.mnr-cleanup-guide summary[data-v-2853a120]{cursor:pointer;opacity:.72}.mnr-cleanup-guide p[data-v-2853a120]{margin:8px 0 0}.mnr-cleanup-guide code[data-v-2853a120]{overflow-wrap:anywhere}.mnr-cleanup-add[data-v-2853a120]{grid-template-columns:minmax(0,1fr) auto;gap:8px;display:grid}.mnr-cleanup-input[data-v-2853a120]{box-sizing:border-box;border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);min-width:0;min-height:42px;color:var(--mnr-text,#333);border-radius:8px;padding:9px 12px;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}.mnr-cleanup-add-button[data-v-2853a120]{white-space:nowrap;width:auto;margin-top:0}.mnr-cleanup-add-button[data-v-2853a120]:disabled{cursor:not-allowed;opacity:.55}.mnr-cleanup-site[data-v-2853a120]{overflow-wrap:anywhere}.mnr-field-help[data-v-2853a120],.mnr-field-error[data-v-2853a120]{margin:-4px 0 8px;font-size:12px;line-height:1.5}.mnr-field-help[data-v-2853a120]{opacity:.72}.mnr-field-error[data-v-2853a120]{color:#c93f49;margin-top:6px}.mnr-settings-footer[data-v-2853a120]{padding:10px 16px max(12px, env(safe-area-inset-bottom));border-top:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);flex-shrink:0}.mnr-exit-btn[data-v-2853a120]{color:#c93f49;cursor:pointer;background:0 0;border:1px solid #c93f49;border-radius:8px;width:100%;min-height:42px;padding:9px 12px;font-size:14px}.mnr-close-btn[data-v-2853a120]:hover,.mnr-secondary-action[data-v-2853a120]:hover,.mnr-segment[data-v-2853a120]:hover,.mnr-exit-btn[data-v-2853a120]:hover{background:var(--mnr-border,#f0f0f0)}.mnr-settings-header h3[data-v-2853a120]:focus-visible,.mnr-close-btn[data-v-2853a120]:focus-visible,.mnr-theme-btn[data-v-2853a120]:focus-visible,.mnr-select[data-v-2853a120]:focus-visible,.mnr-segment[data-v-2853a120]:focus-visible,.mnr-secondary-action[data-v-2853a120]:focus-visible,.mnr-settings-group summary[data-v-2853a120]:focus-visible,.mnr-cleanup-guide summary[data-v-2853a120]:focus-visible,.mnr-switch-row input[data-v-2853a120]:focus-visible,.mnr-cleanup-input[data-v-2853a120]:focus-visible,.mnr-custom-css[data-v-2853a120]:focus-visible,.mnr-exit-btn[data-v-2853a120]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}.mnr-slide-enter-active[data-v-2853a120],.mnr-slide-leave-active[data-v-2853a120],.mnr-settings-panel[data-v-2853a120]{transition:opacity .22s,transform .22s}.mnr-slide-enter-from[data-v-2853a120],.mnr-slide-leave-to[data-v-2853a120]{opacity:0}.mnr-slide-enter-from .mnr-settings-panel[data-v-2853a120],.mnr-slide-leave-to .mnr-settings-panel[data-v-2853a120]{transform:translate(100%)}@media (width<=600px){.mnr-settings-panel[data-v-2853a120]{width:100%}.mnr-reading-preview[data-v-2853a120]{display:block}.mnr-desktop-width[data-v-2853a120]{display:none}}@media (prefers-reduced-motion:reduce){.mnr-slide-enter-active[data-v-2853a120],.mnr-slide-leave-active[data-v-2853a120],.mnr-settings-panel[data-v-2853a120]{transition:none}}.mnr-reader[data-v-cb73e76a]{z-index:2147483647;background:var(--mnr-bg,#fff);color:var(--mnr-text,#1a1a1a);overscroll-behavior:none;flex-direction:column;display:flex;position:fixed;inset:0;overflow:hidden}.mnr-reader-main[data-v-cb73e76a]{padding-top:68px;padding-bottom:max(40px, env(safe-area-inset-bottom));overscroll-behavior:none;-webkit-overflow-scrolling:touch;touch-action:pan-y pinch-zoom;flex:1;overflow:auto}.mnr-boundary-gesture-hint[data-v-cb73e76a]{z-index:4;background:color-mix(in srgb, var(--mnr-text,#1a1a1a) 86%, transparent);max-width:calc(100vw - 32px);color:var(--mnr-bg,#fff);white-space:nowrap;pointer-events:none;border-radius:999px;padding:8px 14px;font-size:14px;line-height:1.4;position:fixed;left:50%;transform:translate(-50%)}.mnr-boundary-gesture-hint.is-prev[data-v-cb73e76a]{top:max(16px, env(safe-area-inset-top))}.mnr-boundary-gesture-hint.is-next[data-v-cb73e76a]{bottom:max(16px, env(safe-area-inset-bottom))}.mnr-reader-content[data-v-cb73e76a]{max-width:var(--mnr-max-width,800px);padding:var(--mnr-padding,20px);font-family:var(--mnr-font-family,\"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif);font-size:var(--mnr-font-size,18px);line-height:var(--mnr-line-height,1.8);letter-spacing:var(--mnr-letter-spacing,0em);margin:0 auto}.mnr-reader-content[data-v-cb73e76a] p{text-indent:var(--mnr-paragraph-indent,2em);margin:0 0 1em}.mnr-reader-content[data-v-cb73e76a] img{max-width:100%;height:auto;margin:1em auto;display:block}.mnr-reader-content[data-v-cb73e76a] a{color:var(--mnr-link,#1976d2)}.mnr-reader-main[data-v-cb73e76a]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}.mnr-chapter-title[data-v-cb73e76a]{color:var(--mnr-text,#1a1a1a);text-align:center;margin:0 0 1em;font-size:1.5em;font-weight:700;line-height:1.4}.mnr-chapter-end[data-v-cb73e76a]{max-width:var(--mnr-max-width,800px);text-align:center;margin:0 auto;padding:40px 20px}.mnr-chapter-end-text[data-v-cb73e76a]{color:var(--mnr-text,#666);opacity:.7;margin-bottom:16px}.mnr-chapter-nav[data-v-cb73e76a]{flex-wrap:wrap;justify-content:center;gap:24px;display:flex}.mnr-chapter-link[data-v-cb73e76a]{color:var(--mnr-link,#1976d2);border:1px solid var(--mnr-border,#e0e0e0);border-radius:8px;padding:12px 24px;text-decoration:none;transition:all .2s}.mnr-chapter-link[data-v-cb73e76a]:hover{background:var(--mnr-border,#f0f0f0)}.mnr-sentinel[data-v-cb73e76a]{visibility:hidden;width:100%;height:1px}.mnr-loading-prev[data-v-cb73e76a],.mnr-loading-next[data-v-cb73e76a]{color:var(--mnr-text,#666);justify-content:center;align-items:center;gap:12px;padding:24px;display:flex}@media (width>=768px){.mnr-reader-content[data-v-cb73e76a]{padding:var(--mnr-padding,30px)}}@media (width>=1024px){.mnr-reader-content[data-v-cb73e76a]{padding:var(--mnr-padding,40px)}}@media (prefers-reduced-motion:reduce){.mnr-chapter-link[data-v-cb73e76a]{transition:none}}\n/*$vite$:1*/", {});
+		})(".mnr-reader-entry[data-v-e6dad6e3]{right:max(20px, env(safe-area-inset-right));bottom:max(20px, env(safe-area-inset-bottom));z-index:2147483646;background:var(--mnr-link,#1976d2);min-width:48px;height:48px;color:var(--mnr-on-link,#fff);cursor:pointer;-webkit-tap-highlight-color:transparent;border:0;border-radius:24px;justify-content:center;align-items:center;gap:8px;margin:0;padding:0 16px;font-size:14px;font-weight:600;line-height:1;transition:transform .18s,filter .18s,box-shadow .18s;animation:.2s ease-out mnr-entry-in-e6dad6e3;display:flex;position:fixed;box-shadow:0 6px 18px #0003}.mnr-reader-entry svg[data-v-e6dad6e3]{fill:none;stroke:currentColor;stroke-width:1.8px;stroke-linecap:round;stroke-linejoin:round;flex:0 0 24px;width:24px;height:24px}.mnr-reader-entry span[data-v-e6dad6e3]{white-space:nowrap}.mnr-reader-entry[data-v-e6dad6e3]:active{transform:scale(.96)}.mnr-reader-entry[data-v-e6dad6e3]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 48%, #fff);outline-offset:3px}@media (hover:hover){.mnr-reader-entry[data-v-e6dad6e3]:hover{filter:brightness(.94);transform:translateY(-2px);box-shadow:0 8px 22px #0000003d}}@media (width<=480px){.mnr-reader-entry[data-v-e6dad6e3]{width:48px;padding:0}.mnr-reader-entry span[data-v-e6dad6e3]{display:none}}@keyframes mnr-entry-in-e6dad6e3{0%{opacity:0;transform:translateY(8px)scale(.96)}}@media (prefers-reduced-motion:reduce){.mnr-reader-entry[data-v-e6dad6e3]{transition:none;animation:none}}.mnr-entry-prompt-overlay[data-v-2c14cbfa]{z-index:2147483647;padding:max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));background:#00000085;justify-content:center;align-items:center;display:flex;position:fixed;inset:0}.mnr-entry-prompt-card[data-v-2c14cbfa]{border:1px solid var(--mnr-border,#e0e0e0);background:var(--mnr-bg,#fff);width:min(100%,400px);max-height:calc(100dvh - 32px);color:var(--mnr-text,#333);border-radius:14px;padding:24px;animation:.24s ease-out mnr-entry-prompt-in-2c14cbfa;overflow:auto;box-shadow:0 18px 50px #00000047}.mnr-entry-prompt-header[data-v-2c14cbfa]{align-items:flex-start;gap:14px;display:flex}.mnr-entry-prompt-icon[data-v-2c14cbfa]{background:color-mix(in srgb, var(--mnr-link,#1976d2) 12%, transparent);width:44px;height:44px;color:var(--mnr-link,#1976d2);border-radius:12px;flex:0 0 44px;place-items:center;display:grid}.mnr-entry-prompt-icon svg[data-v-2c14cbfa]{fill:none;stroke:currentColor;stroke-width:1.8px;stroke-linecap:round;stroke-linejoin:round;width:26px;height:26px}.mnr-entry-prompt-header h3[data-v-2c14cbfa]{margin:1px 0 6px;font-size:18px;font-weight:700;line-height:1.4}.mnr-entry-prompt-header p[data-v-2c14cbfa]{opacity:.76;margin:0;font-size:14px;line-height:1.65}.mnr-entry-preference[data-v-2c14cbfa]{border:1px solid var(--mnr-border,#e0e0e0);background:color-mix(in srgb, var(--mnr-border,#e0e0e0) 34%, transparent);cursor:pointer;border-radius:10px;align-items:flex-start;gap:10px;margin:22px 0;padding:13px 14px;display:flex}.mnr-entry-preference input[data-v-2c14cbfa]{width:20px;height:20px;accent-color:var(--mnr-link,#1976d2);flex:0 0 20px;margin:1px 0 0}.mnr-entry-preference span[data-v-2c14cbfa],.mnr-entry-preference strong[data-v-2c14cbfa],.mnr-entry-preference small[data-v-2c14cbfa]{display:block}.mnr-entry-preference strong[data-v-2c14cbfa]{font-size:14px;font-weight:600}.mnr-entry-preference small[data-v-2c14cbfa]{opacity:.68;margin-top:3px;font-size:12px;line-height:1.5}.mnr-entry-prompt-actions[data-v-2c14cbfa]{grid-template-columns:1fr 1.25fr;gap:10px;display:grid}.mnr-entry-button[data-v-2c14cbfa]{cursor:pointer;border:1px solid #0000;border-radius:9px;min-height:44px;padding:10px 14px;font-size:14px;font-weight:600;transition:filter .18s,background .18s}.mnr-entry-button.secondary[data-v-2c14cbfa]{border-color:var(--mnr-border,#ddd);color:var(--mnr-text,#555);background:0 0}.mnr-entry-button.primary[data-v-2c14cbfa]{background:var(--mnr-link,#1976d2);color:var(--mnr-on-link,#fff)}.mnr-entry-button[data-v-2c14cbfa]:focus-visible,.mnr-entry-preference input[data-v-2c14cbfa]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}@media (hover:hover){.mnr-entry-button[data-v-2c14cbfa]:hover{filter:brightness(.94)}.mnr-entry-button.secondary[data-v-2c14cbfa]:hover{background:var(--mnr-border,#f0f0f0)}}.mnr-entry-prompt-fade-enter-active[data-v-2c14cbfa],.mnr-entry-prompt-fade-leave-active[data-v-2c14cbfa]{transition:opacity .24s}.mnr-entry-prompt-fade-enter-from[data-v-2c14cbfa],.mnr-entry-prompt-fade-leave-to[data-v-2c14cbfa]{opacity:0}@keyframes mnr-entry-prompt-in-2c14cbfa{0%{opacity:0;transform:translateY(12px)scale(.98)}}@media (width<=480px){.mnr-entry-prompt-card[data-v-2c14cbfa]{padding:20px}.mnr-entry-prompt-header[data-v-2c14cbfa]{gap:12px}.mnr-entry-prompt-icon[data-v-2c14cbfa]{flex-basis:40px;width:40px;height:40px}}@media (prefers-reduced-motion:reduce){.mnr-entry-prompt-card[data-v-2c14cbfa],.mnr-entry-button[data-v-2c14cbfa],.mnr-entry-prompt-fade-enter-active[data-v-2c14cbfa],.mnr-entry-prompt-fade-leave-active[data-v-2c14cbfa]{transition:none;animation:none}}.mnr-progress[data-v-fb6f172c]{z-index:1000;height:3px;transition:opacity .3s;position:fixed;top:0;left:0;right:0}.mnr-progress.hidden[data-v-fb6f172c]{opacity:0}.mnr-progress-bar[data-v-fb6f172c]{background:var(--mnr-link,#1976d2);height:100%;transition:width .1s ease-out}.mnr-progress-text[data-v-fb6f172c]{color:#fff;background:#000000b3;border-radius:4px;padding:4px 8px;font-size:12px;position:absolute;top:8px;right:8px}@media (prefers-reduced-motion:reduce){.mnr-progress[data-v-fb6f172c],.mnr-progress-bar[data-v-fb6f172c]{transition:none}}.mnr-floating-toolbar[data-v-99e4013e]{top:max(12px, env(safe-area-inset-top));left:max(12px, env(safe-area-inset-left));right:max(12px, env(safe-area-inset-right));pointer-events:none;z-index:100;justify-content:space-between;display:flex;position:fixed}.mnr-fab[data-v-99e4013e]{pointer-events:auto;background:var(--mnr-bg,#fff);width:44px;height:44px;color:var(--mnr-text,#333);border:1px solid var(--mnr-border,#e5e5e5);cursor:pointer;-webkit-tap-highlight-color:transparent;border-radius:50%;justify-content:center;align-items:center;padding:0;font-size:18px;transition:all .2s cubic-bezier(.25,.8,.25,1);display:flex;position:relative;box-shadow:0 4px 12px #00000026}.mnr-fab[data-v-99e4013e]:hover{background:var(--mnr-border,#f0f0f0);transform:translateY(-2px);box-shadow:0 6px 16px #0003}.mnr-fab[data-v-99e4013e]:active{transform:scale(.95)}.mnr-fab[data-v-99e4013e]:disabled{opacity:.6;cursor:not-allowed;box-shadow:none;transform:none}.mnr-icon[data-v-99e4013e]{fill:none;stroke:currentColor;stroke-width:1.8px;stroke-linecap:round;stroke-linejoin:round;flex:none;width:22px;height:22px;display:block}.mnr-fab[data-v-99e4013e]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}.mnr-fade-slide-enter-active[data-v-99e4013e],.mnr-fade-slide-leave-active[data-v-99e4013e]{transition:opacity .3s,transform .3s}.mnr-fade-slide-enter-from[data-v-99e4013e],.mnr-fade-slide-leave-to[data-v-99e4013e]{opacity:0;transform:translateY(-20px)}@media (prefers-reduced-motion:reduce){.mnr-fab[data-v-99e4013e],.mnr-fade-slide-enter-active[data-v-99e4013e],.mnr-fade-slide-leave-active[data-v-99e4013e]{transition:none}}.mnr-spinner[data-v-c925c262]{border-radius:50%;animation:.8s cubic-bezier(.4,0,.2,1) infinite mnr-spin-c925c262}.mnr-spinner.small[data-v-c925c262]{border:2px solid var(--mnr-border,#e0e0e0);border-top-color:var(--mnr-link,#1976d2);width:24px;height:24px;animation-duration:1s;animation-timing-function:linear}.mnr-spinner.medium[data-v-c925c262]{border:4px solid var(--mnr-border,#e0e0e0);border-top-color:var(--mnr-link,#1976d2);width:48px;height:48px}.mnr-spinner.large[data-v-c925c262]{border:4px solid var(--mnr-border,#e0e0e0);border-top-color:var(--mnr-link,#1976d2);width:64px;height:64px}@keyframes mnr-spin-c925c262{to{transform:rotate(360deg)}}.mnr-toast[data-v-baea3e69]{bottom:max(32px, env(safe-area-inset-bottom));-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);color:#fff;cursor:pointer;z-index:1001;white-space:nowrap;text-overflow:ellipsis;background:#1e1e1ee6;border-radius:50px;align-items:center;gap:8px;max-width:90vw;padding:14px 28px;font-size:15px;font-weight:500;display:flex;position:fixed;left:50%;overflow:hidden;transform:translate(-50%);box-shadow:0 8px 24px #0003}.mnr-toast--error[data-v-baea3e69]{background:#d32f2ff2}.mnr-toast-enter-active[data-v-baea3e69],.mnr-toast-leave-active[data-v-baea3e69]{transition:all .4s cubic-bezier(.175,.885,.32,1.275)}.mnr-toast-enter-from[data-v-baea3e69],.mnr-toast-leave-to[data-v-baea3e69]{opacity:0;transform:translate(-50%)translateY(40px)scale(.9)}@media (prefers-reduced-motion:reduce){.mnr-toast-enter-active[data-v-baea3e69],.mnr-toast-leave-active[data-v-baea3e69]{transition:none}}.mnr-drawer[data-v-9f97c115]{z-index:1001;width:min(88%,340px);padding-left:env(safe-area-inset-left);background:var(--mnr-bg,#fff);color:var(--mnr-text,#333);flex-direction:column;transition:transform .24s;display:flex;position:fixed;inset:0 auto 0 0;transform:translate(-105%);box-shadow:4px 0 20px #00000026}.mnr-drawer.open[data-v-9f97c115]{transform:translate(0)}.mnr-drawer-overlay[data-v-9f97c115]{z-index:1000;background:#00000080;position:fixed;inset:0}.mnr-drawer-header[data-v-9f97c115]{padding:max(16px, env(safe-area-inset-top)) 16px 14px;border-bottom:1px solid var(--mnr-border,#e5e5e5);flex-shrink:0;justify-content:space-between;align-items:center;gap:12px;display:flex}.mnr-drawer-heading[data-v-9f97c115]{min-width:0}.mnr-drawer-title[data-v-9f97c115]{overflow-wrap:anywhere;-webkit-line-clamp:2;-webkit-box-orient:vertical;margin:0;font-size:16px;font-weight:600;line-height:1.5;display:-webkit-box;overflow:hidden}.mnr-drawer-position[data-v-9f97c115]{color:var(--mnr-text,#666);opacity:.72;margin-top:3px;font-size:12px;display:block}.mnr-drawer-close[data-v-9f97c115]{width:36px;height:36px;color:inherit;cursor:pointer;background:0 0;border:0;border-radius:50%;flex:0 0 36px;place-items:center;padding:0;display:grid}.mnr-drawer-close svg[data-v-9f97c115]{fill:none;stroke:currentColor;stroke-width:2px;stroke-linecap:round;width:20px;height:20px}.mnr-drawer-search[data-v-9f97c115]{flex-shrink:0;padding:10px 12px 6px}.mnr-drawer-search input[data-v-9f97c115]{border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);width:100%;color:var(--mnr-text,#333);border-radius:8px;padding:9px 12px;font-size:14px}.mnr-offline-section[data-v-9f97c115]{border-bottom:1px solid var(--mnr-border,#e5e5e5);flex-shrink:0;padding:10px 12px 12px}.mnr-offline-main[data-v-9f97c115]{justify-content:space-between;align-items:center;gap:12px;display:flex}.mnr-offline-copy[data-v-9f97c115]{min-width:0}.mnr-offline-copy strong[data-v-9f97c115],.mnr-offline-copy span[data-v-9f97c115]{display:block}.mnr-offline-copy strong[data-v-9f97c115]{font-size:13px;font-weight:600}.mnr-offline-copy span[data-v-9f97c115]{color:var(--mnr-text,#666);opacity:.7;margin-top:2px;font-size:12px}.mnr-offline-action[data-v-9f97c115]{border:1px solid var(--mnr-border,#ddd);min-height:36px;color:var(--mnr-link,#1976d2);cursor:pointer;background:0 0;border-radius:8px;padding:6px 11px;font-size:12px;font-weight:600}.mnr-offline-action[data-v-9f97c115]:disabled{cursor:wait;opacity:.6}.mnr-offline-action.primary[data-v-9f97c115]{border-color:var(--mnr-link,#1976d2);background:var(--mnr-link,#1976d2);color:var(--mnr-on-link,#fff);flex:none}.mnr-offline-action.danger[data-v-9f97c115]{color:var(--mnr-text,#555)}.mnr-offline-secondary[data-v-9f97c115]{flex-wrap:wrap;gap:6px;margin-top:8px;display:flex}.mnr-drawer-state[data-v-9f97c115]{color:var(--mnr-text,#666);text-align:center;opacity:.78;flex:1;justify-content:center;align-items:center;gap:10px;padding:40px 20px;display:flex}.mnr-drawer-content[data-v-9f97c115]{overscroll-behavior:contain;-webkit-overflow-scrolling:touch;flex:1;position:relative;overflow-y:auto}.mnr-cache-progress-track[data-v-9f97c115]{background:var(--mnr-border,#e0e0e0);border-radius:2px;height:4px;margin-top:10px;overflow:hidden}.mnr-cache-progress-fill[data-v-9f97c115]{background:var(--mnr-link,#1976d2);height:100%;transition:width .2s}.mnr-chapter-list[data-v-9f97c115]{margin:0;padding-left:0;padding-right:0;list-style:none}.mnr-chapter-list li[data-v-9f97c115]{height:44px}.mnr-chapter-button[data-v-9f97c115]{width:100%;height:44px;color:inherit;text-align:left;cursor:pointer;background:0 0;border:0;border-left:3px solid #0000;align-items:center;gap:6px;padding:0 14px;font-size:14px;display:flex;overflow:hidden}.mnr-chapter-title-text[data-v-9f97c115]{text-overflow:ellipsis;white-space:nowrap;overflow:hidden}.mnr-chapter-button.active[data-v-9f97c115]{border-left-color:var(--mnr-link,#1976d2);background:color-mix(in srgb, var(--mnr-link,#1976d2) 10%, transparent);color:var(--mnr-link,#1976d2);font-weight:600}.mnr-chapter-button.persisted[data-v-9f97c115],.mnr-cache-mark[data-v-9f97c115]{color:#388e3c}.mnr-cache-mark[data-v-9f97c115]{flex:none;width:14px;height:14px}.mnr-cache-mark svg[data-v-9f97c115]{fill:none;stroke:currentColor;stroke-width:2px;stroke-linecap:round;stroke-linejoin:round;width:100%;height:100%;display:block}.mnr-drawer-close[data-v-9f97c115]:hover,.mnr-chapter-button[data-v-9f97c115]:hover,.mnr-offline-action[data-v-9f97c115]:hover{background:var(--mnr-border,#f0f0f0)}.mnr-offline-action.primary[data-v-9f97c115]:hover{background:var(--mnr-link,#1976d2);filter:brightness(.94)}.mnr-drawer-close[data-v-9f97c115]:focus-visible,.mnr-drawer-search input[data-v-9f97c115]:focus-visible,.mnr-offline-action[data-v-9f97c115]:focus-visible,.mnr-chapter-button[data-v-9f97c115]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:-3px}.mnr-visually-hidden[data-v-9f97c115]{clip:rect(0 0 0 0);white-space:nowrap;clip-path:inset(50%);width:1px;height:1px;position:absolute;overflow:hidden}.mnr-fade-enter-active[data-v-9f97c115],.mnr-fade-leave-active[data-v-9f97c115]{transition:opacity .24s}.mnr-fade-enter-from[data-v-9f97c115],.mnr-fade-leave-to[data-v-9f97c115]{opacity:0}@media (prefers-reduced-motion:reduce){.mnr-drawer[data-v-9f97c115],.mnr-fade-enter-active[data-v-9f97c115],.mnr-fade-leave-active[data-v-9f97c115],.mnr-cache-progress-fill[data-v-9f97c115]{transition:none}}.mnr-reading-control[data-v-e6745e69]{margin-top:18px}.mnr-reading-control-header[data-v-e6745e69]{justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:4px;display:flex}.mnr-reading-control-header label[data-v-e6745e69]{color:var(--mnr-text,#333);font-size:14px;font-weight:600}.mnr-reading-control-header output[data-v-e6745e69]{color:var(--mnr-text,#666);opacity:.78;font-size:13px}.mnr-reading-slider-row[data-v-e6745e69]{align-items:center;gap:10px;display:flex}.mnr-reading-slider-row span[data-v-e6745e69]{color:var(--mnr-text,#666);text-align:center;flex:0 0 24px;font-size:13px}.mnr-reading-slider-row input[data-v-e6745e69]{appearance:none;cursor:pointer;touch-action:pan-y;background:0 0;flex:1;min-width:0;height:32px;margin:0}.mnr-reading-slider-row input[data-v-e6745e69]::-webkit-slider-runnable-track{background:var(--mnr-border,#e0e0e0);border-radius:2px;height:4px}.mnr-reading-slider-row input[data-v-e6745e69]::-webkit-slider-thumb{appearance:none;background:var(--mnr-link,#1976d2);border:0;border-radius:50%;width:24px;height:24px;margin-top:-10px}.mnr-reading-slider-row input[data-v-e6745e69]::-moz-range-track{background:var(--mnr-border,#e0e0e0);border-radius:2px;height:4px}.mnr-reading-slider-row input[data-v-e6745e69]::-moz-range-thumb{background:var(--mnr-link,#1976d2);border:0;border-radius:50%;width:24px;height:24px}.mnr-reading-slider-row input[data-v-e6745e69]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}.mnr-settings-overlay[data-v-2853a120]{z-index:1000;background:#00000080;justify-content:flex-end;display:flex;position:fixed;inset:0}.mnr-settings-panel[data-v-2853a120]{width:min(100%,380px);height:100%;padding-right:env(safe-area-inset-right);background:var(--mnr-bg,#fff);color:var(--mnr-text,#333);flex-direction:column;display:flex;box-shadow:-4px 0 20px #00000026}.mnr-settings-header[data-v-2853a120]{padding:max(16px, env(safe-area-inset-top)) 16px 16px;border-bottom:1px solid var(--mnr-border,#e0e0e0);flex-shrink:0;justify-content:space-between;align-items:center;display:flex}.mnr-settings-header h3[data-v-2853a120],.mnr-settings-section h4[data-v-2853a120],.mnr-field-label[data-v-2853a120]{color:var(--mnr-text,#333);margin:0}.mnr-settings-header h3[data-v-2853a120]{border-radius:4px;font-size:18px}.mnr-close-btn[data-v-2853a120]{width:36px;height:36px;color:inherit;cursor:pointer;background:0 0;border:0;border-radius:50%;place-items:center;padding:0;display:grid}.mnr-close-btn svg[data-v-2853a120]{fill:none;stroke:currentColor;stroke-width:2px;stroke-linecap:round;width:20px;height:20px}.mnr-settings-content[data-v-2853a120]{overscroll-behavior:contain;flex:1;padding:18px 16px 24px;overflow:auto}.mnr-settings-section h4[data-v-2853a120],.mnr-field-label[data-v-2853a120],.mnr-settings-fieldset legend[data-v-2853a120]{margin-bottom:10px;font-size:14px;font-weight:600;display:block}.mnr-theme-grid[data-v-2853a120]{grid-template-columns:repeat(3,1fr);gap:8px;display:grid}.mnr-theme-btn[data-v-2853a120]{cursor:pointer;border:2px solid #0000;border-radius:8px;min-width:0;min-height:42px;padding:8px 4px;font-size:12px}.mnr-reading-preview[data-v-2853a120]{border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);color:var(--mnr-text,#333);border-radius:8px;margin-top:16px;padding:12px 14px;display:none}.mnr-reading-preview span[data-v-2853a120]{opacity:.65;margin-bottom:4px;font-size:12px;display:block}.mnr-reading-preview p[data-v-2853a120]{font-family:var(--mnr-font-family,system-ui, sans-serif);font-size:var(--mnr-font-size,18px);line-height:var(--mnr-line-height,1.8);letter-spacing:var(--mnr-letter-spacing,0);text-indent:var(--mnr-paragraph-indent,2em);margin:0}.mnr-field-label[data-v-2853a120]{margin-top:18px}.mnr-select[data-v-2853a120]{border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);width:100%;min-height:42px;color:var(--mnr-text,#333);border-radius:8px;padding:9px 12px;font-size:14px}.mnr-settings-fieldset[data-v-2853a120]{border:0;min-width:0;margin:18px 0 0;padding:0}.mnr-segmented-control[data-v-2853a120]{border:1px solid var(--mnr-border,#ddd);border-radius:8px;display:flex;overflow:hidden}.mnr-segment[data-v-2853a120]{border:0;border-right:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);min-height:42px;color:var(--mnr-text,#666);cursor:pointer;flex:1;padding:9px 12px;font-size:14px}.mnr-segment[data-v-2853a120]:last-child{border-right:0}.mnr-segment.active[data-v-2853a120]{background:var(--mnr-link,#1976d2);color:var(--mnr-on-link,#fff)}.mnr-secondary-action[data-v-2853a120]{border:1px solid var(--mnr-border,#ddd);width:100%;min-height:42px;color:var(--mnr-text,#333);cursor:pointer;background:0 0;border-radius:8px;margin-top:16px;padding:9px 12px;font-size:14px}.mnr-settings-group[data-v-2853a120]{border-top:1px solid var(--mnr-border,#ddd);margin-top:18px}.mnr-settings-group summary[data-v-2853a120]{min-height:48px;color:var(--mnr-text,#333);cursor:pointer;padding:14px 0;font-size:14px;font-weight:600}.mnr-settings-group-content[data-v-2853a120]{padding-bottom:4px}.mnr-settings-group-content[data-v-2853a120]>:first-child{margin-top:0}.mnr-switch-row[data-v-2853a120]{min-height:44px;color:var(--mnr-text,#333);cursor:pointer;justify-content:space-between;align-items:center;gap:16px;display:flex}.mnr-switch-row input[data-v-2853a120]{width:22px;height:22px;accent-color:var(--mnr-link,#1976d2);flex:none}.mnr-custom-css[data-v-2853a120]{box-sizing:border-box;resize:vertical;border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);width:100%;min-height:110px;color:var(--mnr-text,#333);border-radius:8px;padding:10px 12px;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}.mnr-cleanup-fields[data-v-2853a120]{gap:10px;margin-top:8px;display:grid}.mnr-cleanup-fields .mnr-field-label[data-v-2853a120],.mnr-cleanup-fields .mnr-field-help[data-v-2853a120],.mnr-cleanup-fields .mnr-field-error[data-v-2853a120]{margin:0}.mnr-cleanup-editor-label[data-v-2853a120],.mnr-cleanup-guide[data-v-2853a120]{font-size:12px;line-height:1.6}.mnr-cleanup-guide[data-v-2853a120]{color:var(--mnr-text,#333)}.mnr-cleanup-guide summary[data-v-2853a120]{cursor:pointer;opacity:.72}.mnr-cleanup-guide p[data-v-2853a120]{margin:8px 0 0}.mnr-cleanup-guide code[data-v-2853a120]{overflow-wrap:anywhere}.mnr-cleanup-add[data-v-2853a120]{grid-template-columns:minmax(0,1fr) auto;gap:8px;display:grid}.mnr-cleanup-input[data-v-2853a120]{box-sizing:border-box;border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);min-width:0;min-height:42px;color:var(--mnr-text,#333);border-radius:8px;padding:9px 12px;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}.mnr-cleanup-add-button[data-v-2853a120]{white-space:nowrap;width:auto;margin-top:0}.mnr-cleanup-add-button[data-v-2853a120]:disabled{cursor:not-allowed;opacity:.55}.mnr-cleanup-site[data-v-2853a120]{overflow-wrap:anywhere}.mnr-field-help[data-v-2853a120],.mnr-field-error[data-v-2853a120]{margin:-4px 0 8px;font-size:12px;line-height:1.5}.mnr-field-help[data-v-2853a120]{opacity:.72}.mnr-field-error[data-v-2853a120]{color:#c93f49;margin-top:6px}.mnr-settings-footer[data-v-2853a120]{padding:10px 16px max(12px, env(safe-area-inset-bottom));border-top:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);flex-shrink:0}.mnr-exit-btn[data-v-2853a120]{color:#c93f49;cursor:pointer;background:0 0;border:1px solid #c93f49;border-radius:8px;width:100%;min-height:42px;padding:9px 12px;font-size:14px}.mnr-close-btn[data-v-2853a120]:hover,.mnr-secondary-action[data-v-2853a120]:hover,.mnr-segment[data-v-2853a120]:hover,.mnr-exit-btn[data-v-2853a120]:hover{background:var(--mnr-border,#f0f0f0)}.mnr-settings-header h3[data-v-2853a120]:focus-visible,.mnr-close-btn[data-v-2853a120]:focus-visible,.mnr-theme-btn[data-v-2853a120]:focus-visible,.mnr-select[data-v-2853a120]:focus-visible,.mnr-segment[data-v-2853a120]:focus-visible,.mnr-secondary-action[data-v-2853a120]:focus-visible,.mnr-settings-group summary[data-v-2853a120]:focus-visible,.mnr-cleanup-guide summary[data-v-2853a120]:focus-visible,.mnr-switch-row input[data-v-2853a120]:focus-visible,.mnr-cleanup-input[data-v-2853a120]:focus-visible,.mnr-custom-css[data-v-2853a120]:focus-visible,.mnr-exit-btn[data-v-2853a120]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}.mnr-slide-enter-active[data-v-2853a120],.mnr-slide-leave-active[data-v-2853a120],.mnr-settings-panel[data-v-2853a120]{transition:opacity .22s,transform .22s}.mnr-slide-enter-from[data-v-2853a120],.mnr-slide-leave-to[data-v-2853a120]{opacity:0}.mnr-slide-enter-from .mnr-settings-panel[data-v-2853a120],.mnr-slide-leave-to .mnr-settings-panel[data-v-2853a120]{transform:translate(100%)}@media (width<=600px){.mnr-settings-panel[data-v-2853a120]{width:100%}.mnr-reading-preview[data-v-2853a120]{display:block}.mnr-desktop-width[data-v-2853a120]{display:none}}@media (prefers-reduced-motion:reduce){.mnr-slide-enter-active[data-v-2853a120],.mnr-slide-leave-active[data-v-2853a120],.mnr-settings-panel[data-v-2853a120]{transition:none}}.mnr-reader[data-v-ce31caf8]{z-index:2147483647;background:var(--mnr-bg,#fff);color:var(--mnr-text,#1a1a1a);overscroll-behavior:none;flex-direction:column;display:flex;position:fixed;inset:0;overflow:hidden}.mnr-reader-main[data-v-ce31caf8]{padding-top:68px;padding-bottom:max(40px, env(safe-area-inset-bottom));overscroll-behavior:none;-webkit-overflow-scrolling:touch;touch-action:pan-y pinch-zoom;flex:1;overflow:auto}.mnr-boundary-gesture-hint[data-v-ce31caf8]{z-index:4;background:color-mix(in srgb, var(--mnr-text,#1a1a1a) 86%, transparent);max-width:calc(100vw - 32px);color:var(--mnr-bg,#fff);white-space:nowrap;pointer-events:none;border-radius:999px;padding:8px 14px;font-size:14px;line-height:1.4;position:fixed;left:50%;transform:translate(-50%)}.mnr-boundary-gesture-hint.is-prev[data-v-ce31caf8]{top:max(16px, env(safe-area-inset-top))}.mnr-boundary-gesture-hint.is-next[data-v-ce31caf8]{bottom:max(16px, env(safe-area-inset-bottom))}.mnr-reader-content[data-v-ce31caf8]{max-width:var(--mnr-max-width,800px);padding:var(--mnr-padding,20px);font-family:var(--mnr-font-family,\"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif);font-size:var(--mnr-font-size,18px);line-height:var(--mnr-line-height,1.8);letter-spacing:var(--mnr-letter-spacing,0em);margin:0 auto}.mnr-reader-content[data-v-ce31caf8] p{text-indent:var(--mnr-paragraph-indent,2em);margin:0 0 1em}.mnr-reader-content[data-v-ce31caf8] img{max-width:100%;height:auto;margin:1em auto;display:block}.mnr-reader-content[data-v-ce31caf8] a{color:var(--mnr-link,#1976d2)}.mnr-reader-main[data-v-ce31caf8]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}.mnr-chapter-title[data-v-ce31caf8]{color:var(--mnr-text,#1a1a1a);text-align:center;margin:0 0 1em;font-size:1.5em;font-weight:700;line-height:1.4}.mnr-chapter-end[data-v-ce31caf8]{max-width:var(--mnr-max-width,800px);text-align:center;margin:0 auto;padding:40px 20px}.mnr-chapter-end-text[data-v-ce31caf8]{color:var(--mnr-text,#666);opacity:.7;margin-bottom:16px}.mnr-chapter-nav[data-v-ce31caf8]{flex-wrap:wrap;justify-content:center;gap:24px;display:flex}.mnr-chapter-link[data-v-ce31caf8]{color:var(--mnr-link,#1976d2);border:1px solid var(--mnr-border,#e0e0e0);border-radius:8px;padding:12px 24px;text-decoration:none;transition:all .2s}.mnr-chapter-link[data-v-ce31caf8]:hover{background:var(--mnr-border,#f0f0f0)}.mnr-sentinel[data-v-ce31caf8]{visibility:hidden;width:100%;height:1px}.mnr-loading-prev[data-v-ce31caf8],.mnr-loading-next[data-v-ce31caf8]{color:var(--mnr-text,#666);justify-content:center;align-items:center;gap:12px;padding:24px;display:flex}@media (width>=768px){.mnr-reader-content[data-v-ce31caf8]{padding:var(--mnr-padding,30px)}}@media (width>=1024px){.mnr-reader-content[data-v-ce31caf8]{padding:var(--mnr-padding,40px)}}@media (prefers-reduced-motion:reduce){.mnr-chapter-link[data-v-ce31caf8]{transition:none}}\n/*$vite$:1*/", {});
 	})();
 })();

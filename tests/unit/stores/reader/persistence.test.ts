@@ -65,7 +65,7 @@ describe('ReaderStore - persistence', () => {
     });
 
     const now = vi.spyOn(Date, 'now').mockReturnValue(1234);
-    await store.persistCache();
+    store.persistCache();
     now.mockRestore();
 
     expect(gm.GM_setValue).toHaveBeenCalled();
@@ -109,7 +109,7 @@ describe('ReaderStore - persistence', () => {
       method: 'rule',
     });
 
-    await store.restoreCache();
+    store.restoreCache();
     expect(Array.from(store.persistedUrls)).toEqual(['https://example.com/book/1/10.html']);
   });
 
@@ -140,13 +140,13 @@ describe('ReaderStore - persistence', () => {
       },
       cachedAt: 1,
     });
-    await store.persistCache();
+    store.persistCache();
     expect(store.persistedUrls.size).toBeGreaterThan(0);
     const sessionCacheSize = store.cachedContents.size;
     expect(sessionCacheSize).toBeGreaterThan(0);
 
     const beforeKeys = new Set(gm.store.keys());
-    await store.clearPersistedCache();
+    store.clearPersistedCache();
 
     expect(store.persistedUrls.size).toBe(0);
     expect(store.cachedContents.size).toBe(sessionCacheSize);
@@ -182,7 +182,7 @@ describe('ReaderStore - persistence', () => {
     });
 
     store.persistedUrls.clear();
-    await store.clearPersistedCache();
+    store.clearPersistedCache();
 
     expect(gm.store.has(`${chapterPrefix}a`)).toBe(false);
     expect(gm.store.has(`${chapterPrefix}b`)).toBe(false);
@@ -221,7 +221,7 @@ describe('ReaderStore - persistence', () => {
       },
       cachedAt: 1,
     });
-    await store.persistCache();
+    store.persistCache();
 
     // Force the store to read from persisted storage rather than the session cache.
     store.cachedContents.clear();

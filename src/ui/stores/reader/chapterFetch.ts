@@ -147,7 +147,7 @@ export async function loadRuleApiDocument(
   url: string,
   reference: Pick<ParsedChapter, 'bookTitle' | 'indexUrl' | 'url'>
 ): Promise<Document | null> {
-  const match = await getRuleManager().matchRule(url);
+  const match = getRuleManager().matchRule(url);
   const fetchDocument = match?.rule.hooks?.fetchDocument;
   if (!fetchDocument) return null;
 

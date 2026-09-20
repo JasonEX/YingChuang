@@ -54,8 +54,8 @@ export interface CacheAllContext {
   // Callbacks
   /** The reader's single TOC loader; it reports missing or empty TOCs itself. */
   loadToc: () => Promise<void>;
-  restoreCache: () => Promise<void>;
-  persistCache: (skipChapterUrls?: ReadonlySet<string>) => Promise<void>;
+  restoreCache: () => void;
+  persistCache: (skipChapterUrls?: ReadonlySet<string>) => void;
   showToast: (message: string, type?: 'info' | 'error', duration?: number) => void;
 }
 
@@ -88,8 +88,7 @@ export function createCacheAll(ctx: CacheAllContext) {
       }
 
       // Ensure we have the latest persistedUrls before building the task list.
-      await ctx.restoreCache();
-      if (!isCurrent()) return;
+      ctx.restoreCache();
       const persistedSet = new Set(ctx.persistedUrls.value);
       const cacheBook = getCurrentBookCacheKey(ctx.chapter.value?.indexUrl);
       const indexUrlKey = cacheBook ? normalizeUrlForBlock(cacheBook.indexUrl) : null;
@@ -140,8 +139,7 @@ export function createCacheAll(ctx: CacheAllContext) {
             ctx.showToast('目录中没有可缓存的章节', 'info');
             return;
           }
-          await ctx.persistCache();
-          if (!isCurrent()) return;
+          ctx.persistCache();
           ctx.showToast('本书章节已全部缓存', 'info');
         }
         return;
@@ -325,8 +323,7 @@ export function createCacheAll(ctx: CacheAllContext) {
       if (cacheBook && persistedSet.size > 0) {
         ctx.persistedUrls.value = persistedSet;
       }
-      await ctx.persistCache(writtenUrls);
-      if (!isCurrent()) return;
+      ctx.persistCache(writtenUrls);
 
       if (ctx.cacheProgress.value.failed > 0) {
         ctx.showToast(`缓存完成，${ctx.cacheProgress.value.failed} 章失败`, 'error', 3500);

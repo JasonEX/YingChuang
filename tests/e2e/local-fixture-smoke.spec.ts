@@ -1825,6 +1825,13 @@ test('keeps generic chapter extraction, template TOC and cached navigation in th
   await expect(page).toHaveURL('http://mnr.test/read/123/501.html');
   await expect(root.locator('.mnr-reader')).toBeVisible();
 
+  // Directory selection can replace an ongoing smooth jump; the latest choice owns the view.
+  for (const chapter of [500, 501]) {
+    await root.getByRole('button', { name: '打开目录' }).click();
+    await root.getByRole('button', { name: `第${chapter}章 风起，云涌`, exact: true }).click();
+    await expect(page).toHaveURL(`http://mnr.test/read/123/${chapter}.html`);
+  }
+
   // Respect the shared smooth-navigation lock before the next keyboard command.
   await page.waitForTimeout(800);
   await page.keyboard.press('ArrowRight');

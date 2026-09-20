@@ -15,7 +15,6 @@ export interface AutoLoadPolicyInput {
   graceUntil: number;
   hasChapter: boolean;
   hasNext: boolean;
-  isLoading: boolean;
   isLoadingNext: boolean;
   isLoadingPrev: boolean;
   isNavigating: boolean;
@@ -72,7 +71,6 @@ function canAutoLoadBase(input: AutoLoadPolicyInput): boolean {
     input.hasNext &&
     !input.isLoadingNext &&
     !input.isLoadingPrev &&
-    !input.isLoading &&
     !input.isNavigating &&
     !input.autoLoadInFlight &&
     !input.pageHidden &&

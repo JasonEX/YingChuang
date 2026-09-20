@@ -47,8 +47,7 @@ export function createNavigation(ctx: NavigationContext) {
         return await insertCachedChapter(ctx, cached, load.isNext ? 'append' : 'prepend');
       }
       if (ctx.persistedUrls.value.has(load.targetUrl)) {
-        const persisted = await ctx.getPersistedCachedChapter(load.targetUrl);
-        if (ctx.runtime.isViewStale(runId)) return false;
+        const persisted = ctx.getPersistedCachedChapter(load.targetUrl);
         if (persisted) {
           const sessionCached = { ...persisted, cachedAt: Date.now() };
           ctx.cachedContents.value.set(load.targetUrl, sessionCached);
@@ -234,7 +233,7 @@ export function createNavigation(ctx: NavigationContext) {
    * Rebuild chapters array around a target URL (for jumping to cached chapter)
    */
   async function rebuildChaptersAround(targetUrl: string): Promise<boolean> {
-    const runId = ctx.runtime.bumpView();
+    ctx.runtime.bumpView();
     const url = normalizeUrlForFetch(targetUrl);
     ctx.pendingNextAbort.value?.();
     ctx.pendingNextAbort.value = null;
@@ -242,15 +241,13 @@ export function createNavigation(ctx: NavigationContext) {
     ctx.pendingPrevAbort.value = null;
     ctx.reloadAbort.value?.();
     ctx.reloadAbort.value = null;
-    ctx.isLoading.value = false;
     ctx.isLoadingPrev.value = false;
     ctx.isLoadingNext.value = false;
 
     // Check cachedContents first
     let cached = ctx.cachedContents.value.get(url);
     if (!cached && ctx.persistedUrls.value.has(url)) {
-      const persisted = await ctx.getPersistedCachedChapter(url);
-      if (ctx.runtime.isViewStale(runId)) return false;
+      const persisted = ctx.getPersistedCachedChapter(url);
       if (persisted) {
         cached = { ...persisted, cachedAt: Date.now() };
         ctx.cachedContents.value.set(url, cached);
@@ -258,9 +255,8 @@ export function createNavigation(ctx: NavigationContext) {
       }
     }
     if (!cached) return false;
-    if (ctx.runtime.isViewStale(runId)) return false;
 
-    return rebuildChaptersFromCache(ctx, cached, url);
+    return rebuildChaptersFromCache(ctx, cached);
   }
 
   /**

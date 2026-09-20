@@ -112,11 +112,6 @@
       @exit="emit('exit')"
     />
 
-    <!-- Loading overlay -->
-    <MnrLoadingOverlay v-if="readerStore.isLoading">
-      <span>加载中...</span>
-    </MnrLoadingOverlay>
-
     <!-- Toast message -->
     <MnrToast
       :message="readerStore.error ?? ''"
@@ -146,7 +141,7 @@ import ProgressIndicator from './ProgressIndicator.vue';
 import FloatingToolbar from './FloatingToolbar.vue';
 import ChapterDrawer from './ChapterDrawer.vue';
 import SettingsPanel from '@/ui/components/settings/SettingsPanel.vue';
-import { MnrSpinner, MnrToast, MnrLoadingOverlay } from '@/ui/components/common';
+import { MnrSpinner, MnrToast } from '@/ui/components/common';
 import {
   compileCustomParagraphFilters,
   filterCustomParagraphs,
@@ -253,7 +248,6 @@ const SCROLL_BOUNDARY_EPSILON_PX = 4;
 const gesturesIdle = computed(
   () =>
     !hasOpenPanel.value &&
-    !readerStore.isLoading &&
     !readerStore.isLoadingPrev &&
     !readerStore.isLoadingNext &&
     !isNavigating.value
@@ -351,9 +345,9 @@ function handleCacheAll() {
   void readerStore.startCacheAll();
 }
 
-async function handleClearCache() {
+function handleClearCache() {
   if (!window.confirm('确定要清除本书的离线缓存吗？')) return;
-  await readerStore.clearPersistedCache();
+  readerStore.clearPersistedCache();
   readerStore.showToast('离线缓存已清除', 'info');
 }
 
