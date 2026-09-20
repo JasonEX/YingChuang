@@ -3,7 +3,7 @@
 // @name:zh-CN         萤窗
 // @name:zh-TW         螢窗
 // @namespace          https://github.com/JasonEX
-// @version            1.0.1
+// @version            1.0.2
 // @author             JasonEX
 // @description        萤窗：小说阅读脚本，智能正文识别、连续阅读、阅读位置恢复、简繁转换
 // @description:zh-CN  萤窗：小说阅读脚本，智能正文识别、连续阅读、阅读位置恢复、简繁转换
@@ -6458,6 +6458,19 @@
 			exampleUrl: "https://www.hetushu.com/book/9145/6567989.html"
 		}
 	};
+	var kudushu_exports = __exportAll({ kudushuRule: () => kudushuRule });
+	var kudushuRule = {
+		id: "kudushu",
+		name: "苦读书（移动版）",
+		version: 1,
+		match: { pattern: "^https?://m\\.kudushu\\.org/html/\\d+/\\d+(?:_\\d+)?/(?:[?#].*)?$" },
+		content: { selector: "#novelcontent" },
+		toc: { selector: ".info_menu1 .list_xm:has(> .listpage) > ul" },
+		meta: {
+			source: "builtin",
+			exampleUrl: "https://m.kudushu.org/html/1088392/146537147/"
+		}
+	};
 	var qidian_exports$1 = __exportAll({
 		qidianMobileRule: () => qidianMobileRule,
 		qidianRule: () => qidianRule,
@@ -6931,6 +6944,19 @@
 			exampleUrl: "https://www.uuread.tw/chapter/1880014/2545609.html"
 		}
 	};
+	var wxsl_exports = __exportAll({ wxslRule: () => wxslRule });
+	var wxslRule = {
+		id: "wxsl",
+		name: "森林文学",
+		version: 1,
+		match: { pattern: "^https?://www\\.2wxsl\\.com/book/\\d+/\\d+(?:_\\d+)?\\.html(?:[?#].*)?$" },
+		content: { selector: "#content" },
+		toc: { selector: ".row-section .section-box:has(+ .listpage) > .section-list" },
+		meta: {
+			source: "builtin",
+			exampleUrl: "http://www.2wxsl.com/book/132139/50723047.html"
+		}
+	};
 	var xszj_exports = __exportAll({ xszjRule: () => xszjRule });
 	var xszjRule = {
 		id: "xszj",
@@ -6968,6 +6994,7 @@
 		"./dingdianzww.ts": dingdianzww_exports,
 		"./goboo.ts": goboo_exports$1,
 		"./hetushu.ts": hetushu_exports,
+		"./kudushu.ts": kudushu_exports,
 		"./novel543.ts": novel543_exports,
 		"./qidian.ts": qidian_exports$1,
 		"./shu69.ts": shu69_exports,
@@ -6977,6 +7004,7 @@
 		"./ttks.ts": ttks_exports,
 		"./twkan.ts": twkan_exports$1,
 		"./uuread.ts": uuread_exports,
+		"./wxsl.ts": wxsl_exports,
 		"./xszj.ts": xszj_exports
 	});
 	function isSiteRule(value) {
@@ -8687,7 +8715,7 @@
 		else if (options) managerInstance.updateOptions(options);
 		return managerInstance;
 	}
-	var VERSION = "1.0.1";
+	var VERSION = "1.0.2";
 	var BUILD_DATE = "2026-09-19";
 	var SENSITIVE_QUERY_KEY = /(?:^|[_-])(?:token|auth|session|sid|key|sign|signature|ticket|password|passwd|pwd|jwt|credential|access|refresh|challenge|chl)(?:[_-]|$)|^__cf_/i;
 	function redactUrl(url) {
@@ -18700,7 +18728,8 @@ ul, ol {
 				});
 			}
 		};
-		collect(doc);
+		if (rule?.toc?.selector) for (const root of doc.querySelectorAll(rule.toc.selector)) collect(root);
+		else collect(doc);
 		return candidates;
 	}
 	function findNextTocPageUrl(doc, currentPageUrl, indexUrl) {
@@ -18766,11 +18795,17 @@ ul, ol {
 				const { promise, abort } = fetchAndParseUrl(pageUrl, referer);
 				aborters.push(abort);
 				const result = await promise;
-				if (aborted) break;
-				if (result.error === "abort") break;
-				if (!result.doc) break;
+				if (aborted || result.error === "abort") return [];
+				if (!result.doc || result.error) {
+					if (allCandidates.length === 0) return [];
+					throw new Error(`TOC page request failed: ${pageUrl} (${result.error})`);
+				}
 				const effectivePageUrl = result.finalUrl || pageUrl;
 				const pageCandidates = collectTocCandidates(result.doc, effectivePageUrl, rule);
+				if (pageCandidates.length === 0 && (rule?.toc?.selector || allCandidates.length > 0)) {
+					if (allCandidates.length === 0) return [];
+					throw new Error(`TOC page has no chapter entries: ${effectivePageUrl}`);
+				}
 				allCandidates.push(...pageCandidates);
 				let newCount = 0;
 				for (const entry of pageCandidates) if (!seenChapterUrls.has(entry.url)) {

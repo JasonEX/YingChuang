@@ -337,7 +337,11 @@ export function collectTocCandidates(doc: Document, base: string, rule?: SiteRul
       candidates.push({ title, url });
     }
   };
-  collect(doc);
+  if (rule?.toc?.selector) {
+    for (const root of doc.querySelectorAll(rule.toc.selector)) collect(root);
+  } else {
+    collect(doc);
+  }
 
   return candidates;
 }

@@ -18,7 +18,92 @@ import {
   novel543Origin,
 } from '../testUtils/novel543';
 
+import {
+  catalogChapterCount,
+  makePagedCatalog,
+  makePagedCatalogChapter,
+  pagedCatalogSites,
+} from '../testUtils/pagedCatalogs';
+
 const targetUrl = 'http://mnr.test/chapter/100.html';
+
+for (const site of pagedCatalogSites) {
+  for (const width of site.id === 'wxsl' ? [1280, 390] : [390]) {
+    test(`${site.id} catalog stays ordered at ${width}px and retries incomplete pagination`, async ({
+      page,
+      context,
+    }) => {
+      await page.setViewportSize({ width, height: 844 });
+      const catalogRequests: number[] = [];
+      let failSecondPage = true;
+      await context.route(`${site.origin}/**`, async route => {
+        const pathname = new URL(route.request().url()).pathname;
+        const catalogPage = [1, 2, 3].find(p => site.tocPath(p) === pathname);
+        if (catalogPage) {
+          catalogRequests.push(catalogPage);
+          if (catalogPage === 2 && failSecondPage) {
+            failSecondPage = false;
+            await route.fulfill({ status: 403, body: '<title>Just a moment...</title>' });
+            return;
+          }
+          await route.fulfill({
+            contentType: 'text/html; charset=utf-8',
+            body: makePagedCatalog(site, catalogPage),
+          });
+          return;
+        }
+        const chapter = Array.from({ length: catalogChapterCount }, (_, i) => i + 1).find(
+          ch => site.chapterPath(ch) === pathname
+        );
+        if (!chapter) {
+          await route.fulfill({ status: 404, body: '' });
+          return;
+        }
+        await route.fulfill({
+          contentType: 'text/html; charset=utf-8',
+          body: makePagedCatalogChapter(site, chapter),
+        });
+      });
+      await addYingChuangUserscript(context);
+      await page.goto(site.origin + site.chapterPath(25));
+      await waitForMnrReader(page);
+      const root = page.locator('#mnr-reader-root');
+      await root.getByRole('button', { name: '打开目录', exact: true }).click();
+      await expect(root).toContainText('目录加载失败');
+      await expect(root.locator('.mnr-chapter-button')).toHaveCount(0);
+      expect(catalogRequests).toEqual([1, 2]);
+
+      // Cache-all must retry the failed catalog, not offer to cache its first page.
+      let cacheConfirmations = 0;
+      page.on('dialog', async dialog => {
+        cacheConfirmations++;
+        await dialog.dismiss();
+      });
+      await root.getByRole('button', { name: '缓存本书', exact: true }).click();
+      await expect(root.locator('.mnr-drawer-position')).toContainText('第 25 / 46 章');
+      expect(cacheConfirmations).toBe(0);
+      expect(catalogRequests).toEqual([1, 2, 1, 2, 3]);
+      // The drawer virtualizes rows. Check both ends through its scroll surface.
+      const list = root.locator('.mnr-drawer-content');
+      await list.evaluate(el => {
+        el.scrollTop = el.scrollHeight;
+      });
+      await expect(root.locator('.mnr-chapter-button').last()).toHaveText('第46章 测试正文');
+      expect((await root.locator('.mnr-chapter-button').allTextContents()).slice(-8)).toEqual(
+        Array.from({ length: 8 }, (_, i) => `第${i + 39}章 测试正文`)
+      );
+      await list.evaluate(el => {
+        el.scrollTop = 0;
+      });
+      await expect(root.locator('.mnr-chapter-button').first()).toHaveText('第1章 测试正文');
+      await root.getByRole('button', { name: '第1章 测试正文', exact: true }).click();
+      await expect(page).toHaveURL(site.origin + site.chapterPath(1));
+      await expect(
+        root.locator(`article[data-chapter-url="${site.origin + site.chapterPath(1)}"]`)
+      ).toContainText('沿着河岸继续赶路');
+    });
+  }
+}
 
 test('Ciweimao keeps short closing prose across initial parsing and chapter navigation', async ({
   page,

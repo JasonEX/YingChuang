@@ -44,6 +44,8 @@ interface NavigationConfig {
 
 /** Table of contents (TOC) parsing configuration */
 interface TocConfig {
+  /** Main chapter-list containers. When set, do not collect links outside them. */
+  selector?: string;
   /**
    * Exclude TOC links that are inside these ancestor containers.
    * Comma-separated CSS selectors. If any selector matches `a.closest(sel)`,

@@ -76,12 +76,19 @@ export async function loadTocEntriesPaged(
       aborters.push(abort);
 
       const result = await promise;
-      if (aborted) break;
-      if (result.error === 'abort') break;
-      if (!result.doc) break;
+      // Failed/cancelled requests must not publish earlier pages as a full catalog.
+      if (aborted || result.error === 'abort') return [];
+      if (!result.doc || result.error) {
+        if (allCandidates.length === 0) return [];
+        throw new Error(`TOC page request failed: ${pageUrl} (${result.error})`);
+      }
 
       const effectivePageUrl = result.finalUrl || pageUrl;
       const pageCandidates = collectTocCandidates(result.doc, effectivePageUrl, rule);
+      if (pageCandidates.length === 0 && (rule?.toc?.selector || allCandidates.length > 0)) {
+        if (allCandidates.length === 0) return [];
+        throw new Error(`TOC page has no chapter entries: ${effectivePageUrl}`);
+      }
       allCandidates.push(...pageCandidates);
 
       let newCount = 0;
