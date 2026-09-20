@@ -20,7 +20,18 @@ vi.mock('@/core/utils/network', async importOriginal => ({
   fetchAndParseUrl: vi.fn(),
 }));
 
-const parse = (html: string): Document => new DOMParser().parseFromString(html, 'text/html');
+// Mirrors production: fetched documents always carry a base URL (live pages via
+// doc.location, fetched ones via the <base> tag fetchAndParseUrl injects), so
+// rule-based navigation selectors resolve relative hrefs against the real origin.
+const parse = (html: string, baseUrl?: string): Document => {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  if (baseUrl) {
+    const base = doc.createElement('base');
+    base.href = baseUrl;
+    doc.head.insertBefore(base, doc.head.firstChild);
+  }
+  return doc;
+};
 
 it('still follows a generic pagination landing page without a configured chapter-list scope', async () => {
   vi.mocked(fetchAndParseUrl).mockReset();
@@ -75,7 +86,10 @@ for (const site of pagedCatalogSites) {
     });
 
     it('matches only chapter URLs and keeps the native catalog entrance', async () => {
-      const parsed = await new Parser().parse(parse(makePagedCatalogChapter(site, 25)), currentUrl);
+      const parsed = await new Parser().parse(
+        parse(makePagedCatalogChapter(site, 25), currentUrl),
+        currentUrl
+      );
       expect(parsed?.rule?.id).toBe(site.id);
       expect(parsed?.indexUrl).toBe(indexUrl);
       expect(parsed?.nextUrl).toBe(site.origin + site.chapterPath(26));
@@ -166,7 +180,7 @@ for (const site of pagedCatalogSites) {
         stubGmStorage(createGmStorageMock());
         const store = useReaderStore();
         const chapter = await new Parser().parse(
-          parse(makePagedCatalogChapter(site, 25)),
+          parse(makePagedCatalogChapter(site, 25), currentUrl),
           currentUrl
         );
         store.setChapter(chapter!);

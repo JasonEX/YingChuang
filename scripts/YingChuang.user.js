@@ -351,6 +351,14 @@
 				section
 			};
 		}
+		match = normalized.match(/^(.*\/\d{3,})[_-](\d{1,2})\/?$/);
+		if (match) {
+			const section = parseInt(match[2], 10);
+			if (section >= 1 && section <= 99) return {
+				chapterKey: match[1],
+				section
+			};
+		}
 		match = normalized.match(/^(.*\/\d+)\/(\d+)\.html?$/i);
 		if (match) {
 			const section = parseInt(match[2], 10);
@@ -474,6 +482,8 @@
 		if (novel543) return novel543.page > 1 ? novel543.chapterUrl : null;
 		const m = url.match(/^(.*\/\d+)[_-]\d+(\.html?)$/i);
 		if (m) return `${m[1]}${m[2]}`;
+		const dirSection = url.match(/^(.*\/\d{3,})[_-]\d{1,2}(\/?)(\?[^#]*)?(#.*)?$/);
+		if (dirSection) return `${dirSection[1]}${dirSection[2] || ""}${dirSection[3] || ""}${dirSection[4] || ""}`;
 		try {
 			const u = new URL(url);
 			const parts = u.pathname.split("/").filter(Boolean);
@@ -6459,17 +6469,64 @@
 			exampleUrl: "https://www.hetushu.com/book/9145/6567989.html"
 		}
 	};
-	var kudushu_exports = __exportAll({ kudushuRule: () => kudushuRule });
+	var kudushu_exports = __exportAll({
+		kudushuPcRule: () => kudushuPcRule,
+		kudushuRule: () => kudushuRule
+	});
 	var kudushuRule = {
 		id: "kudushu",
 		name: "苦读书（移动版）",
-		version: 1,
+		version: 2,
 		match: { pattern: "^https?://m\\.kudushu\\.org/html/\\d+/\\d+(?:_\\d+)?/(?:[?#].*)?$" },
-		content: { selector: "#novelcontent" },
+		content: {
+			selector: "#novelcontent",
+			remove: "#content_tip, ul.novelbutton, script, style",
+			replace: [{
+				pattern: "^[\\s\\S]*?[（(]第\\d+[/／]\\d+页[）)]",
+				replacement: "",
+				flags: ""
+			}]
+		},
+		navigation: {
+			prev: ".content_novel > ul.novelbutton p.p1:not(.p3) > a[href*=\"/html/\"]",
+			next: ".content_novel > ul.novelbutton p.p3 > a[href*=\"/html/\"]",
+			index: ".content_novel > ul.novelbutton p.p2 > a[href*=\"/book/\"]"
+		},
+		title: { selector: "#chaptertitle" },
 		toc: { selector: ".info_menu1 .list_xm:has(> .listpage) > ul" },
+		advanced: {
+			checkSection: true,
+			sectionDelayMs: 800
+		},
 		meta: {
 			source: "builtin",
-			exampleUrl: "https://m.kudushu.org/html/1088392/146537147/"
+			exampleUrl: "https://m.kudushu.org/html/1088392/146537150/"
+		}
+	};
+	var kudushuPcRule = {
+		id: "kudushu-pc",
+		name: "苦读书（PC版）",
+		version: 1,
+		match: { pattern: "^https?://www\\.kudushu\\.org/html/\\d+/\\d+/\\d+\\.html(?:[?#].*)?$" },
+		content: {
+			selector: "#clickeye_content",
+			remove: ".style3, script, style",
+			replace: [{
+				pattern: "[（(]?\\s*苦读书\\s*www\\.kudushu\\.org\\s*[）)]?",
+				replacement: "",
+				flags: "g"
+			}]
+		},
+		navigation: {
+			prev: ".P_Nav .inforight a:not([href$=\"index.html\"]):contains(\"上一页\")",
+			next: ".P_Nav .inforight a:not([href$=\"index.html\"]):contains(\"下一页\")",
+			index: ".P_Nav .inforight a[href$=\"index.html\"]"
+		},
+		title: { selector: "#cont h1" },
+		toc: { selector: ".index > ul.chapters" },
+		meta: {
+			source: "builtin",
+			exampleUrl: "https://www.kudushu.org/html/1088/1088392/146537150.html"
 		}
 	};
 	var qidian_exports$1 = __exportAll({

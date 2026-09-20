@@ -44,6 +44,13 @@ export function getSectionBaseUrl(url: string): string | null {
   const m = url.match(/^(.*\/\d+)[_-]\d+(\.html?)$/i);
   if (m) return `${m[1]}${m[2]}`;
 
+  // Directory-style section: /123_2/ -> /123/ (no .html extension).
+  // Mirrors branch 1b of parseChapterSectionFromPathname.
+  const dirSection = url.match(/^(.*\/\d{3,})[_-]\d{1,2}(\/?)(\?[^#]*)?(#.*)?$/);
+  if (dirSection) {
+    return `${dirSection[1]}${dirSection[2] || ''}${dirSection[3] || ''}${dirSection[4] || ''}`;
+  }
+
   // Extensionless pagination: /{bookId}/{chapterId}/{page} -> /{bookId}/{chapterId}/1
   // Keep it conservative to avoid misclassifying /{bookId}/{chapterNo} as "page 2".
   try {

@@ -115,6 +115,30 @@ describe('isSectionLikeUrl', () => {
     ).toBe(true);
   });
 
+  it('detects directory-style section URLs without a file extension', () => {
+    expect(
+      isSectionLikeUrl(
+        'https://m.kudushu.org/html/1088392/146537150/',
+        'https://m.kudushu.org/html/1088392/146537150_2/'
+      )
+    ).toBe(true);
+    expect(
+      isSectionLikeUrl(
+        'https://m.kudushu.org/html/1088392/146537150_2/',
+        'https://m.kudushu.org/html/1088392/146537150_3/'
+      )
+    ).toBe(true);
+  });
+
+  it('does not treat the next chapter as a section of the current one', () => {
+    expect(
+      isSectionLikeUrl(
+        'https://m.kudushu.org/html/1088392/146537150_3/',
+        'https://m.kudushu.org/html/1088392/146537151/'
+      )
+    ).toBe(false);
+  });
+
   it('detects query-based pagination (page increments)', () => {
     expect(
       isSectionLikeUrl(
@@ -191,6 +215,13 @@ describe('getSectionBaseUrl', () => {
     expect(getSectionBaseUrl('https://m.goboo.cc/gb_1/94443/1/2')).toBe(
       'https://m.goboo.cc/gb_1/94443/1'
     );
+  });
+
+  it('normalizes directory-style sections to the first page', () => {
+    expect(getSectionBaseUrl('https://m.kudushu.org/html/1088392/146537150_2/')).toBe(
+      'https://m.kudushu.org/html/1088392/146537150/'
+    );
+    expect(getSectionBaseUrl('https://m.kudushu.org/html/1088392/146537150/')).toBe(null);
   });
 
   it('normalizes query-based pagination to the first page', () => {

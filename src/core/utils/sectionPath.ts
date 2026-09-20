@@ -18,6 +18,7 @@ export interface ChapterSectionPathInfo {
  * - /123.html -> { chapterKey: "/123", section: 1 }
  * - /123_2.html -> { chapterKey: "/123", section: 2 }
  * - /book/123/2.html -> { chapterKey: "/book/123", section: 2 }
+ * - /html/1088392/146537150_2/ -> { chapterKey: "/html/1088392/146537150", section: 2 }
  * - /xs_xxx/89812/1358/2 -> { chapterKey: "/xs_xxx/89812/1358", section: 2 }
  */
 export function parseChapterSectionFromPathname(pathname: string): ChapterSectionPathInfo | null {
@@ -26,6 +27,16 @@ export function parseChapterSectionFromPathname(pathname: string): ChapterSectio
 
   // 1) /123_2.html or /123-2.html
   let match = normalized.match(/^(.*\/\d+)[_-](\d+)\.html?$/i);
+  if (match) {
+    const section = parseInt(match[2], 10);
+    if (section >= 1 && section <= 99) {
+      return { chapterKey: match[1], section };
+    }
+  }
+
+  // 1b) Directory-style section: /123_2/ or /123-2/ (no .html extension).
+  // Require a long chapter id so paths like /2024-12/ are not mistaken for pages.
+  match = normalized.match(/^(.*\/\d{3,})[_-](\d{1,2})\/?$/);
   if (match) {
     const section = parseInt(match[2], 10);
     if (section >= 1 && section <= 99) {
