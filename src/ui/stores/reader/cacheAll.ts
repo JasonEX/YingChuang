@@ -211,9 +211,7 @@ export function createCacheAll(ctx: CacheAllContext) {
             if (!isCurrent()) break;
           }
           if (!parsed && !blockReason) {
-            const apiDoc = reference
-              ? await loadRuleApiDocument(targetUrl, { chapter: reference, rule })
-              : null;
+            const apiDoc = reference ? await loadRuleApiDocument(targetUrl, reference) : null;
             if (!isCurrent()) break;
             let doc = apiDoc;
             if (!doc) {

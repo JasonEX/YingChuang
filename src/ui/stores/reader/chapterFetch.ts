@@ -3,6 +3,7 @@ import type { ParsedChapter, Parser } from '@/core/parser';
 
 import { fetchAndParseUrl } from '@/core/utils/network';
 import { getChapterDocumentBlockReason } from '@/core/detection';
+import { getRuleManager } from '@/core/rules/RuleManager';
 import type { LoadSource } from './types';
 import type { NavigationContext } from './navigationContext';
 import { normalizeUrlForBlock } from './utils';
@@ -10,7 +11,6 @@ import { parseWithSectionMerge } from './section';
 import type { PreparedChapterLoad } from './chapterLoadGuards';
 import { recordDebugEvent } from '@/core/debug/events';
 import { recordNavFailure } from './navFailure';
-import type { SiteRule } from '@/core/rules/types';
 
 export type FetchDocumentResult = Document | 'abort' | null;
 export type ParsedCandidateResult = ParsedChapter | 'abort' | 'blocked' | null;
@@ -107,7 +107,7 @@ export async function loadFetchDocument(
   runId: number,
   referer: string
 ): Promise<FetchDocumentResult> {
-  const ruleDoc = await loadRuleApiDocument(load.targetUrl, load.refChapter);
+  const ruleDoc = await loadRuleApiDocument(load.targetUrl, load.refChapter.chapter);
   if (ctx.runtime.isViewStale(runId)) return 'abort';
   if (ruleDoc) return ruleDoc;
 
@@ -140,22 +140,21 @@ export async function loadFetchDocument(
 }
 
 /**
- * Let the matched site rule supply the chapter document from its own API.
- *
- * The generic loader knows nothing about which sites do this: a rule opts in by declaring
- * `hooks.fetchDocument`, and returning null falls through to the ordinary page fetch.
+ * Executable hooks come from the current rule for the target URL, never a cached rule
+ * snapshot: JSON persistence retains chapter data but drops functions.
  */
 export async function loadRuleApiDocument(
   url: string,
-  reference: { chapter: ParsedChapter; rule?: SiteRule }
+  reference: Pick<ParsedChapter, 'bookTitle' | 'indexUrl' | 'url'>
 ): Promise<Document | null> {
-  const fetchDocument = (reference.rule ?? reference.chapter.rule)?.hooks?.fetchDocument;
+  const match = await getRuleManager().matchRule(url);
+  const fetchDocument = match?.rule.hooks?.fetchDocument;
   if (!fetchDocument) return null;
 
   return fetchDocument(url, {
-    bookTitle: reference.chapter.bookTitle,
-    indexUrl: reference.chapter.indexUrl,
-    refererUrl: reference.chapter.url,
+    bookTitle: reference.bookTitle,
+    indexUrl: reference.indexUrl,
+    refererUrl: reference.url,
   });
 }
 

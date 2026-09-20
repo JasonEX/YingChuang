@@ -19101,7 +19101,7 @@ ul, ol {
 		};
 	}
 	async function loadFetchDocument(ctx, load, runId, referer) {
-		const ruleDoc = await loadRuleApiDocument(load.targetUrl, load.refChapter);
+		const ruleDoc = await loadRuleApiDocument(load.targetUrl, load.refChapter.chapter);
 		if (ctx.runtime.isViewStale(runId)) return "abort";
 		if (ruleDoc) return ruleDoc;
 		const fetchLoader = fetchAndParseUrl(load.targetUrl, referer);
@@ -19126,12 +19126,12 @@ ul, ol {
 		return fetchResult.doc;
 	}
 	async function loadRuleApiDocument(url, reference) {
-		const fetchDocument = (reference.rule ?? reference.chapter.rule)?.hooks?.fetchDocument;
+		const fetchDocument = (await getRuleManager().matchRule(url))?.rule.hooks?.fetchDocument;
 		if (!fetchDocument) return null;
 		return fetchDocument(url, {
-			bookTitle: reference.chapter.bookTitle,
-			indexUrl: reference.chapter.indexUrl,
-			refererUrl: reference.chapter.url
+			bookTitle: reference.bookTitle,
+			indexUrl: reference.indexUrl,
+			refererUrl: reference.url
 		});
 	}
 	async function parseCandidateDocument(ctx, load, parser, doc, runId, _referer, source) {
@@ -19370,8 +19370,7 @@ ul, ol {
 						let parsed = null;
 						let blockReason = null;
 						const reference = ctx.chapter.value;
-						const rule = ctx.rule.value ?? reference?.rule;
-						if (rule?.advanced?.useIframe) {
+						if ((ctx.rule.value ?? reference?.rule)?.advanced?.useIframe) {
 							const loader = loadDocumentInIframe(targetUrl);
 							ctx.cacheAbort.value = loader.abort;
 							const loaded = await loader.promise;
@@ -19387,10 +19386,7 @@ ul, ol {
 							if (!isCurrent()) break;
 						}
 						if (!parsed && !blockReason) {
-							const apiDoc = reference ? await loadRuleApiDocument(targetUrl, {
-								chapter: reference,
-								rule
-							}) : null;
+							const apiDoc = reference ? await loadRuleApiDocument(targetUrl, reference) : null;
 							if (!isCurrent()) break;
 							let doc = apiDoc;
 							if (!doc) {
