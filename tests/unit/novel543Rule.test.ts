@@ -18,7 +18,7 @@ import { Parser } from '@/core/parser';
 import { SectionMerger } from '@/core/auto-enable/SectionMerger';
 
 const url = (chapter: number, page = 1) => novel543Origin + novel543ChapterPath(chapter, page);
-// The site declares its section-URL shape on the rule; the generic helpers read it from there.
+// Detection and merging share the parser registered by the site rule.
 const parseSectionUrl = (value: string) => getRuleManager().parseSectionUrl(value);
 const doc = (html: string) => {
   const parsed = new DOMParser().parseFromString(html, 'text/html');

@@ -1,8 +1,8 @@
 import { MAX_NAV_FAILURES, VIP_BLOCK_TOAST } from './types';
 import type { ParsedChapter, Parser } from '@/core/parser';
 
-import { chapterShellSelector, getChapterDocumentBlockReason } from '@/core/detection';
 import { fetchAndParseUrl } from '@/core/utils/network';
+import { getChapterDocumentBlockReason } from '@/core/detection';
 import type { LoadSource } from './types';
 import type { NavigationContext } from './navigationContext';
 import { normalizeUrlForBlock } from './utils';
@@ -152,16 +152,11 @@ export async function loadRuleApiDocument(
   const fetchDocument = (reference.rule ?? reference.chapter.rule)?.hooks?.fetchDocument;
   if (!fetchDocument) return null;
 
-  try {
-    return await fetchDocument(url, {
-      bookTitle: reference.chapter.bookTitle,
-      indexUrl: reference.chapter.indexUrl,
-      refererUrl: reference.chapter.url,
-    });
-  } catch (e) {
-    console.debug('[MNR] Rule fetchDocument hook failed:', e);
-    return null;
-  }
+  return fetchDocument(url, {
+    bookTitle: reference.chapter.bookTitle,
+    indexUrl: reference.chapter.indexUrl,
+    refererUrl: reference.chapter.url,
+  });
 }
 
 export async function parseCandidateDocument(
@@ -174,11 +169,7 @@ export async function parseCandidateDocument(
   source: LoadSource
 ): Promise<ParsedCandidateResult> {
   if (ctx.runtime.isViewStale(runId)) return 'abort';
-  const blockReason = getChapterDocumentBlockReason(doc, {
-    chapterShellSelector: chapterShellSelector(
-      load.refChapter.rule ?? load.refChapter.chapter.rule
-    ),
-  });
+  const blockReason = getChapterDocumentBlockReason(doc);
   if (blockReason) {
     recordDebugEvent('chapter.rejected', { url: load.targetUrl, reason: blockReason });
   }

@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 
-import { createMeta, toUserscriptConfig } from '@/meta';
+import { createMeta, generateMetaBlock, toUserscriptConfig } from '@/meta';
 
 type ParsedMeta = Record<string, string[]>;
 
@@ -24,6 +24,36 @@ function parseMetaBlock(script: string): ParsedMeta {
 }
 
 describe('userscript meta', () => {
+  it('generates a standard meta block from the shared metadata model', () => {
+    const meta = {
+      ...createMeta({ version: '1.2.3' }),
+      requires: ['https://example.com/dep.js'],
+      resources: { demo: 'https://example.com/demo.css' },
+    };
+
+    const block = generateMetaBlock(meta);
+
+    expect(block).toContain('// ==UserScript==');
+    expect(block).toContain('// @name          YingChuang');
+    expect(block).toContain('// @name:zh-CN    萤窗');
+    expect(block).toContain('// @description:zh-TW');
+    expect(block).toContain('// @version       1.2.3');
+    expect(block).toContain('// @description:zh-CN 萤窗：小说阅读脚本');
+    expect(block).toContain('// @run-at        document-start');
+    expect(block).toContain('// @match         *://*/*.html');
+    expect(block).toContain('// @match         *://*/gb_*/*/*');
+    expect(block).toContain('// @match         *://dingdianzww.org/*');
+    expect(block).toContain('// @match         *://www.deqixs.org/*');
+    expect(block).toContain('// @match         *://www.deqixs.co/*');
+    expect(block).toContain('// @match         *://m.kudushu.org/html/*/*');
+    expect(block).toContain('// @require       https://example.com/dep.js');
+    expect(block).toContain('// @resource      demo https://example.com/demo.css');
+    expect(block).not.toContain('@id');
+    expect(block).not.toContain('@contributor');
+    expect(block).not.toContain('@build-date');
+    expect(block.trimEnd().endsWith('// ==/UserScript==')).toBe(true);
+  });
+
   it('converts to userscript config shape for build tools', () => {
     const meta = createMeta({ version: '9.9.9' });
     const config = toUserscriptConfig(meta);

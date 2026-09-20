@@ -9,13 +9,12 @@
 
 import { CHAPTER_TEXT_PATTERNS, SECTION_TEXT_PATTERNS } from '@/core/constants';
 import { getSectionBaseUrl, isSectionLikeUrl, joinHtml, normalizeAbsoluteUrl } from '@/core/utils';
-
-/** Section-URL shapes come from site rules; see SiteRule.advanced.sectionUrl. */
-const parseSectionUrl = (url: string) => getRuleManager().parseSectionUrl(url);
 import type { ParsedChapter, Parser } from '@/core/parser';
 import type { ChineseScript } from '@/core/converter/scriptProfile';
 import { fetchAndParseUrl } from '@/core/utils/network';
 import { getRuleManager } from '@/core/rules/RuleManager';
+
+const parseSectionUrl = (url: string) => getRuleManager().parseSectionUrl(url);
 
 /** Section detection result */
 interface SectionInfo {

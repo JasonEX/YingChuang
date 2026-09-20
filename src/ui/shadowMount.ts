@@ -225,3 +225,15 @@ export function createShadowMount(hostId: string): ShadowMountResult {
 
   return { host, shadowRoot, mountPoint, cleanup };
 }
+
+/**
+ * Inject additional CSS into the Shadow DOM
+ *
+ * @param shadowRoot - Target Shadow DOM
+ * @param css - CSS string to inject
+ */
+export function injectShadowCSS(shadowRoot: ShadowRoot, css: string): void {
+  const style = document.createElement('style');
+  style.textContent = css;
+  shadowRoot.appendChild(style);
+}

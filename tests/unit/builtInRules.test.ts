@@ -5,6 +5,7 @@ import { ciweimaoRule, ciweimaoWapRule } from '@/core/rules/sites/ciweimao';
 import { qidianMobileRule, qidianRule } from '@/core/rules/sites/qidian';
 import { builtInRules } from '@/core/rules/builtInRules';
 import { createSectionMerger } from '@/core/auto-enable/SectionMerger';
+import { loadRuleApiDocument } from '@/ui/stores/reader/chapterFetch';
 import { Parser } from '@/core/parser';
 
 describe('builtInRules', () => {
@@ -407,14 +408,18 @@ describe('builtInRules', () => {
     vi.stubGlobal('fetch', fetchMock);
     win.fetch = fetchMock as unknown as typeof fetch;
 
-    // Reached through the rule's declared extension point, not a direct import: this is the
-    // contract the generic chapter loader relies on.
-    const fetchDocument = ciweimaoRule.hooks?.fetchDocument;
-    expect(fetchDocument).toBeTypeOf('function');
-    const apiDoc = await fetchDocument!('https://www.ciweimao.com/chapter/113927226', {
-      bookTitle: '无奥世界，但是群友全是奥特曼',
-      indexUrl: 'https://www.ciweimao.com/chapter-list/100452963',
-      refererUrl: 'https://www.ciweimao.com/chapter/113926737',
+    const apiDoc = await loadRuleApiDocument('https://www.ciweimao.com/chapter/113927226', {
+      chapter: {
+        bookTitle: '无奥世界，但是群友全是奥特曼',
+        indexUrl: 'https://www.ciweimao.com/chapter-list/100452963',
+        url: 'https://www.ciweimao.com/chapter/113926737',
+        title: '9.决战！异次元超人！',
+        content: '',
+        rawContent: '',
+        confidence: 1,
+        method: 'rule',
+        rule: ciweimaoRule,
+      },
     });
 
     expect(apiDoc?.querySelector('#J_BtnPagePrev')?.getAttribute('href')).toBe(

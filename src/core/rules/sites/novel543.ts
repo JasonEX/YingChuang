@@ -3,6 +3,16 @@ import type { SiteRule } from '../types';
 const CHAPTER_URL =
   /^https?:\/\/(?:www\.)?novel543\.com(\/\d+\/\d+_\d+)(?:_(\d+))?\.html(?:[?#].*)?$/;
 
+// The first underscore belongs to the chapter ID; only the second is a page suffix.
+function parseNovel543Url(url: string): { chapterUrl: string; page: number } | null {
+  const match = url.match(CHAPTER_URL);
+  if (!match) return null;
+  const parsed = new URL(url);
+  parsed.pathname = `${match[1]}.html`;
+  parsed.hash = '';
+  return { chapterUrl: parsed.href, page: Number(match[2] || 1) };
+}
+
 export const novel543Rule: SiteRule = {
   id: 'novel543',
   name: '稷下書院',
@@ -27,16 +37,8 @@ export const novel543Rule: SiteRule = {
   toc: {
     excludeAncestors: '.chaplist > ul:not(.all)',
   },
-  advanced: {
-    // The first underscore belongs to the chapter ID; only the second is a page suffix, so the
-    // generic /{id}_{page}.html split would read /1019622989/8096_941.html as page 941.
-    sectionUrl: {
-      pattern: CHAPTER_URL.source,
-      chapterPath: '$1.html',
-      pageGroup: 2,
-    },
-  },
   hooks: {
+    parseSectionUrl: parseNovel543Url,
     beforeParse: doc => {
       const bookLink = doc.querySelector('.header .nav li:last-child a');
       const bookTitle = doc

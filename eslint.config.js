@@ -103,41 +103,6 @@ export default [
       ],
     },
   },
-  // Layering: site-specific knowledge lives in src/core/rules/sites/*.
-  //
-  // AGENTS.md states this ("generic detection, parsing, and reader code must stay
-  // site-agnostic"), but until now nothing enforced it, and 31 of 39 site-related commits
-  // ended up editing generic code. Rules reach generic code through their declared surface
-  // (SiteRule fields and hooks); generic code must never import a site file directly.
-  {
-    files: [
-      'src/core/utils/**/*.ts',
-      'src/core/detection/**/*.ts',
-      'src/core/parser/**/*.ts',
-      'src/core/auto-enable/**/*.ts',
-      'src/core/constants/**/*.ts',
-      'src/core/protection/**/*.ts',
-      'src/core/converter/**/*.ts',
-      'src/ui/**/*.ts',
-      'src/ui/**/*.vue',
-      'src/bootstrap.ts',
-    ],
-    rules: {
-      'no-restricted-imports': [
-        'error',
-        {
-          patterns: [
-            {
-              group: ['@/core/rules/sites/*', '**/core/rules/sites/*', '../sites/*', './sites/*'],
-              message:
-                'Generic code must not import a site rule. Declare the behaviour on the SiteRule (content/advanced/hooks) and consume it through RuleManager instead.',
-            },
-          ],
-        },
-      ],
-    },
-  },
-
   // Type definitions
   {
     files: ['**/*.d.ts'],

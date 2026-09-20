@@ -2,13 +2,13 @@
  * Reader Store Utility Functions
  */
 
-import { normalizeRedundantFirstPageParam, normalizeSiteChapterUrl } from '@/core/utils';
+import { normalizeCiwemaoChapterUrl, normalizeRedundantFirstPageParam } from '@/core/utils';
 
 /**
  * Normalize URL for fetching (remove hash, canonicalize)
  */
 export function normalizeUrlForFetch(url: string): string {
-  const normalized = normalizeRedundantFirstPageParam(normalizeSiteChapterUrl(url));
+  const normalized = normalizeRedundantFirstPageParam(normalizeCiwemaoChapterUrl(url));
   try {
     const u = new URL(normalized);
     u.hash = '';
@@ -29,7 +29,7 @@ export function normalizeUrl(url: string): string {
  * Normalize URL for block list (combines fetch and comparison normalization)
  */
 export function normalizeUrlForBlock(url: string): string {
-  const normalized = normalizeSiteChapterUrl(url);
+  const normalized = normalizeCiwemaoChapterUrl(url);
   try {
     const u = new URL(normalized);
     u.hash = '';

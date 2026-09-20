@@ -3,11 +3,7 @@
  * Also detects multi-page chapters (分页章节)
  */
 
-import {
-  CHAPTER_TEXT_PATTERNS,
-  NON_CHAPTER_ENDPOINT_PATTERNS,
-  SECTION_TEXT_PATTERNS,
-} from '@/core/constants';
+import { CHAPTER_TEXT_PATTERNS, SECTION_TEXT_PATTERNS } from '@/core/constants';
 import { generateCssSelector, isSectionLikeUrl } from '@/core/utils';
 import { NAV_PATTERNS, NavigationResult, NavLinkResult, SectionDetectionResult } from './types';
 import { getRuleManager } from '@/core/rules/RuleManager';
@@ -19,7 +15,10 @@ const INVALID_URL_PATTERNS = [
   /^javascript:/i,
   /BuyChapterUnLogin/i,
   /\/0\.html$/i,
-  ...NON_CHAPTER_ENDPOINT_PATTERNS,
+  // Ciweimao: non-chapter endpoints under /chapter/
+  /\/chapter\/get_par_tsu_list(?:$|[/?#])/i,
+  /\/chapter\/ajax_get_session_code(?:$|[/?#])/i,
+  /\/chapter\/get_book_chapter_detail_info(?:$|[/?#])/i,
   // Homepage/root path patterns
   /^https?:\/\/[^/]+\/?$/i, // Root domain only (e.g., https://www.qidian.com/)
   /^https?:\/\/[^/]+\/(?:index|home|main)?\.?(?:html?|php|aspx)?$/i, // /index.html, /home.php
@@ -593,7 +592,7 @@ export class NavigationDetector {
       }
 
       // Fast path: strict section-like detection (includes query-based pagination).
-      if (isSectionLikeUrl(currentUrl, nextUrl, url => getRuleManager().parseSectionUrl(url))) {
+      if (isSectionLikeUrl(currentUrl, nextUrl, getRuleManager().parseSectionUrl)) {
         const currentInfo = parseChapterSectionFromPathname(currentPath);
         const nextInfo = parseChapterSectionFromPathname(nextPath);
         if (

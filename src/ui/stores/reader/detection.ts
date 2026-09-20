@@ -3,8 +3,7 @@
  * Detection utilities for VIP pages, TOC pages, and invalid URLs
  */
 
-import { NON_CHAPTER_ENDPOINT_PATTERNS } from '@/core/constants';
-import { normalizeSiteChapterUrl } from '@/core/utils';
+import { normalizeCiwemaoChapterUrl } from '@/core/utils';
 
 /**
  * Check if URL is invalid for chapter navigation (homepage, login, etc.)
@@ -12,7 +11,7 @@ import { normalizeSiteChapterUrl } from '@/core/utils';
  */
 export function isInvalidChapterUrl(url: string, currentChapterUrl?: string): boolean {
   try {
-    const normalizedUrl = normalizeSiteChapterUrl(url);
+    const normalizedUrl = normalizeCiwemaoChapterUrl(url);
     const parsed = new URL(normalizedUrl);
     const pathname = parsed.pathname;
 
@@ -42,7 +41,10 @@ export function isInvalidChapterUrl(url: string, currentChapterUrl?: string): bo
       /\/(?:list|catalog|toc|contents?)\.?(?:html?)?$/i,
       /\/(?:index|list|last|LastPage|end)\.(?:html?|php|aspx)/i,
       /\/(?:user|login|register|search|rank|category|tag|author|help|about|contact|faq)\.(?:html?|php|aspx)$/i,
-      ...NON_CHAPTER_ENDPOINT_PATTERNS,
+      // Ciweimao: non-chapter endpoints under /chapter/
+      /\/chapter\/get_par_tsu_list(?:$|[/?#])/i,
+      /\/chapter\/ajax_get_session_code(?:$|[/?#])/i,
+      /\/chapter\/get_book_chapter_detail_info(?:$|[/?#])/i,
     ];
 
     for (const pattern of invalidPatterns) {

@@ -8,7 +8,6 @@
  */
 
 import {
-  chapterShellSelector,
   DetectionEngine,
   type DetectionEngineResult,
   getChapterDocumentBlockReason,
@@ -98,41 +97,6 @@ export class AutoEnableManager {
   private currentDecision?: AutoEnableDecision;
   private currentDecisionUrl?: string;
 
-  /**
-   * Chapter-shell selector for this URL's rule, but only when that rule opted in via
-   * `advanced.lazyChapterShell`.
-   *
-   * Lets a site whose subscription copy sits beside an encrypted chapter shell avoid a false
-   * paywall verdict, without clearing real paywalls on sites that never opted in. Keeping the
-   * lookup here — rather than a hostname check inside the classifier — keeps site knowledge in
-   * src/core/rules/sites/*.
-   */
-  private async classifyChapterDocument(
-    doc: Document,
-    url: string
-  ): Promise<ReturnType<typeof getChapterDocumentBlockReason>> {
-    const reason = getChapterDocumentBlockReason(doc);
-    // Only a VIP verdict is worth a rule lookup. Cloudflare and clean pages keep the cheap
-    // short-circuit they have always had, so this stays off the hot path.
-    if (reason !== 'vip') return reason;
-
-    const shellSelector = await this.resolveChapterShellSelector(url);
-    if (!shellSelector) return reason;
-    return getChapterDocumentBlockReason(doc, { chapterShellSelector: shellSelector });
-  }
-
-  private async resolveChapterShellSelector(url: string): Promise<string | undefined> {
-    try {
-      const ruleManager = getRuleManager();
-      await ruleManager.initialize();
-      const match = await ruleManager.matchRule(url);
-      return chapterShellSelector(match?.rule);
-    } catch (e) {
-      console.debug('[AutoEnableManager] Failed to resolve rule for classification:', e);
-      return undefined;
-    }
-  }
-
   private recordDecision(url: string, decision: AutoEnableDecision): AutoEnableDecision {
     this.currentDecision = decision;
     this.currentDecisionUrl = url;
@@ -198,7 +162,7 @@ export class AutoEnableManager {
     const decide = (decision: AutoEnableDecision): AutoEnableDecision =>
       this.recordDecision(url, decision);
 
-    const blockReason = await this.classifyChapterDocument(doc, url);
+    const blockReason = getChapterDocumentBlockReason(doc);
     if (blockReason === 'cloudflare') {
       return decide({
         shouldEnable: false,
@@ -482,10 +446,7 @@ export class AutoEnableManager {
    * Manual enable (force launch without detection)
    */
   async manualEnable(doc: Document = document): Promise<void> {
-    const blockReason = await this.classifyChapterDocument(
-      doc,
-      doc.location?.href || window.location.href
-    );
+    const blockReason = getChapterDocumentBlockReason(doc);
     if (blockReason) {
       console.info(`[AutoEnableManager] Manual enable skipped: ${blockReason}`);
       this.deactivateProtection();

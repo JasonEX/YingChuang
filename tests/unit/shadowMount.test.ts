@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 
-import { createShadowMount, setShadowCustomCSS, setShadowStyleProperties } from '@/ui/shadowMount';
+import {
+  createShadowMount,
+  injectShadowCSS,
+  setShadowCustomCSS,
+  setShadowStyleProperties,
+} from '@/ui/shadowMount';
 
 describe('shadowMount', () => {
   let dom: JSDOM;
@@ -39,13 +44,17 @@ describe('shadowMount', () => {
     expect(window.__MY_NOVEL_READER__?.shadowRoots).toBeUndefined();
   });
 
-  it('injects previously collected CSS into the Shadow DOM', () => {
+  it('injects previously collected CSS and supports injecting extra CSS', () => {
     window.__MY_NOVEL_READER__ = { styles: 'body{background:red;}' };
 
     const { shadowRoot } = createShadowMount('mnr-style-root');
     const appStyle = shadowRoot.querySelector('#mnr-app-styles') as HTMLStyleElement | null;
     expect(appStyle).not.toBeNull();
     expect(appStyle?.textContent).toContain('background:red');
+
+    injectShadowCSS(shadowRoot, 'a{color:blue;}');
+    expect(shadowRoot.querySelectorAll('style').length).toBeGreaterThan(1);
+    expect(shadowRoot.textContent).toContain('color:blue');
   });
 
   it('applies runtime style properties and custom CSS to registered Shadow DOM roots', () => {

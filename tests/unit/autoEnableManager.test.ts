@@ -147,9 +147,7 @@ describe('AutoEnableManager', () => {
       confidence: 0,
     });
     expect(decision.reasons.join(' ')).toContain('VIP/付费章节');
-    // A VIP verdict now costs exactly one rule lookup, so a site whose subscription copy sits
-    // beside a real chapter shell can clear itself. Non-VIP pages keep the old short-circuit.
-    expect(mockedRuleManager.matchRule).toHaveBeenCalledTimes(1);
+    expect(mockedRuleManager.initialize).not.toHaveBeenCalled();
   });
 
   it('returns site-preference decision when user enabled auto-enable for the site', async () => {

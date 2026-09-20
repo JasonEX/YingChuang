@@ -126,47 +126,15 @@ interface AdvancedConfig {
    * Some sites require this to prevent 403 errors
    */
   withReferer?: boolean;
-  /**
-   * Declarative override for how multi-page chapter (分页章节) URLs are shaped on this site.
-   *
-   * Generic derivation assumes `/…/{chapterId}_{page}.html`. Declare this when the chapter id
-   * itself contains the separator, so the generic split would otherwise read a plain chapter as
-   * "page N of a shorter id". Without it the generic layer would need to know the host name.
-   */
-  sectionUrl?: SectionUrlShape;
-  /**
-   * This site serves its chapter container empty and fills it from script (encrypted or
-   * lazily decoded), while subscription copy may sit elsewhere on the page. Generic VIP
-   * heuristics read that copy as a paywall, so when `content.selector` is present and carries
-   * no subscription copy of its own, the document is treated as a chapter shell.
-   *
-   * Opt in only for sites that genuinely do this. On an ordinary paywall the preview prose
-   * sits inside the container and the notice is a sibling — Qidian's locked chapters look
-   * exactly like that — so inferring the exemption from any content selector would clear
-   * real paywalls.
-   */
-  lazyChapterShell?: boolean;
 }
 
-/** Site-declared shape of a section (multi-page chapter) URL. */
-export interface SectionUrlShape {
-  /** Regex source matched against the full URL. */
-  pattern: string;
-  /** Replacement producing the page-1 chapter *pathname*; $1…$9 reference capture groups. */
-  chapterPath: string;
-  /** Capture group holding the page number. An unmatched group means page 1. */
-  pageGroup: number;
-}
-
-/** Result of applying a SectionUrlShape. */
+/** Canonical chapter identity and its 1-based section number. */
 export interface ParsedSectionUrl {
-  /** Page-1 URL of the chapter, query preserved and hash dropped. */
   chapterUrl: string;
-  /** 1-based page number within the chapter. */
   page: number;
 }
 
-/** Parses a URL into its chapter/page parts, or null when no site shape applies. */
+/** Return null for URLs outside the site's section format. */
 export type SectionUrlParser = (url: string) => ParsedSectionUrl | null;
 
 export interface HookFetchOptions {
@@ -210,6 +178,8 @@ export type FetchDocumentHook = (
 
 /** JavaScript hooks for built-in site adapters */
 interface HooksConfig {
+  /** Override generic section parsing when the chapter ID itself contains a separator. */
+  parseSectionUrl?: SectionUrlParser;
   /** Typed hook to run before parsing. */
   beforeParse?: BeforeParseHook;
   /** Typed hook that supplies a chapter document from a site API instead of a page fetch. */

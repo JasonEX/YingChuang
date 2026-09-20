@@ -561,19 +561,12 @@
 		if (!right) return left;
 		return `${left}<p></p>${right}`;
 	}
-	var CHAPTER_URL_REWRITES = [(url) => {
-		if (url.hostname !== "wap.ciweimao.com" && url.hostname !== "mip.ciweimao.com") return null;
-		if (url.pathname !== "/chapter/get_par_tsu_list" && url.pathname !== "/chapter/get_par_tsu_list/") return null;
-		const chapterId = url.searchParams.get("chapter_id");
-		if (!chapterId || !/^\d+$/.test(chapterId)) return null;
-		return `${url.origin}/chapter/${chapterId}`;
-	}];
-	function normalizeSiteChapterUrl(url) {
+	function normalizeCiwemaoChapterUrl(url) {
 		try {
-			const parsed = new URL(url);
-			for (const rewrite of CHAPTER_URL_REWRITES) {
-				const rewritten = rewrite(parsed);
-				if (rewritten) return rewritten;
+			const u = new URL(url);
+			if ((u.hostname === "wap.ciweimao.com" || u.hostname === "mip.ciweimao.com") && (u.pathname === "/chapter/get_par_tsu_list" || u.pathname === "/chapter/get_par_tsu_list/")) {
+				const chapterId = u.searchParams.get("chapter_id");
+				if (chapterId && /^\d+$/.test(chapterId)) return `${u.origin}/chapter/${chapterId}`;
 			}
 			return url;
 		} catch {
@@ -2919,11 +2912,6 @@
 		/[下上]一?[节節]/,
 		/第.+[章节節]/
 	];
-	var NON_CHAPTER_ENDPOINT_PATTERNS = [
-		/\/chapter\/get_par_tsu_list(?:$|[/?#])/i,
-		/\/chapter\/ajax_get_session_code(?:$|[/?#])/i,
-		/\/chapter\/get_book_chapter_detail_info(?:$|[/?#])/i
-	];
 	var REMOVE_SELECTORS = [
 		"script",
 		"style",
@@ -2932,32 +2920,37 @@
 		".ad",
 		".ads",
 		".advertisement",
-		"[class^=\"ad-\"]",
-		"[class*=\" ad-\"]",
-		"[id^=\"ad-\"]",
-		"ins.adsbygoogle",
-		"amp-social-share",
+		"[class*=\"ad-\"]",
+		"[id*=\"ad-\"]",
 		".sponsor",
 		".recommend",
-		"[class*=\"recommend\"]",
-		"[id*=\"recommend\"]",
 		".related",
 		".comment",
 		".share",
 		"[class*=\"share\"]",
 		"[id*=\"share\"]",
+		".div_feedback",
 		"[class*=\"feedback\"]",
 		"[id*=\"feedback\"]",
+		".anchor_bookmark",
 		"[class*=\"bookmark\"]",
 		"[id*=\"bookmark\"]",
+		".social_share_frame",
+		".social_share_inner_frame",
 		".page-separator",
 		".page_separator_first",
 		".page_separator_last",
 		".prev_page",
 		".next_page",
-		".mobadsq"
+		".more_recommend",
+		"[class*=\"recommend\"]",
+		"[id*=\"recommend\"]",
+		".txtcenter",
+		".mobadsq",
+		"amp-social-share",
+		"ins.adsbygoogle"
 	];
-	var GENERIC_AD_PATTERNS = [
+	var AD_PATTERNS = [
 		/[（(]本章未完[，,]?请?点击下一页继续阅读[）)]/gi,
 		/本章未完[，,]?请?点击下一页继续.*/gi,
 		/请点击下一页继续阅读/gi,
@@ -2969,6 +2962,7 @@
 		/^\s*[）)]/gm,
 		/手机用户请到.*阅读/gi,
 		/请记住本书.*网址/gi,
+		/【[^】\r\n]{1,120}】(?:小说|小說)(?:免费|免費)(?:阅读|閱讀)[，,][ \t\u3000]*(?:请|請)收藏[ \t\u3000]*[^【】\r\n]{1,32}【1qxs\.com】/giu,
 		/(?:[请請]?[记記]住首[发發][网網]站(?:域名)?|[请請][记記]住[网網]址)[^<\n]*/gi,
 		/百度搜索.*最新章节/gi,
 		/一秒记住.*为您提供/gi,
@@ -2982,20 +2976,13 @@
 		/请[|｜\s]*返[|｜\s]*回[|｜\s]*原[|｜\s]*网[|｜\s]*页[|｜\s]*阅[|｜\s]*读/gi,
 		/加[|｜\s]*载[|｜\s]*更[|｜\s]*多/gi,
 		/小[^\u4e00-\u9fff]{0,3}说[^\u4e00-\u9fff]{0,3}网[^\u4e00-\u9fff]{0,6}最[^\u4e00-\u9fff]{0,3}新[^\u4e00-\u9fff]{0,3}章[^\u4e00-\u9fff]{0,3}节[^\u4e00-\u9fff]{0,6}更[^\u4e00-\u9fff]{0,3}新[^\u4e00-\u9fff]{0,3}快/gi,
-		/最[^\u4e00-\u9fff]{0,3}新[^\u4e00-\u9fff]{0,3}章[^\u4e00-\u9fff]{0,3}节[^\u4e00-\u9fff]{0,6}更[^\u4e00-\u9fff]{0,3}新[^\u4e00-\u9fff]{0,3}快/gi
-	];
-	var SITE_WATERMARK_PATTERNS = [
-		/【[^】\r\n]{1,120}】(?:小说|小說)(?:免费|免費)(?:阅读|閱讀)[，,][ \t\u3000]*(?:请|請)收藏[ \t\u3000]*[^【】\r\n]{1,32}【1qxs\.com】/giu,
+		/最[^\u4e00-\u9fff]{0,3}新[^\u4e00-\u9fff]{0,3}章[^\u4e00-\u9fff]{0,3}节[^\u4e00-\u9fff]{0,6}更[^\u4e00-\u9fff]{0,3}新[^\u4e00-\u9fff]{0,3}快/gi,
 		/幻[^\u4e00-\u9fff]{0,3}想[^\u4e00-\u9fff]{0,3}姬[^\u4e00-\u9fff]{0,6}免[^\u4e00-\u9fff]{0,3}费[^\u4e00-\u9fff]{0,3}(?:阅|讀)[^\u4e00-\u9fff]{0,3}(?:读|讀)/gi,
 		/萝[^\u4e00-\u9fff]{0,3}拉[^\u4e00-\u9fff]{0,3}小[^\u4e00-\u9fff]{0,3}说[^\u4e00-\u9fff]{0,3}\d{1,3}[^\u4e00-\u9fff]{0,3}最[^\u4e00-\u9fff]{0,3}新[^\u4e00-\u9fff]{0,3}章[^\u4e00-\u9fff]{0,3}节[^\u4e00-\u9fff]{0,6}更[^\u4e00-\u9fff]{0,3}新[^\u4e00-\u9fff]{0,3}快/gi,
 		/(天天看小说|天天看小說)[^<\n]*ttks\.tw/gi,
-		/⚡?\s*天天看[小小說]{2}[^<\n]*/gi
-	];
-	var BARE_URL_PATTERNS = [/https?:\/\/[^\s<>"]+/gi, /www\.[a-z0-9]+\.(com|net|org|cc)/gi];
-	var AD_PATTERNS = [
-		...GENERIC_AD_PATTERNS,
-		...SITE_WATERMARK_PATTERNS,
-		...BARE_URL_PATTERNS
+		/⚡?\s*天天看[小小說]{2}[^<\n]*/gi,
+		/https?:\/\/[^\s<>"]+/gi,
+		/www\.[a-z0-9]+\.(com|net|org|cc)/gi
 	];
 	var ciweimao_exports = __exportAll({
 		ciweimaoRule: () => ciweimaoRule,
@@ -3385,8 +3372,7 @@
 		advanced: {
 			mutationSelector: "#J_BookRead",
 			mutationChildCount: 2,
-			timeout: 3e3,
-			lazyChapterShell: true
+			timeout: 3e3
 		},
 		meta: {
 			source: "builtin",
@@ -3409,8 +3395,7 @@
 		advanced: {
 			mutationSelector: "#J_BookRead",
 			mutationChildCount: 2,
-			timeout: 3e3,
-			lazyChapterShell: true
+			timeout: 3e3
 		},
 		meta: {
 			source: "builtin",
@@ -4059,6 +4044,17 @@
 	};
 	var novel543_exports = __exportAll({ novel543Rule: () => novel543Rule });
 	var CHAPTER_URL = /^https?:\/\/(?:www\.)?novel543\.com(\/\d+\/\d+_\d+)(?:_(\d+))?\.html(?:[?#].*)?$/;
+	function parseNovel543Url(url) {
+		const match = url.match(CHAPTER_URL);
+		if (!match) return null;
+		const parsed = new URL(url);
+		parsed.pathname = `${match[1]}.html`;
+		parsed.hash = "";
+		return {
+			chapterUrl: parsed.href,
+			page: Number(match[2] || 1)
+		};
+	}
 	var novel543Rule = {
 		id: "novel543",
 		name: "稷下書院",
@@ -4079,20 +4075,18 @@
 			bookSelector: ".header .nav li:last-child a"
 		},
 		toc: { excludeAncestors: ".chaplist > ul:not(.all)" },
-		advanced: { sectionUrl: {
-			pattern: CHAPTER_URL.source,
-			chapterPath: "$1.html",
-			pageGroup: 2
-		} },
-		hooks: { beforeParse: (doc) => {
-			const bookLink = doc.querySelector(".header .nav li:last-child a");
-			const bookTitle = doc.querySelector("meta[name=keywords]")?.content.match(/^(.+?)官方首[發发](?:[,，]|$)/)?.[1];
-			if (bookLink && !bookLink.textContent?.trim() && bookTitle) bookLink.textContent = bookTitle;
-			for (const p of doc.querySelectorAll("#chapterWarp .content > div > p")) {
-				const label = p.firstChild;
-				if (label?.nodeName === "SPAN" && /^[溫温]馨提示[:：]$/.test(label.textContent?.trim() || "")) p.remove();
+		hooks: {
+			parseSectionUrl: parseNovel543Url,
+			beforeParse: (doc) => {
+				const bookLink = doc.querySelector(".header .nav li:last-child a");
+				const bookTitle = doc.querySelector("meta[name=keywords]")?.content.match(/^(.+?)官方首[發发](?:[,，]|$)/)?.[1];
+				if (bookLink && !bookLink.textContent?.trim() && bookTitle) bookLink.textContent = bookTitle;
+				for (const p of doc.querySelectorAll("#chapterWarp .content > div > p")) {
+					const label = p.firstChild;
+					if (label?.nodeName === "SPAN" && /^[溫温]馨提示[:：]$/.test(label.textContent?.trim() || "")) p.remove();
+				}
 			}
-		} },
+		},
 		meta: {
 			source: "builtin",
 			exampleUrl: "https://www.novel543.com/1019622989/8096_941.html"
@@ -4469,7 +4463,7 @@
 		match: { pattern: "^https?://(?:www\\.)?ttks\\.tw/novel/chapters/[^/?#]+/\\d+\\.html(?:[?#].*)?$" },
 		content: {
 			selector: ".frame_body > .title + .content",
-			remove: ".anchor_bookmark, .txtcenter, .div_feedback, .social_share_frame, .social_share_inner_frame"
+			remove: ".anchor_bookmark, .txtcenter, .div_feedback, .social_share_frame"
 		},
 		navigation: {
 			prev: "#linkPrev",
@@ -4874,29 +4868,12 @@
 			this.builtInRules = builtInRules;
 			this.initialized = false;
 			this.compiledCache = new WeakMap();
-			this.sectionUrlCache = new WeakMap();
+			this.sectionUrlParsers = this.builtInRules.flatMap((rule) => rule.hooks?.parseSectionUrl ? [rule.hooks.parseSectionUrl] : []);
+			this.entryResolvers = this.builtInRules.flatMap((rule) => rule.hooks?.resolveEntryUrl ? [rule.hooks.resolveEntryUrl] : []);
 			this.parseSectionUrl = (url) => {
-				for (const rule of this.builtInRules) {
-					const shape = rule.advanced?.sectionUrl;
-					if (!shape) continue;
-					let match;
-					try {
-						match = this.compileSectionUrl(shape).exec(url);
-					} catch {
-						continue;
-					}
-					if (!match) continue;
-					try {
-						const parsed = new URL(url);
-						parsed.pathname = shape.chapterPath.replace(/\$(\d)/g, (_, group) => match[Number(group)] ?? "");
-						parsed.hash = "";
-						return {
-							chapterUrl: parsed.href,
-							page: Number(match[shape.pageGroup] || 1)
-						};
-					} catch {
-						return null;
-					}
+				for (const parse of this.sectionUrlParsers) {
+					const parsed = parse(url);
+					if (parsed) return parsed;
 				}
 				return null;
 			};
@@ -4905,23 +4882,10 @@
 			if (this.initialized) return;
 			this.initialized = true;
 		}
-		compileSectionUrl(shape) {
-			const cached = this.sectionUrlCache.get(shape);
-			if (cached) return cached;
-			const compiled = new RegExp(shape.pattern);
-			this.sectionUrlCache.set(shape, compiled);
-			return compiled;
-		}
 		resolveEntryUrl(doc, url) {
-			for (const rule of this.builtInRules) {
-				const resolve = rule.hooks?.resolveEntryUrl;
-				if (!resolve) continue;
-				try {
-					const resolved = resolve(doc, url);
-					if (resolved) return resolved;
-				} catch (e) {
-					console.debug("[RuleManager] resolveEntryUrl hook failed:", e);
-				}
+			for (const resolve of this.entryResolvers) {
+				const resolved = resolve(doc, url);
+				if (resolved) return resolved;
 			}
 			return null;
 		}
@@ -4966,7 +4930,9 @@
 		/^javascript:/i,
 		/BuyChapterUnLogin/i,
 		/\/0\.html$/i,
-		...NON_CHAPTER_ENDPOINT_PATTERNS,
+		/\/chapter\/get_par_tsu_list(?:$|[/?#])/i,
+		/\/chapter\/ajax_get_session_code(?:$|[/?#])/i,
+		/\/chapter\/get_book_chapter_detail_info(?:$|[/?#])/i,
 		/^https?:\/\/[^/]+\/?$/i,
 		/^https?:\/\/[^/]+\/(?:index|home|main)?\.?(?:html?|php|aspx)?$/i,
 		/^https?:\/\/[^/]+\/\?/i
@@ -5282,7 +5248,7 @@
 					isSection: false,
 					confidence: 0
 				};
-				if (isSectionLikeUrl(currentUrl, nextUrl, (url) => getRuleManager().parseSectionUrl(url))) {
+				if (isSectionLikeUrl(currentUrl, nextUrl, getRuleManager().parseSectionUrl)) {
 					const currentInfo = parseChapterSectionFromPathname(currentPath);
 					const nextInfo = parseChapterSectionFromPathname(nextPath);
 					if (currentInfo && nextInfo && currentInfo.chapterKey === nextInfo.chapterKey && nextInfo.section === currentInfo.section + 1 && nextInfo.section > 1) return {
@@ -6510,45 +6476,30 @@
 		if (!protectionInstance) protectionInstance = new SiteProtection();
 		return protectionInstance;
 	}
-	function chapterShellSelector(rule) {
-		return rule?.advanced?.lazyChapterShell ? rule.content.selector : void 0;
-	}
 	function normalizeTextForVipDetection(text) {
 		return text.replace(/\s+/g, "").replace(/[\u3000]/g, "").replace(/[，。！？、""''（）()【】[\]<>《》:：;；·~…—-]/g, "").toLowerCase();
 	}
-	var VIP_COPY_PATTERNS = [
-		/本章(?:为|是)?vip章节/,
-		/(vip|付费|收费)(?:章节|内容)/,
-		/(未订阅|未购买|未解锁).{0,10}(本章|本章节|章节|内容)/,
-		/(本章|本章节|章节|内容).{0,12}(?:已)?锁定/,
-		/(本章|本章节|章节|内容).{0,12}(?:需|需要).{0,6}(订阅|购买|付费|解锁)/,
-		/(订阅|购买|付费|解锁).{0,12}(后|即可|才能|方可|才可).{0,12}(阅读|查看|继续阅读|继续查看)/,
-		/(请|需).{0,6}(订阅|购买|付费|解锁).{0,12}(阅读|查看|继续阅读|继续查看)/,
-		/立即(订阅|购买|解锁|充值)/,
-		/(订阅|购买|解锁)本章/
-	];
-	function hasVipCopy(normalizedText) {
-		return VIP_COPY_PATTERNS.some((re) => re.test(normalizedText));
-	}
-	function isChapterShell(doc, shellSelector) {
-		if (!shellSelector) return false;
-		let container;
+	function isVipChapterPage(doc) {
 		try {
-			container = doc.querySelector(shellSelector);
-		} catch {
-			return false;
-		}
-		if (!container) return false;
-		return !hasVipCopy(normalizeTextForVipDetection(container.textContent || ""));
-	}
-	function isVipChapterPage(doc, options = {}) {
-		try {
-			if (isChapterShell(doc, options.chapterShellSelector)) return false;
+			const url = doc._mnrUrl || doc.location?.href || doc.baseURI || "";
+			if (/^https?:\/\/(?:www|wap)\.ciweimao\.com\/chapter\/\d+/i.test(url)) {
+				if (!!doc.querySelector("#J_BookCnt, #J_BookRead")) return false;
+			}
 		} catch {}
 		const rawText = doc.body?.textContent || "";
 		if (!rawText) return false;
 		const text = normalizeTextForVipDetection(rawText);
-		if (hasVipCopy(text)) return true;
+		if ([
+			/本章(?:为|是)?vip章节/,
+			/(vip|付费|收费)(?:章节|内容)/,
+			/(未订阅|未购买|未解锁).{0,10}(本章|本章节|章节|内容)/,
+			/(本章|本章节|章节|内容).{0,12}(?:已)?锁定/,
+			/(本章|本章节|章节|内容).{0,12}(?:需|需要).{0,6}(订阅|购买|付费|解锁)/,
+			/(订阅|购买|付费|解锁).{0,12}(后|即可|才能|方可|才可).{0,12}(阅读|查看|继续阅读|继续查看)/,
+			/(请|需).{0,6}(订阅|购买|付费|解锁).{0,12}(阅读|查看|继续阅读|继续查看)/,
+			/立即(订阅|购买|解锁|充值)/,
+			/(订阅|购买|解锁)本章/
+		].some((re) => re.test(text))) return true;
 		const cta = normalizeTextForVipDetection(Array.from(doc.querySelectorAll("a,button,input[type=\"button\"],input[type=\"submit\"]")).map((element) => {
 			if (element instanceof HTMLInputElement) return element.value || "";
 			return element.textContent || "";
@@ -6556,9 +6507,9 @@
 		if (/立即(订阅|购买|解锁|充值)/.test(cta) && /(vip|付费|订阅|购买|解锁|锁定)/.test(text)) return true;
 		return false;
 	}
-	function getChapterDocumentBlockReason(doc, options = {}) {
+	function getChapterDocumentBlockReason(doc) {
 		if (isCloudflareChallenge(doc)) return "cloudflare";
-		if (isVipChapterPage(doc, options)) return "vip";
+		if (isVipChapterPage(doc)) return "vip";
 		return null;
 	}
 	var DetectionEngine = class {
@@ -7425,7 +7376,7 @@
 		return null;
 	}
 	function normalizeUrlForFetch$1(url) {
-		const normalized = normalizeRedundantFirstPageParam(normalizeSiteChapterUrl(url));
+		const normalized = normalizeRedundantFirstPageParam(normalizeCiwemaoChapterUrl(url));
 		try {
 			const u = new URL(normalized);
 			u.hash = "";
@@ -8589,23 +8540,6 @@
 		]
 	};
 	var AutoEnableManager = class {
-		async classifyChapterDocument(doc, url) {
-			const reason = getChapterDocumentBlockReason(doc);
-			if (reason !== "vip") return reason;
-			const shellSelector = await this.resolveChapterShellSelector(url);
-			if (!shellSelector) return reason;
-			return getChapterDocumentBlockReason(doc, { chapterShellSelector: shellSelector });
-		}
-		async resolveChapterShellSelector(url) {
-			try {
-				const ruleManager = getRuleManager();
-				await ruleManager.initialize();
-				return chapterShellSelector((await ruleManager.matchRule(url))?.rule);
-			} catch (e) {
-				console.debug("[AutoEnableManager] Failed to resolve rule for classification:", e);
-				return;
-			}
-		}
 		recordDecision(url, decision) {
 			this.currentDecision = decision;
 			this.currentDecisionUrl = url;
@@ -8649,7 +8583,7 @@
 		async check(doc = document) {
 			const url = doc.location?.href || window.location.href;
 			const decide = (decision) => this.recordDecision(url, decision);
-			const blockReason = await this.classifyChapterDocument(doc, url);
+			const blockReason = getChapterDocumentBlockReason(doc);
 			if (blockReason === "cloudflare") return decide({
 				shouldEnable: false,
 				method: "manual",
@@ -8834,7 +8768,7 @@
 			this.currentDecisionUrl = void 0;
 		}
 		async manualEnable(doc = document) {
-			const blockReason = await this.classifyChapterDocument(doc, doc.location?.href || window.location.href);
+			const blockReason = getChapterDocumentBlockReason(doc);
 			if (blockReason) {
 				console.info(`[AutoEnableManager] Manual enable skipped: ${blockReason}`);
 				this.deactivateProtection();
@@ -18193,7 +18127,7 @@ ul, ol {
 		}
 	}
 	function normalizeUrlForFetch(url) {
-		const normalized = normalizeRedundantFirstPageParam(normalizeSiteChapterUrl(url));
+		const normalized = normalizeRedundantFirstPageParam(normalizeCiwemaoChapterUrl(url));
 		try {
 			const u = new URL(normalized);
 			u.hash = "";
@@ -18206,7 +18140,7 @@ ul, ol {
 		return url.replace(/\/$/, "").replace(/\/index\.html?$/, "");
 	}
 	function normalizeUrlForBlock(url) {
-		const normalized = normalizeSiteChapterUrl(url);
+		const normalized = normalizeCiwemaoChapterUrl(url);
 		try {
 			const u = new URL(normalized);
 			u.hash = "";
@@ -19194,20 +19128,15 @@ ul, ol {
 	async function loadRuleApiDocument(url, reference) {
 		const fetchDocument = (reference.rule ?? reference.chapter.rule)?.hooks?.fetchDocument;
 		if (!fetchDocument) return null;
-		try {
-			return await fetchDocument(url, {
-				bookTitle: reference.chapter.bookTitle,
-				indexUrl: reference.chapter.indexUrl,
-				refererUrl: reference.chapter.url
-			});
-		} catch (e) {
-			console.debug("[MNR] Rule fetchDocument hook failed:", e);
-			return null;
-		}
+		return fetchDocument(url, {
+			bookTitle: reference.chapter.bookTitle,
+			indexUrl: reference.chapter.indexUrl,
+			refererUrl: reference.chapter.url
+		});
 	}
 	async function parseCandidateDocument(ctx, load, parser, doc, runId, _referer, source) {
 		if (ctx.runtime.isViewStale(runId)) return "abort";
-		const blockReason = getChapterDocumentBlockReason(doc, { chapterShellSelector: chapterShellSelector(load.refChapter.rule ?? load.refChapter.chapter.rule) });
+		const blockReason = getChapterDocumentBlockReason(doc);
 		if (blockReason) recordDebugEvent("chapter.rejected", {
 			url: load.targetUrl,
 			reason: blockReason
@@ -19238,7 +19167,7 @@ ul, ol {
 	}
 	function isInvalidChapterUrl(url, currentChapterUrl) {
 		try {
-			const normalizedUrl = normalizeSiteChapterUrl(url);
+			const normalizedUrl = normalizeCiwemaoChapterUrl(url);
 			const parsed = new URL(normalizedUrl);
 			const pathname = parsed.pathname;
 			if (pathname === "/" || pathname === "") return true;
@@ -19247,16 +19176,17 @@ ul, ol {
 				const part = pathParts[0] || "";
 				if (!/\d/.test(part)) return true;
 			}
-			const invalidPatterns = [
+			for (const pattern of [
 				/^https?:\/\/[^/]+\/?$/i,
 				/^https?:\/\/[^/]+\/(?:index|home|main)?\.?(?:html?|php)?$/i,
 				/\/(?:book|novel|xiaoshuo|info)\/?\d*\/?$/i,
 				/\/(?:list|catalog|toc|contents?)\.?(?:html?)?$/i,
 				/\/(?:index|list|last|LastPage|end)\.(?:html?|php|aspx)/i,
 				/\/(?:user|login|register|search|rank|category|tag|author|help|about|contact|faq)\.(?:html?|php|aspx)$/i,
-				...NON_CHAPTER_ENDPOINT_PATTERNS
-			];
-			for (const pattern of invalidPatterns) if (pattern.test(normalizedUrl) || pattern.test(pathname)) return true;
+				/\/chapter\/get_par_tsu_list(?:$|[/?#])/i,
+				/\/chapter\/ajax_get_session_code(?:$|[/?#])/i,
+				/\/chapter\/get_book_chapter_detail_info(?:$|[/?#])/i
+			]) if (pattern.test(normalizedUrl) || pattern.test(pathname)) return true;
 			if (/\/(?:user|login|register|search|rank|category|tag|author|help|about|contact|faq)(?:\/|$)/i.test(pathname)) return true;
 			if (currentChapterUrl) {
 				const currentParsed = new URL(currentChapterUrl);
@@ -19449,7 +19379,7 @@ ul, ol {
 							if (!isCurrent()) break;
 							ctx.cacheAbort.value = null;
 							if (loaded) {
-								blockReason = getChapterDocumentBlockReason(loaded.doc, { chapterShellSelector: chapterShellSelector(rule) });
+								blockReason = getChapterDocumentBlockReason(loaded.doc);
 								if (!blockReason) parsed = await parseDocument(loaded.doc);
 							}
 							cleanupIframe?.();
@@ -19478,7 +19408,7 @@ ul, ol {
 								});
 							}
 							if (doc) {
-								blockReason = getChapterDocumentBlockReason(doc, { chapterShellSelector: chapterShellSelector(rule) });
+								blockReason = getChapterDocumentBlockReason(doc);
 								if (!blockReason) parsed = await parseDocument(doc);
 							}
 						}
@@ -19937,7 +19867,7 @@ ul, ol {
 				ctx.showToast("重新加载失败", "error");
 				return;
 			}
-			const blockReason = getChapterDocumentBlockReason(result.doc, { chapterShellSelector: chapterShellSelector(current.rule ?? current.chapter.rule) });
+			const blockReason = getChapterDocumentBlockReason(result.doc);
 			if (blockReason === "cloudflare") {
 				ctx.showToast("Cloudflare 验证页面，请完成验证后重试", "info", 4e3);
 				return;
