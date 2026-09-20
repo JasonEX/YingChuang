@@ -2,10 +2,12 @@
  * VIP chapter paging should be blocked with a toast instead of loading.
  */
 
+import { chapterShellSelector, isVipChapterPage } from '@/core/detection';
 import { createPinia, setActivePinia } from 'pinia';
 import { describe, expect, it, vi } from 'vitest';
-import { isVipChapterPage } from '@/core/detection';
+import { ciweimaoRule } from '@/core/rules/sites/ciweimao';
 import { JSDOM } from 'jsdom';
+import { qidianMobileRule } from '@/core/rules/sites/qidian';
 import { useReaderStore } from '@/ui/stores/reader';
 
 type MockGmXhrOpts = {
@@ -34,7 +36,7 @@ describe('VIP chapter block', () => {
       { url: 'https://www.ciweimao.com/chapter/113914324' }
     ).window.document;
 
-    expect(isVipChapterPage(doc, { contentSelector: '#J_BookRead' })).toBe(false);
+    expect(isVipChapterPage(doc, { chapterShellSelector: '#J_BookRead' })).toBe(false);
     // Without a matched rule there is nothing to prove the shell, so the generic heuristic wins.
     expect(isVipChapterPage(doc)).toBe(true);
   });
@@ -48,7 +50,7 @@ describe('VIP chapter block', () => {
       { url: 'https://www.ciweimao.com/chapter/113914324' }
     ).window.document;
 
-    expect(isVipChapterPage(doc, { contentSelector: '#J_BookRead' })).toBe(true);
+    expect(isVipChapterPage(doc, { chapterShellSelector: '#J_BookRead' })).toBe(true);
   });
 
   it('ignores a degenerate body selector so a real paywall is not whitelisted', () => {
@@ -58,7 +60,32 @@ describe('VIP chapter block', () => {
       { url: 'https://example.com/book/1/2.html' }
     ).window.document;
 
-    expect(isVipChapterPage(doc, { contentSelector: 'body' })).toBe(true);
+    expect(isVipChapterPage(doc, { chapterShellSelector: 'body' })).toBe(true);
+  });
+
+  it('only exempts rules that opted into the chapter-shell escape hatch', () => {
+    // Qidian's locked chapters look the opposite way round: preview prose sits *inside*
+    // main[id^="c-"] and the 登录订阅本章 notice is a sibling. Inferring the exemption from
+    // any content selector would let a paid preview through as a normal chapter.
+    const qidianLocked = new JSDOM(
+      `<!doctype html><html><body>
+        <main id="c-711273151" class="lock-mask"><p>两三句预览正文……</p></main>
+        <p>登录订阅本章: 16点</p>
+      </body></html>`,
+      { url: 'https://m.qidian.com/chapter/1234/711273151/' }
+    ).window.document;
+
+    expect(qidianMobileRule.advanced?.lazyChapterShell).toBeUndefined();
+    expect(chapterShellSelector(qidianMobileRule)).toBeUndefined();
+    expect(
+      isVipChapterPage(qidianLocked, {
+        chapterShellSelector: chapterShellSelector(qidianMobileRule),
+      })
+    ).toBe(true);
+
+    // Ciweimao opts in, so the same call shape clears its encrypted shell.
+    expect(ciweimaoRule.advanced?.lazyChapterShell).toBe(true);
+    expect(chapterShellSelector(ciweimaoRule)).toBe('#J_BookRead');
   });
 
   it('blocks VIP page on loadNextChapter and shows toast', async () => {

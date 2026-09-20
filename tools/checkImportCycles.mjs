@@ -3,8 +3,9 @@
  *
  * eslint-plugin-import would give the same guarantee, but it is a sizeable dev dependency for
  * one rule, so this walks the graph directly. It understands the '@/' alias, relative paths,
- * and treats a directory import as its index file. `import type` is skipped: a type-only edge
- * is erased at build time and cannot produce a runtime cycle.
+ * and treats a directory import as its index file. Side-effect-only imports (`import './x'`)
+ * are included because they execute at runtime. `import type` is skipped: a type-only edge is
+ * erased at build time and cannot produce a runtime cycle.
  */
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
@@ -50,6 +51,8 @@ function resolveSpecifier(specifier, fromFile) {
 // `import ... from 'x'`, `export ... from 'x'`, and `import('x')`, minus type-only forms.
 const IMPORT_RE = /(?:^|\n)\s*(?:import|export)\s+(?!type\s)([\s\S]*?)\s*from\s*['"]([^'"]+)['"]/g;
 const DYNAMIC_RE = /\bimport\(\s*['"]([^'"]+)['"]\s*\)/g;
+// `import 'x'` has no `from` clause but still executes the module, so it can close a cycle.
+const SIDE_EFFECT_RE = /(?:^|\n)\s*import\s+['"]([^'"]+)['"]/g;
 
 function readEdges(file) {
   const source = readFileSync(file, 'utf8');
@@ -68,9 +71,11 @@ function readEdges(file) {
     const resolved = resolveSpecifier(match[2], file);
     if (resolved) targets.add(resolved);
   }
-  for (const match of source.matchAll(DYNAMIC_RE)) {
-    const resolved = resolveSpecifier(match[1], file);
-    if (resolved) targets.add(resolved);
+  for (const re of [DYNAMIC_RE, SIDE_EFFECT_RE]) {
+    for (const match of source.matchAll(re)) {
+      const resolved = resolveSpecifier(match[1], file);
+      if (resolved) targets.add(resolved);
+    }
   }
   return targets;
 }

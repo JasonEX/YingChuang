@@ -4,9 +4,9 @@
  */
 
 import type { CachedChapter, CacheProgressState, TocEntry } from './types';
+import { chapterShellSelector, getChapterDocumentBlockReason } from '@/core/detection';
 import type { ComputedRef, Ref } from 'vue';
 import { fetchAndParseUrl } from '@/core/utils/network';
-import { getChapterDocumentBlockReason } from '@/core/detection';
 import { getParser } from '@/core/parser';
 import type { ParsedChapter } from '@/core/parser';
 import type { SiteRule } from '@/core/rules/types';
@@ -204,7 +204,7 @@ export function createCacheAll(ctx: CacheAllContext) {
             ctx.cacheAbort.value = null;
             if (loaded) {
               blockReason = getChapterDocumentBlockReason(loaded.doc, {
-                contentSelector: rule?.content?.selector,
+                chapterShellSelector: chapterShellSelector(rule),
               });
               if (!blockReason) parsed = await parseDocument(loaded.doc);
             }
@@ -235,7 +235,7 @@ export function createCacheAll(ctx: CacheAllContext) {
             }
             if (doc) {
               blockReason = getChapterDocumentBlockReason(doc, {
-                contentSelector: rule?.content?.selector,
+                chapterShellSelector: chapterShellSelector(rule),
               });
               if (!blockReason) parsed = await parseDocument(doc);
             }

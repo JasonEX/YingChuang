@@ -599,6 +599,9 @@ export const ciweimaoRule: SiteRule = {
     mutationSelector: '#J_BookRead',
     mutationChildCount: 2,
     timeout: 3000,
+    // #J_BookRead ships empty and is decrypted by script; the subscription dialog is a
+    // sibling, so the generic VIP heuristics would block every free chapter.
+    lazyChapterShell: true,
   },
   meta: { source: 'builtin', exampleUrl: 'https://www.ciweimao.com/chapter/113909523' },
 };
@@ -628,6 +631,9 @@ export const ciweimaoWapRule: SiteRule = {
     mutationSelector: '#J_BookRead',
     mutationChildCount: 2,
     timeout: 3000,
+    // #J_BookRead ships empty and is decrypted by script; the subscription dialog is a
+    // sibling, so the generic VIP heuristics would block every free chapter.
+    lazyChapterShell: true,
   },
   meta: { source: 'builtin', exampleUrl: 'https://wap.ciweimao.com/chapter/113489050' },
 };

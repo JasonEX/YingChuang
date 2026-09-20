@@ -134,6 +134,18 @@ interface AdvancedConfig {
    * "page N of a shorter id". Without it the generic layer would need to know the host name.
    */
   sectionUrl?: SectionUrlShape;
+  /**
+   * This site serves its chapter container empty and fills it from script (encrypted or
+   * lazily decoded), while subscription copy may sit elsewhere on the page. Generic VIP
+   * heuristics read that copy as a paywall, so when `content.selector` is present and carries
+   * no subscription copy of its own, the document is treated as a chapter shell.
+   *
+   * Opt in only for sites that genuinely do this. On an ordinary paywall the preview prose
+   * sits inside the container and the notice is a sibling — Qidian's locked chapters look
+   * exactly like that — so inferring the exemption from any content selector would clear
+   * real paywalls.
+   */
+  lazyChapterShell?: boolean;
 }
 
 /** Site-declared shape of a section (multi-page chapter) URL. */

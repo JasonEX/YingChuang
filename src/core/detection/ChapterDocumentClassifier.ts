@@ -1,16 +1,26 @@
 import { isCloudflareChallenge } from '@/core/protection';
+import type { SiteRule } from '@/core/rules/types';
 
 export type ChapterDocumentBlockReason = 'cloudflare' | 'vip';
 
 export interface ChapterDocumentClassifyOptions {
   /**
-   * `content.selector` of the site rule that matched this document, when one is known.
-   *
-   * Used to suppress false positives: some sites render subscription copy next to a real
-   * chapter (or next to an encrypted shell that JavaScript fills in later), which would
-   * otherwise trip the generic VIP heuristics below.
+   * Content container of a rule that opted into the chapter-shell exemption via
+   * `advanced.lazyChapterShell`. Resolve it with {@link chapterShellSelector} rather than
+   * passing `content.selector` directly — the exemption is not safe for every site.
    */
-  contentSelector?: string;
+  chapterShellSelector?: string;
+}
+
+/**
+ * Shell-exemption selector for a rule, or undefined when the rule did not opt in.
+ *
+ * Gating on the opt-in matters: on a locked Qidian chapter the preview prose sits inside
+ * `main[id^="c-"]` while the 登录订阅本章 notice is a sibling, so treating any content
+ * selector as proof of a chapter would let a paid preview through as a normal chapter.
+ */
+export function chapterShellSelector(rule?: SiteRule | null): string | undefined {
+  return rule?.advanced?.lazyChapterShell ? rule.content.selector : undefined;
 }
 
 export function normalizeTextForVipDetection(text: string): string {
@@ -46,12 +56,12 @@ function hasVipCopy(normalizedText: string): boolean {
  * notice belongs to surrounding page furniture and the container is the chapter shell —
  * possibly still empty, because some sites decrypt or lazily inject the text after load.
  */
-function isChapterShell(doc: Document, contentSelector?: string): boolean {
-  if (!contentSelector) return false;
+function isChapterShell(doc: Document, shellSelector?: string): boolean {
+  if (!shellSelector) return false;
 
   let container: Element | null;
   try {
-    container = doc.querySelector(contentSelector);
+    container = doc.querySelector(shellSelector);
   } catch {
     return false;
   }
@@ -69,7 +79,7 @@ export function isVipChapterPage(
   options: ChapterDocumentClassifyOptions = {}
 ): boolean {
   try {
-    if (isChapterShell(doc, options.contentSelector)) return false;
+    if (isChapterShell(doc, options.chapterShellSelector)) return false;
   } catch {
     // Fall through to generic VIP detection.
   }

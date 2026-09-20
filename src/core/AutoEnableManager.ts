@@ -8,6 +8,7 @@
  */
 
 import {
+  chapterShellSelector,
   DetectionEngine,
   type DetectionEngineResult,
   getChapterDocumentBlockReason,
@@ -98,11 +99,13 @@ export class AutoEnableManager {
   private currentDecisionUrl?: string;
 
   /**
-   * content.selector of the rule that matches this URL, when one does.
+   * Chapter-shell selector for this URL's rule, but only when that rule opted in via
+   * `advanced.lazyChapterShell`.
    *
-   * Passed to the chapter-document classifier so a site whose subscription copy sits next to a
-   * real chapter shell is not mistaken for a paywall. Keeping the lookup here — rather than a
-   * hostname check inside the classifier — keeps site knowledge in src/core/rules/sites/*.
+   * Lets a site whose subscription copy sits beside an encrypted chapter shell avoid a false
+   * paywall verdict, without clearing real paywalls on sites that never opted in. Keeping the
+   * lookup here — rather than a hostname check inside the classifier — keeps site knowledge in
+   * src/core/rules/sites/*.
    */
   private async classifyChapterDocument(
     doc: Document,
@@ -113,17 +116,17 @@ export class AutoEnableManager {
     // short-circuit they have always had, so this stays off the hot path.
     if (reason !== 'vip') return reason;
 
-    const contentSelector = await this.resolveContentSelector(url);
-    if (!contentSelector) return reason;
-    return getChapterDocumentBlockReason(doc, { contentSelector });
+    const shellSelector = await this.resolveChapterShellSelector(url);
+    if (!shellSelector) return reason;
+    return getChapterDocumentBlockReason(doc, { chapterShellSelector: shellSelector });
   }
 
-  private async resolveContentSelector(url: string): Promise<string | undefined> {
+  private async resolveChapterShellSelector(url: string): Promise<string | undefined> {
     try {
       const ruleManager = getRuleManager();
       await ruleManager.initialize();
       const match = await ruleManager.matchRule(url);
-      return match?.rule.content.selector;
+      return chapterShellSelector(match?.rule);
     } catch (e) {
       console.debug('[AutoEnableManager] Failed to resolve rule for classification:', e);
       return undefined;

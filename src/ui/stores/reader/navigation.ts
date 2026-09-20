@@ -4,6 +4,7 @@
  */
 
 import type { CachedChapter, LoadSource } from './types';
+import { chapterShellSelector, getChapterDocumentBlockReason } from '@/core/detection';
 import { clearNavFailure, recordNavFailure } from './navFailure';
 import {
   clearPendingAbort,
@@ -22,7 +23,6 @@ import { normalizeUrl, normalizeUrlForBlock, normalizeUrlForFetch } from './util
 import { prepareChapterLoad, validateTargetChapterUrl } from './chapterLoadGuards';
 import { detectTocPage } from './detection';
 import { fetchAndParseUrl } from '@/core/utils/network';
-import { getChapterDocumentBlockReason } from '@/core/detection';
 import type { NavigationContext } from './navigationContext';
 import { parseWithSectionMerge } from './section';
 import { recordDebugEvent } from '@/core/debug/events';
@@ -298,7 +298,7 @@ export function createNavigation(ctx: NavigationContext) {
     }
 
     const blockReason = getChapterDocumentBlockReason(result.doc, {
-      contentSelector: (current.rule ?? current.chapter.rule)?.content?.selector,
+      chapterShellSelector: chapterShellSelector(current.rule ?? current.chapter.rule),
     });
     if (blockReason === 'cloudflare') {
       ctx.showToast('Cloudflare 验证页面，请完成验证后重试', 'info', 4000);

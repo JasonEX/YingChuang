@@ -3385,7 +3385,8 @@
 		advanced: {
 			mutationSelector: "#J_BookRead",
 			mutationChildCount: 2,
-			timeout: 3e3
+			timeout: 3e3,
+			lazyChapterShell: true
 		},
 		meta: {
 			source: "builtin",
@@ -3408,7 +3409,8 @@
 		advanced: {
 			mutationSelector: "#J_BookRead",
 			mutationChildCount: 2,
-			timeout: 3e3
+			timeout: 3e3,
+			lazyChapterShell: true
 		},
 		meta: {
 			source: "builtin",
@@ -6508,6 +6510,9 @@
 		if (!protectionInstance) protectionInstance = new SiteProtection();
 		return protectionInstance;
 	}
+	function chapterShellSelector(rule) {
+		return rule?.advanced?.lazyChapterShell ? rule.content.selector : void 0;
+	}
 	function normalizeTextForVipDetection(text) {
 		return text.replace(/\s+/g, "").replace(/[\u3000]/g, "").replace(/[，。！？、""''（）()【】[\]<>《》:：;；·~…—-]/g, "").toLowerCase();
 	}
@@ -6525,11 +6530,11 @@
 	function hasVipCopy(normalizedText) {
 		return VIP_COPY_PATTERNS.some((re) => re.test(normalizedText));
 	}
-	function isChapterShell(doc, contentSelector) {
-		if (!contentSelector) return false;
+	function isChapterShell(doc, shellSelector) {
+		if (!shellSelector) return false;
 		let container;
 		try {
-			container = doc.querySelector(contentSelector);
+			container = doc.querySelector(shellSelector);
 		} catch {
 			return false;
 		}
@@ -6538,7 +6543,7 @@
 	}
 	function isVipChapterPage(doc, options = {}) {
 		try {
-			if (isChapterShell(doc, options.contentSelector)) return false;
+			if (isChapterShell(doc, options.chapterShellSelector)) return false;
 		} catch {}
 		const rawText = doc.body?.textContent || "";
 		if (!rawText) return false;
@@ -8587,15 +8592,15 @@
 		async classifyChapterDocument(doc, url) {
 			const reason = getChapterDocumentBlockReason(doc);
 			if (reason !== "vip") return reason;
-			const contentSelector = await this.resolveContentSelector(url);
-			if (!contentSelector) return reason;
-			return getChapterDocumentBlockReason(doc, { contentSelector });
+			const shellSelector = await this.resolveChapterShellSelector(url);
+			if (!shellSelector) return reason;
+			return getChapterDocumentBlockReason(doc, { chapterShellSelector: shellSelector });
 		}
-		async resolveContentSelector(url) {
+		async resolveChapterShellSelector(url) {
 			try {
 				const ruleManager = getRuleManager();
 				await ruleManager.initialize();
-				return (await ruleManager.matchRule(url))?.rule.content.selector;
+				return chapterShellSelector((await ruleManager.matchRule(url))?.rule);
 			} catch (e) {
 				console.debug("[AutoEnableManager] Failed to resolve rule for classification:", e);
 				return;
@@ -19202,7 +19207,7 @@ ul, ol {
 	}
 	async function parseCandidateDocument(ctx, load, parser, doc, runId, _referer, source) {
 		if (ctx.runtime.isViewStale(runId)) return "abort";
-		const blockReason = getChapterDocumentBlockReason(doc, { contentSelector: (load.refChapter.rule ?? load.refChapter.chapter.rule)?.content?.selector });
+		const blockReason = getChapterDocumentBlockReason(doc, { chapterShellSelector: chapterShellSelector(load.refChapter.rule ?? load.refChapter.chapter.rule) });
 		if (blockReason) recordDebugEvent("chapter.rejected", {
 			url: load.targetUrl,
 			reason: blockReason
@@ -19444,7 +19449,7 @@ ul, ol {
 							if (!isCurrent()) break;
 							ctx.cacheAbort.value = null;
 							if (loaded) {
-								blockReason = getChapterDocumentBlockReason(loaded.doc, { contentSelector: rule?.content?.selector });
+								blockReason = getChapterDocumentBlockReason(loaded.doc, { chapterShellSelector: chapterShellSelector(rule) });
 								if (!blockReason) parsed = await parseDocument(loaded.doc);
 							}
 							cleanupIframe?.();
@@ -19473,7 +19478,7 @@ ul, ol {
 								});
 							}
 							if (doc) {
-								blockReason = getChapterDocumentBlockReason(doc, { contentSelector: rule?.content?.selector });
+								blockReason = getChapterDocumentBlockReason(doc, { chapterShellSelector: chapterShellSelector(rule) });
 								if (!blockReason) parsed = await parseDocument(doc);
 							}
 						}
@@ -19932,7 +19937,7 @@ ul, ol {
 				ctx.showToast("重新加载失败", "error");
 				return;
 			}
-			const blockReason = getChapterDocumentBlockReason(result.doc, { contentSelector: (current.rule ?? current.chapter.rule)?.content?.selector });
+			const blockReason = getChapterDocumentBlockReason(result.doc, { chapterShellSelector: chapterShellSelector(current.rule ?? current.chapter.rule) });
 			if (blockReason === "cloudflare") {
 				ctx.showToast("Cloudflare 验证页面，请完成验证后重试", "info", 4e3);
 				return;
