@@ -1,3 +1,11 @@
+export interface SiteRequestDiagnostic {
+  url: string;
+  finalUrl: string | null;
+  transport: 'fetch' | 'gm' | null;
+  status: number | null;
+  reason: string;
+}
+
 interface SiteRequestOptions<T> {
   responseType: 'text' | 'json';
   parse: (data: unknown) => T | null;
@@ -8,6 +16,7 @@ interface SiteRequestOptions<T> {
   body?: string;
   timeoutMs?: number;
   gmFallback?: boolean;
+  onResult?: (result: SiteRequestDiagnostic) => void;
 }
 
 function getPageFetch(): typeof fetch | null {
@@ -27,15 +36,24 @@ export function requestSiteData<T>(url: string, options: SiteRequestOptions<T>):
     let gmRequest: { abort: () => void } | undefined;
     let settled = false;
     const timeoutMs = options.timeoutMs ?? 10_000;
+    const diagnostic: SiteRequestDiagnostic = {
+      url,
+      finalUrl: null,
+      transport: null,
+      status: null,
+      reason: 'unavailable',
+    };
     const finish = (value: T | null) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       options.setAbort(null);
+      options.onResult?.({ ...diagnostic, reason: value === null ? diagnostic.reason : 'success' });
       resolve(value);
     };
-    const cancel = () => {
+    const cancel = (reason = 'cancelled') => {
       if (settled) return;
+      diagnostic.reason = reason;
       finish(null);
       controller.abort();
       try {
@@ -44,7 +62,7 @@ export function requestSiteData<T>(url: string, options: SiteRequestOptions<T>):
         console.debug('[MNR] Site request abort failed:', error);
       }
     };
-    const timer = setTimeout(cancel, timeoutMs);
+    const timer = setTimeout(() => cancel('timeout'), timeoutMs);
     options.setAbort(cancel);
 
     const parse = (data: unknown): T | null => {
@@ -61,6 +79,8 @@ export function requestSiteData<T>(url: string, options: SiteRequestOptions<T>):
         if (settled) return;
         const fetcher = getPageFetch();
         if (fetcher) {
+          diagnostic.transport = 'fetch';
+          diagnostic.reason = 'network';
           try {
             const response = await fetcher(url, {
               method: options.method ?? 'GET',
@@ -70,6 +90,9 @@ export function requestSiteData<T>(url: string, options: SiteRequestOptions<T>):
               signal: controller.signal,
             });
             if (settled) return;
+            diagnostic.status = response.status;
+            diagnostic.finalUrl = response.url || url;
+            diagnostic.reason = response.ok ? 'parse' : 'http';
             if (response.ok) {
               const data = await response[options.responseType]();
               if (settled) return;
@@ -89,6 +112,10 @@ export function requestSiteData<T>(url: string, options: SiteRequestOptions<T>):
           finish(null);
           return;
         }
+        diagnostic.transport = 'gm';
+        diagnostic.status = null;
+        diagnostic.finalUrl = null;
+        diagnostic.reason = 'network';
         gmRequest = gmXhr({
           method: options.method ?? 'GET',
           url,
@@ -101,10 +128,14 @@ export function requestSiteData<T>(url: string, options: SiteRequestOptions<T>):
           withCredentials: true,
           onload: response => {
             if (settled) return;
+            diagnostic.status = response.status;
+            diagnostic.finalUrl = response.finalUrl || url;
+            diagnostic.reason = 'http';
             if (response.status < 200 || response.status >= 300) {
               finish(null);
               return;
             }
+            diagnostic.reason = 'parse';
             try {
               const data =
                 options.responseType === 'json'
@@ -117,8 +148,11 @@ export function requestSiteData<T>(url: string, options: SiteRequestOptions<T>):
             }
           },
           onerror: () => finish(null),
-          onabort: () => finish(null),
-          ontimeout: cancel,
+          onabort: () => {
+            diagnostic.reason = 'cancelled';
+            finish(null);
+          },
+          ontimeout: () => cancel('timeout'),
         });
       } catch (error) {
         console.warn('[MNR] Site request failed:', error);

@@ -27,6 +27,28 @@ import {
 
 const targetUrl = 'http://mnr.test/chapter/100.html';
 
+async function copyReaderDiagnostic(page: Page) {
+  await page.evaluate(() => {
+    const target = window as Window & {
+      __mnrDiagnosticText?: string;
+      __mnrMenuCommands?: Array<{ caption: string; fn: () => void }>;
+    };
+    target.__mnrDiagnosticText = '';
+    globalThis.GM_setClipboard = text => {
+      target.__mnrDiagnosticText = text;
+    };
+    const command = target.__mnrMenuCommands?.find(item => item.caption === '复制诊断信息');
+    if (!command) throw new Error('Diagnostic menu command is missing');
+    command.fn();
+  });
+  const read = () =>
+    page.evaluate(
+      () => (window as Window & { __mnrDiagnosticText?: string }).__mnrDiagnosticText || ''
+    );
+  await expect.poll(read).not.toBe('');
+  return JSON.parse(await read());
+}
+
 for (const site of pagedCatalogSites) {
   for (const width of site.id === 'wxsl' ? [1280, 390] : [390]) {
     test(`${site.id} catalog stays ordered at ${width}px and retries incomplete pagination`, async ({
@@ -82,6 +104,17 @@ for (const site of pagedCatalogSites) {
       await expect(root).toContainText('目录加载失败');
       await expect(root.locator('.mnr-chapter-button')).toHaveCount(0);
       expect(catalogRequests).toEqual([1, 2]);
+      const failedDiagnostic = await copyReaderDiagnostic(page);
+      expect(failedDiagnostic.reader.toc.lastLoad).toMatchObject({
+        loader: 'paged',
+        outcome: 'failed',
+        pages: 1,
+        request: { url: site.origin + site.tocPath(2), status: 403 },
+      });
+      expect(Array.isArray(failedDiagnostic.reader.navigation.loadedUrls.tail)).toBe(true);
+      expect(
+        failedDiagnostic.recentEvents.some((event: { type: string }) => event.type === 'toc.load')
+      ).toBe(true);
 
       // Cache-all must retry the failed catalog, not offer to cache its first page.
       let cacheConfirmations = 0;
@@ -93,6 +126,17 @@ for (const site of pagedCatalogSites) {
       await expect(root.locator('.mnr-drawer-position')).toContainText('第 25 / 46 章');
       expect(cacheConfirmations).toBe(0);
       expect(catalogRequests).toEqual([1, 2, 1, 2, 3]);
+      const completedDiagnostic = await copyReaderDiagnostic(page);
+      expect(completedDiagnostic.reader.toc.lastLoad).toMatchObject({
+        outcome: 'complete',
+        pages: 3,
+        entries: 46,
+        reason: 'last-page',
+      });
+      expect(completedDiagnostic.reader.toc.firstUrls[0]).toBe(site.origin + site.chapterPath(1));
+      expect(completedDiagnostic.reader.toc.lastUrls.at(-1)).toBe(
+        site.origin + site.chapterPath(46)
+      );
       // The drawer virtualizes rows. Check both ends through its scroll surface.
       const list = root.locator('.mnr-drawer-content');
       await list.evaluate(el => {

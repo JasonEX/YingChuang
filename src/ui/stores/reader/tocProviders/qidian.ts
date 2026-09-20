@@ -1,6 +1,7 @@
 import { extractBookId, normalizeUrlForFetch, resolveUrl } from '../utils';
 import { requestSiteData } from '@/core/utils/siteRequest';
 import type { SiteRule } from '@/core/rules/types';
+import type { SpecialTocLoaderContext } from './index';
 import type { TocEntry } from '../types';
 
 type QidianCategoryChapter = {
@@ -142,7 +143,7 @@ function qidianCategoryToEntries(
 async function loadQidianTocEntries(
   indexUrl: string,
   currentUrl: string,
-  setAbort: (abort: (() => void) | null) => void
+  context: SpecialTocLoaderContext
 ): Promise<TocEntry[]> {
   const apiUrl = buildQidianCategoryUrl(indexUrl, currentUrl);
   if (!apiUrl) return [];
@@ -150,7 +151,8 @@ async function loadQidianTocEntries(
   return (
     (await requestSiteData(apiUrl, {
       responseType: 'json',
-      setAbort,
+      setAbort: context.setAbort,
+      onResult: context.onRequest,
       referrer: currentUrl || indexUrl,
       headers: {
         Accept: 'application/json, text/javascript, */*; q=0.01',
@@ -170,9 +172,6 @@ export const qidianTocLoader = {
   id: 'qidian',
   matches: (context: { currentUrl: string; indexUrl: string; rule?: SiteRule }) =>
     isQidianTocRequest(context.indexUrl, context.currentUrl, context.rule),
-  load: (context: {
-    currentUrl: string;
-    indexUrl: string;
-    setAbort: (abort: (() => void) | null) => void;
-  }) => loadQidianTocEntries(context.indexUrl, context.currentUrl, context.setAbort),
+  load: (context: SpecialTocLoaderContext) =>
+    loadQidianTocEntries(context.indexUrl, context.currentUrl, context),
 };

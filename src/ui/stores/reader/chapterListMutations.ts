@@ -80,14 +80,6 @@ export async function insertParsedChapter(
   }
   if (ctx.runtime.isViewStale(runId)) return false;
 
-  if (!ctx.history.value.includes(parsed.url)) {
-    if (load.isNext) {
-      ctx.history.value.push(parsed.url);
-    } else {
-      ctx.history.value.unshift(parsed.url);
-    }
-  }
-
   trimDisplayChapters(ctx, load.isNext);
 
   return true;

@@ -32,7 +32,6 @@ import { trimCachedContents } from './trim';
 export interface CacheAllContext {
   // State refs
   cacheProgress: Ref<CacheProgressState>;
-  cacheQueue: Ref<string[]>;
   cacheFailedUrls: Ref<string[]>;
   cacheAbort: Ref<(() => void) | null>;
   cachedContents: Ref<Map<string, CachedChapter>>;
@@ -63,6 +62,13 @@ export interface CacheAllContext {
 
 export function createCacheAll(ctx: CacheAllContext) {
   let taskId = 0;
+  let lastTask: {
+    chapterUrl: string | null;
+    requested: number;
+    firstUrls: string[];
+    lastUrls: string[];
+    currentUrl: string | null;
+  } | null = null;
   /**
    * Batch cache chapters (best-effort, sequential)
    * Persists chapters to storage (best-effort); in-memory cache is LRU-capped.
@@ -71,6 +77,14 @@ export function createCacheAll(ctx: CacheAllContext) {
     const runId = ctx.runtime.sessionId();
     if (ctx.cacheProgress.value.running) return;
 
+    const task = {
+      chapterUrl: ctx.chapter.value?.url ?? null,
+      requested: 0,
+      firstUrls: [] as string[],
+      lastUrls: [] as string[],
+      currentUrl: null as string | null,
+    };
+    lastTask = task;
     const fullBook = urls === undefined;
     const currentTask = ++taskId;
     const isCurrent = () => currentTask === taskId && !ctx.runtime.isSessionStale(runId);
@@ -97,7 +111,6 @@ export function createCacheAll(ctx: CacheAllContext) {
 
       let cacheableChapterCount = 0;
       let taskList = urls ? urls.map(normalizeUrlForFetch).filter(url => !isIndexUrl(url)) : []; // No limit
-      ctx.cacheQueue.value = [...taskList];
 
       // 目录列表：由阅读器统一加载的目录决定缓存全本的任务
       if (fullBook) {
@@ -127,11 +140,13 @@ export function createCacheAll(ctx: CacheAllContext) {
         taskList = Array.from(tocLinks).filter(
           url => !ctx.cachedContents.value.has(url) && !persistedSet.has(url)
         );
-        ctx.cacheQueue.value = [...taskList];
       }
 
       // Total is actual list length
       const estimatedTotal = taskList.length;
+      task.requested = estimatedTotal;
+      task.firstUrls = taskList.slice(0, 4);
+      task.lastUrls = taskList.slice(-4);
       if (!isCurrent()) return;
       if (estimatedTotal === 0) {
         if (fullBook) {
@@ -156,6 +171,7 @@ export function createCacheAll(ctx: CacheAllContext) {
 
       while (isCurrent() && ctx.cacheProgress.value.running && nextUrl) {
         const targetUrl = normalizeUrlForFetch(nextUrl);
+        task.currentUrl = targetUrl;
 
         // 去重 - only stored content can satisfy an offline-cache task.
         if (
@@ -348,7 +364,6 @@ export function createCacheAll(ctx: CacheAllContext) {
   function cancelCacheAll(): void {
     taskId += 1;
     ctx.cacheProgress.value = { done: 0, total: 0, failed: 0, running: false };
-    ctx.cacheQueue.value = [];
     ctx.cacheFailedUrls.value = [];
     ctx.cacheAbort.value?.();
     ctx.cacheAbort.value = null;
@@ -360,5 +375,5 @@ export function createCacheAll(ctx: CacheAllContext) {
     return startCacheAll(urls);
   }
 
-  return { startCacheAll, cancelCacheAll, retryFailedCache };
+  return { startCacheAll, cancelCacheAll, retryFailedCache, getCacheDebugSnapshot: () => lastTask };
 }

@@ -40,7 +40,6 @@ describe('chapterLoadGuards', () => {
       originalTitles: ref(new Map()),
       currentConversionMode: ref('none'),
       navFailures: overrides.navFailures || new Map(),
-      history: ref([]),
       runtime: {
         bumpView: vi.fn(() => 1),
         isViewStale: vi.fn(() => false),

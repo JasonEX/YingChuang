@@ -66,7 +66,6 @@ describe('chapterListMutations', () => {
       originalTitles: ref(new Map()),
       currentConversionMode: ref('none'),
       navFailures: new Map(),
-      history: ref([]),
       runtime: {
         bumpView: vi.fn(() => 1),
         isViewStale: vi.fn(() => false),
@@ -125,7 +124,6 @@ describe('chapterListMutations', () => {
     expect(ctx.chapters.value.at(-1)?.chapter.url).toBe('https://example.com/6.html');
     expect(ctx.loadedUrls.value.has('https://example.com/7.html')).toBe(false);
     expect(ctx.currentChapterIndex.value).toBe(1);
-    expect(ctx.history.value[0]).toBe('https://example.com/1.html');
     expect(ctx.cachedContents.value.get('https://example.com/1.html')?.chapter.url).toBe(
       parsed.url
     );
@@ -150,7 +148,6 @@ describe('chapterListMutations', () => {
     expect(ctx.originalContents.value.has(entries[0].id)).toBe(false);
     expect(ctx.originalTitles.value.has(entries[0].id)).toBe(false);
     expect(ctx.currentChapterIndex.value).toBe(3);
-    expect(ctx.history.value).toEqual(['https://example.com/7.html']);
   });
 
   it('rebuilds display state from cached content and applies conversion', async () => {
@@ -200,7 +197,7 @@ describe('chapterListMutations', () => {
   });
 
   it.each(['cached', 'parsed'] as const)(
-    'does not trim or update history after a stale %s insertion',
+    'does not trim the new view after a stale %s insertion',
     async kind => {
       const ctx = makeContext();
       ctx.currentConversionMode.value = 'sc';
@@ -218,12 +215,10 @@ describe('chapterListMutations', () => {
         makeEntry(index + 20)
       );
       ctx.chapters.value = replacement;
-      ctx.history.value = ['new-view'];
       vi.mocked(ctx.runtime.isViewStale).mockReturnValue(true);
       resolve();
       expect(await run).toBe(false);
       expect(ctx.chapters.value).toHaveLength(MAX_CACHED_CHAPTERS + 1);
-      expect(ctx.history.value).toEqual(['new-view']);
     }
   );
 });

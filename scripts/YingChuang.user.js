@@ -3,7 +3,7 @@
 // @name:zh-CN         萤窗
 // @name:zh-TW         螢窗
 // @namespace          https://github.com/JasonEX
-// @version            1.0.3
+// @version            1.0.4
 // @author             JasonEX
 // @description        萤窗：小说阅读脚本，智能正文识别、连续阅读、阅读位置恢复、简繁转换
 // @description:zh-CN  萤窗：小说阅读脚本，智能正文识别、连续阅读、阅读位置恢复、简繁转换
@@ -8795,9 +8795,9 @@
 		else if (options) managerInstance.updateOptions(options);
 		return managerInstance;
 	}
-	var VERSION = "1.0.3";
+	var VERSION = "1.0.4";
 	var BUILD_DATE = "2026-09-20";
-	var SENSITIVE_QUERY_KEY = /(?:^|[_-])(?:token|auth|session|sid|key|sign|signature|ticket|password|passwd|pwd|jwt|credential|access|refresh|challenge|chl)(?:[_-]|$)|^__cf_/i;
+	var SENSITIVE_QUERY_KEY = /(?:^|[_-])(?:token|auth|session|sid|key|sign|signature|ticket|password|passwd|pwd|jwt|credential|access|refresh|challenge|chl)(?:[_-]|$)|^__cf_|^_csrfToken$/i;
 	function redactUrl(url) {
 		if (!url) return null;
 		try {
@@ -8938,8 +8938,8 @@
 			browser: getBrowserSnapshot(),
 			page: getPageSnapshot(),
 			config: options.configStore ? getConfigSnapshot(options.configStore) : null,
-			reader: options.readerStore?.getDebugSnapshot ? toDebugValue(options.readerStore.getDebugSnapshot()) : null,
-			recentEvents: toDebugValue(getDebugEvents())
+			reader: options.readerStore?.getDebugSnapshot ? toDebugValue(options.readerStore.getDebugSnapshot(), 5) : null,
+			recentEvents: getDebugEvents().map((event) => toDebugValue(event, 4))
 		};
 	}
 	async function copyDiagnosticInfo(options = {}) {
@@ -18201,15 +18201,27 @@ ul, ol {
 			let gmRequest;
 			let settled = false;
 			const timeoutMs = options.timeoutMs ?? 1e4;
+			const diagnostic = {
+				url,
+				finalUrl: null,
+				transport: null,
+				status: null,
+				reason: "unavailable"
+			};
 			const finish = (value) => {
 				if (settled) return;
 				settled = true;
 				clearTimeout(timer);
 				options.setAbort(null);
+				options.onResult?.({
+					...diagnostic,
+					reason: value === null ? diagnostic.reason : "success"
+				});
 				resolve(value);
 			};
-			const cancel = () => {
+			const cancel = (reason = "cancelled") => {
 				if (settled) return;
+				diagnostic.reason = reason;
 				finish(null);
 				controller.abort();
 				try {
@@ -18218,7 +18230,7 @@ ul, ol {
 					console.debug("[MNR] Site request abort failed:", error);
 				}
 			};
-			const timer = setTimeout(cancel, timeoutMs);
+			const timer = setTimeout(() => cancel("timeout"), timeoutMs);
 			options.setAbort(cancel);
 			const parse = (data) => {
 				try {
@@ -18232,26 +18244,33 @@ ul, ol {
 				try {
 					if (settled) return;
 					const fetcher = getPageFetch();
-					if (fetcher) try {
-						const response = await fetcher(url, {
-							method: options.method ?? "GET",
-							credentials: "include",
-							headers: options.headers,
-							...options.body === void 0 ? {} : { body: options.body },
-							signal: controller.signal
-						});
-						if (settled) return;
-						if (response.ok) {
-							const data = await response[options.responseType]();
+					if (fetcher) {
+						diagnostic.transport = "fetch";
+						diagnostic.reason = "network";
+						try {
+							const response = await fetcher(url, {
+								method: options.method ?? "GET",
+								credentials: "include",
+								headers: options.headers,
+								...options.body === void 0 ? {} : { body: options.body },
+								signal: controller.signal
+							});
 							if (settled) return;
-							const value = parse(data);
-							if (value !== null) {
-								finish(value);
-								return;
+							diagnostic.status = response.status;
+							diagnostic.finalUrl = response.url || url;
+							diagnostic.reason = response.ok ? "parse" : "http";
+							if (response.ok) {
+								const data = await response[options.responseType]();
+								if (settled) return;
+								const value = parse(data);
+								if (value !== null) {
+									finish(value);
+									return;
+								}
 							}
+						} catch (error) {
+							if (!settled) console.debug("[MNR] Native site request failed:", error);
 						}
-					} catch (error) {
-						if (!settled) console.debug("[MNR] Native site request failed:", error);
 					}
 					if (settled) return;
 					const gmXhr = typeof GM_xmlhttpRequest === "function" ? GM_xmlhttpRequest : null;
@@ -18259,6 +18278,10 @@ ul, ol {
 						finish(null);
 						return;
 					}
+					diagnostic.transport = "gm";
+					diagnostic.status = null;
+					diagnostic.finalUrl = null;
+					diagnostic.reason = "network";
 					gmRequest = gmXhr({
 						method: options.method ?? "GET",
 						url,
@@ -18271,10 +18294,14 @@ ul, ol {
 						withCredentials: true,
 						onload: (response) => {
 							if (settled) return;
+							diagnostic.status = response.status;
+							diagnostic.finalUrl = response.finalUrl || url;
+							diagnostic.reason = "http";
 							if (response.status < 200 || response.status >= 300) {
 								finish(null);
 								return;
 							}
+							diagnostic.reason = "parse";
 							try {
 								const data = options.responseType === "json" ? JSON.parse(response.responseText) : response.responseText;
 								finish(parse(data));
@@ -18284,8 +18311,11 @@ ul, ol {
 							}
 						},
 						onerror: () => finish(null),
-						onabort: () => finish(null),
-						ontimeout: cancel
+						onabort: () => {
+							diagnostic.reason = "cancelled";
+							finish(null);
+						},
+						ontimeout: () => cancel("timeout")
 					});
 				} catch (error) {
 					console.warn("[MNR] Site request failed:", error);
@@ -18363,6 +18393,7 @@ ul, ol {
 		return await requestSiteData(apiUrl, {
 			responseType: "text",
 			setAbort: context.setAbort,
+			onResult: context.onRequest,
 			referrer: context.currentUrl || context.indexUrl,
 			headers: {
 				Accept: "text/html, */*; q=0.01",
@@ -18416,6 +18447,7 @@ ul, ol {
 			return await requestSiteData(new URL("/novel/clist/", pageUrl.origin).href, {
 				responseType: "json",
 				setAbort: context.setAbort,
+				onResult: context.onRequest,
 				timeoutMs: 15e3,
 				gmFallback: false,
 				method: "POST",
@@ -18522,12 +18554,13 @@ ul, ol {
 		}
 		return dedupeQidianTocEntries(entries);
 	}
-	async function loadQidianTocEntries(indexUrl, currentUrl, setAbort) {
+	async function loadQidianTocEntries(indexUrl, currentUrl, context) {
 		const apiUrl = buildQidianCategoryUrl(indexUrl, currentUrl);
 		if (!apiUrl) return [];
 		return await requestSiteData(apiUrl, {
 			responseType: "json",
-			setAbort,
+			setAbort: context.setAbort,
+			onResult: context.onRequest,
 			referrer: currentUrl || indexUrl,
 			headers: {
 				Accept: "application/json, text/javascript, */*; q=0.01",
@@ -18542,7 +18575,7 @@ ul, ol {
 	var qidianTocLoader = {
 		id: "qidian",
 		matches: (context) => isQidianTocRequest(context.indexUrl, context.currentUrl, context.rule),
-		load: (context) => loadQidianTocEntries(context.indexUrl, context.currentUrl, context.setAbort)
+		load: (context) => loadQidianTocEntries(context.indexUrl, context.currentUrl, context)
 	};
 	var sto9_exports = __exportAll({ sto9TocLoader: () => sto9TocLoader });
 	var sto9TocLoader = createAjaxChapterListLoader({
@@ -18810,65 +18843,116 @@ ul, ol {
 		return candidates[0].url;
 	}
 	var MAX_TOC_PAGES = 120;
-	async function loadTocEntriesPaged(indexUrl, currentUrl, rule, setAbort) {
+	async function loadTocEntriesPaged(indexUrl, currentUrl, rule, setAbort, report = () => {}) {
 		const loaderContext = {
 			indexUrl,
 			currentUrl,
 			rule,
-			setAbort
+			setAbort,
+			onRequest: (request) => report({ request })
 		};
 		const loader = specialTocLoaders.find((item) => item.matches(loaderContext));
-		if (loader) return loader.load(loaderContext);
+		report({ loader: loader?.id ?? "paged" });
+		if (loader) {
+			const entries = await loader.load(loaderContext);
+			report({
+				pages: entries.length ? 1 : 0,
+				entries: entries.length,
+				reason: entries.length ? "provider-complete" : "empty"
+			});
+			return entries;
+		}
 		const visitedPages = new Set();
 		const seenChapterUrls = new Set();
 		const allCandidates = [];
-		const aborters = [];
+		let currentAbort = null;
 		let aborted = false;
-		const abortAll = () => {
+		setAbort(() => {
 			aborted = true;
-			for (const fn of aborters) try {
-				fn();
-			} catch {}
-		};
-		setAbort(abortAll);
+			currentAbort?.();
+		});
 		try {
 			let pageUrl = indexUrl;
 			let referer = currentUrl || indexUrl;
-			while (pageUrl && visitedPages.size < MAX_TOC_PAGES) {
+			while (pageUrl && !aborted) {
 				const pageKey = normalizeUrlForCompare(pageUrl);
-				if (visitedPages.has(pageKey)) break;
+				if (visitedPages.has(pageKey)) {
+					report({ reason: "repeated-page" });
+					break;
+				}
+				if (visitedPages.size >= MAX_TOC_PAGES) {
+					report({
+						reason: "page-limit",
+						nextUrl: pageUrl
+					});
+					throw new Error(`TOC page limit reached before: ${pageUrl}`);
+				}
 				visitedPages.add(pageKey);
+				report({ request: {
+					url: pageUrl,
+					finalUrl: null,
+					status: null,
+					transport: null,
+					reason: "pending"
+				} });
 				const { promise, abort } = fetchAndParseUrl(pageUrl, referer);
-				aborters.push(abort);
+				currentAbort = abort;
+				if (aborted) abort();
 				const result = await promise;
-				if (aborted || result.error === "abort") return [];
+				currentAbort = null;
+				report({ request: {
+					url: pageUrl,
+					finalUrl: result.finalUrl,
+					status: result.status,
+					transport: null,
+					reason: result.error || (result.doc ? "success" : "empty")
+				} });
+				if (aborted || result.error === "abort") {
+					report({ reason: "cancelled" });
+					return [];
+				}
 				if (!result.doc || result.error) {
+					report({ reason: result.error || "empty-response" });
 					if (allCandidates.length === 0) return [];
 					throw new Error(`TOC page request failed: ${pageUrl} (${result.error})`);
 				}
 				const effectivePageUrl = result.finalUrl || pageUrl;
 				const pageCandidates = collectTocCandidates(result.doc, effectivePageUrl, rule);
 				if (pageCandidates.length === 0 && (rule?.toc?.selector || allCandidates.length > 0)) {
+					report({ reason: "empty-page" });
 					if (allCandidates.length === 0) return [];
 					throw new Error(`TOC page has no chapter entries: ${effectivePageUrl}`);
 				}
 				allCandidates.push(...pageCandidates);
-				let newCount = 0;
-				for (const entry of pageCandidates) if (!seenChapterUrls.has(entry.url)) {
-					seenChapterUrls.add(entry.url);
-					newCount++;
+				const previousCount = seenChapterUrls.size;
+				for (const entry of pageCandidates) seenChapterUrls.add(entry.url);
+				report({
+					pages: visitedPages.size,
+					entries: seenChapterUrls.size
+				});
+				if (visitedPages.size >= 2 && seenChapterUrls.size === previousCount) {
+					report({ reason: "no-new-chapters" });
+					break;
 				}
-				if (visitedPages.size >= 2 && newCount === 0) break;
 				const nextPageUrl = findNextTocPageUrl(result.doc, effectivePageUrl, indexUrl);
-				if (!nextPageUrl) break;
+				report({ nextUrl: nextPageUrl });
+				if (!nextPageUrl) {
+					report({ reason: "last-page" });
+					break;
+				}
 				referer = effectivePageUrl;
 				pageUrl = nextPageUrl;
 			}
 		} finally {
 			setAbort(null);
 		}
-		if (allCandidates.length === 0) return [];
-		return filterTocEntries(dedupeTocEntries(allCandidates));
+		if (aborted) {
+			report({ reason: "cancelled" });
+			return [];
+		}
+		const entries = filterTocEntries(dedupeTocEntries(allCandidates));
+		report({ entries: entries.length });
+		return entries;
 	}
 	function createTocActions(ctx) {
 		const _loadTocEntriesPaged = ctx.loadTocEntriesPaged ?? loadTocEntriesPaged;
@@ -18898,6 +18982,7 @@ ul, ol {
 				return;
 			}
 		}
+		let lastLoad = null;
 		let inflight = null;
 		function loadToc() {
 			const runId = ctx.runtime.sessionId();
@@ -18914,38 +18999,67 @@ ul, ol {
 		}
 		async function runLoadToc(runId) {
 			ctx.tocLoading.value = true;
+			const diagnostic = {
+				currentUrl: ctx.chapter.value?.url || "",
+				indexUrl: ctx.chapter.value?.indexUrl || null,
+				ruleId: ctx.rule.value?.id || null,
+				attempt: 0,
+				loader: "pending",
+				pages: 0,
+				entries: 0,
+				outcome: "loading",
+				reason: null
+			};
+			lastLoad = diagnostic;
 			try {
 				const currentUrl = ctx.chapter.value?.url || "";
 				let indexUrl = ctx.chapter.value?.indexUrl;
 				if (!indexUrl || currentUrl && normalizeUrlForBlock(indexUrl) === normalizeUrlForBlock(currentUrl)) indexUrl = await ensureIndexUrl() || void 0;
 				if (ctx.runtime.isSessionStale(runId)) return;
+				diagnostic.indexUrl = indexUrl || null;
 				if (!indexUrl) {
+					diagnostic.outcome = "empty";
+					diagnostic.reason = "missing-index";
 					ctx.showToast("未检测到目录链接", "info", 2500);
 					return;
 				}
-				let entries = await _loadTocEntriesPaged(indexUrl, currentUrl || indexUrl, ctx.rule.value ?? void 0, (abort) => {
-					if (!ctx.runtime.isSessionStale(runId)) ctx.tocAbort.value = abort;
-					else abort?.();
-				});
-				if (ctx.runtime.isSessionStale(runId)) return;
-				if (entries.length === 0) {
-					await new Promise((resolve) => window.setTimeout(resolve, 400));
-					if (ctx.runtime.isSessionStale(runId)) return;
-					entries = await _loadTocEntriesPaged(indexUrl, currentUrl || indexUrl, ctx.rule.value ?? void 0, (abort) => {
+				const fetchEntries = () => {
+					diagnostic.attempt++;
+					diagnostic.pages = 0;
+					diagnostic.entries = 0;
+					diagnostic.reason = null;
+					diagnostic.request = void 0;
+					diagnostic.nextUrl = void 0;
+					return _loadTocEntriesPaged(indexUrl, currentUrl || indexUrl, ctx.rule.value ?? void 0, (abort) => {
 						if (!ctx.runtime.isSessionStale(runId)) ctx.tocAbort.value = abort;
 						else abort?.();
-					});
+					}, (update) => Object.assign(diagnostic, update));
+				};
+				let entries = await fetchEntries();
+				if (ctx.runtime.isSessionStale(runId)) return;
+				if (entries.length === 0) {
+					recordDebugEvent("toc.retry", diagnostic);
+					await new Promise((resolve) => window.setTimeout(resolve, 400));
+					if (ctx.runtime.isSessionStale(runId)) return;
+					entries = await fetchEntries();
 					if (ctx.runtime.isSessionStale(runId)) return;
 				}
 				await setTocEntries(entries);
 				if (ctx.runtime.isSessionStale(runId)) return;
+				diagnostic.entries = entries.length;
+				diagnostic.outcome = entries.length ? "complete" : "empty";
 				if (entries.length === 0) ctx.showToast("目录解析为空，可稍后重试或刷新页面", "info", 2500);
 			} catch (e) {
 				if (!ctx.runtime.isSessionStale(runId)) {
+					diagnostic.outcome = "failed";
+					diagnostic.error = String(e);
+					diagnostic.reason ??= "exception";
 					console.error("[MNR] Failed to load TOC:", e);
 					ctx.showToast("目录加载失败，可稍后重试", "error", 2500);
 				}
 			} finally {
+				if (ctx.runtime.isSessionStale(runId)) diagnostic.outcome = "cancelled";
+				recordDebugEvent("toc.load", diagnostic, diagnostic.outcome === "failed" ? "error" : "info");
 				if (!ctx.runtime.isSessionStale(runId)) {
 					ctx.tocLoading.value = false;
 					ctx.tocAbort.value = null;
@@ -18953,9 +19067,8 @@ ul, ol {
 			}
 		}
 		return {
-			setTocEntries,
-			ensureIndexUrl,
-			loadToc
+			loadToc,
+			getLoadDiagnostic: () => lastLoad
 		};
 	}
 	async function parseWithSectionMerge(parser, initialDoc, url, options = {}) {
@@ -19225,9 +19338,18 @@ ul, ol {
 	}
 	function createCacheAll(ctx) {
 		let taskId = 0;
+		let lastTask = null;
 		async function startCacheAll(urls) {
 			const runId = ctx.runtime.sessionId();
 			if (ctx.cacheProgress.value.running) return;
+			const task = {
+				chapterUrl: ctx.chapter.value?.url ?? null,
+				requested: 0,
+				firstUrls: [],
+				lastUrls: [],
+				currentUrl: null
+			};
+			lastTask = task;
 			const fullBook = urls === void 0;
 			const currentTask = ++taskId;
 			const isCurrent = () => currentTask === taskId && !ctx.runtime.isSessionStale(runId);
@@ -19253,7 +19375,6 @@ ul, ol {
 				const isIndexUrl = (url) => indexUrlKey !== null && normalizeUrlForBlock(url) === indexUrlKey;
 				let cacheableChapterCount = 0;
 				let taskList = urls ? urls.map(normalizeUrlForFetch).filter((url) => !isIndexUrl(url)) : [];
-				ctx.cacheQueue.value = [...taskList];
 				if (fullBook) {
 					const tocEntries = ctx.tocOriginal.value;
 					const tocLinks = new Set();
@@ -19273,9 +19394,11 @@ ul, ol {
 					}
 					cacheableChapterCount = tocLinks.size;
 					taskList = Array.from(tocLinks).filter((url) => !ctx.cachedContents.value.has(url) && !persistedSet.has(url));
-					ctx.cacheQueue.value = [...taskList];
 				}
 				const estimatedTotal = taskList.length;
+				task.requested = estimatedTotal;
+				task.firstUrls = taskList.slice(0, 4);
+				task.lastUrls = taskList.slice(-4);
 				if (!isCurrent()) return;
 				if (estimatedTotal === 0) {
 					if (fullBook) {
@@ -19301,6 +19424,7 @@ ul, ol {
 				const writtenUrls = new Set();
 				while (isCurrent() && ctx.cacheProgress.value.running && nextUrl) {
 					const targetUrl = normalizeUrlForFetch(nextUrl);
+					task.currentUrl = targetUrl;
 					if (seenUrls.has(targetUrl) || ctx.cachedContents.value.has(targetUrl) || persistedSet.has(targetUrl)) {
 						ctx.cacheProgress.value = {
 							...ctx.cacheProgress.value,
@@ -19454,7 +19578,6 @@ ul, ol {
 				failed: 0,
 				running: false
 			};
-			ctx.cacheQueue.value = [];
 			ctx.cacheFailedUrls.value = [];
 			ctx.cacheAbort.value?.();
 			ctx.cacheAbort.value = null;
@@ -19467,7 +19590,8 @@ ul, ol {
 		return {
 			startCacheAll,
 			cancelCacheAll,
-			retryFailedCache
+			retryFailedCache,
+			getCacheDebugSnapshot: () => lastTask
 		};
 	}
 	async function insertCachedChapter(ctx, cached, position) {
@@ -19521,10 +19645,6 @@ ul, ol {
 		trimCachedContents(ctx.cachedContents.value, 500);
 		if (ctx.currentConversionMode.value !== "none") await ctx.applyConversionToChapterEntry(id, ctx.currentConversionMode.value);
 		if (ctx.runtime.isViewStale(runId)) return false;
-		if (!ctx.history.value.includes(parsed.url)) {
-			if (load.isNext) ctx.history.value.push(parsed.url);
-			else ctx.history.value.unshift(parsed.url);
-		}
 		trimDisplayChapters(ctx, load.isNext);
 		return true;
 	}
@@ -19893,7 +20013,6 @@ ul, ol {
 		const toastType = ref("error");
 		const toastTimer = ref(null);
 		const scrollPercent = ref(0);
-		const history = ref([]);
 		const loadedUrls = computed(() => new Set(chapters.value.map((entry) => entry.chapter.url)));
 		const vipBlockedUrls = ref(new Set());
 		const blockedNavUrls = ref(new Set());
@@ -19909,7 +20028,6 @@ ul, ol {
 			failed: 0,
 			running: false
 		});
-		const cacheQueue = ref([]);
 		const cacheFailedUrls = ref([]);
 		const cacheAbort = ref(null);
 		const reloadAbort = ref(null);
@@ -20069,7 +20187,6 @@ ul, ol {
 			originalTitles,
 			currentConversionMode,
 			navFailures,
-			history,
 			runtime,
 			showToast,
 			setError,
@@ -20090,9 +20207,8 @@ ul, ol {
 			applyTocConversion: applyTocConversion$1,
 			loadTocEntriesPaged
 		});
-		const { startCacheAll, cancelCacheAll, retryFailedCache } = createCacheAll({
+		const { startCacheAll, cancelCacheAll, retryFailedCache, getCacheDebugSnapshot } = createCacheAll({
 			cacheProgress,
-			cacheQueue,
 			cacheFailedUrls,
 			cacheAbort,
 			cachedContents,
@@ -20112,8 +20228,7 @@ ul, ol {
 			pendingNextAbort.value = null;
 			pendingPrevAbort.value?.();
 			pendingPrevAbort.value = null;
-			cacheAbort.value?.();
-			cacheAbort.value = null;
+			cancelCacheAll();
 			reloadAbort.value?.();
 			reloadAbort.value = null;
 			tocAbort.value?.();
@@ -20121,14 +20236,6 @@ ul, ol {
 			isLoadingPrev.value = false;
 			isLoadingNext.value = false;
 			tocLoading.value = false;
-			cacheProgress.value = {
-				done: 0,
-				total: 0,
-				failed: 0,
-				running: false
-			};
-			cacheQueue.value = [];
-			cacheFailedUrls.value = [];
 		}
 		function clearAllData() {
 			chapters.value = [];
@@ -20186,10 +20293,6 @@ ul, ol {
 				rule: effectiveRule,
 				cachedAt: Date.now()
 			});
-			if (newChapter.url && !history.value.includes(newChapter.url)) {
-				history.value.push(newChapter.url);
-				if (history.value.length > 100) history.value = history.value.slice(-100);
-			}
 			if (currentConversionMode.value !== "none") applyConversionToChapterEntry$1(id, currentConversionMode.value).then(() => {
 				syncCurrentHostPage();
 			});
@@ -20326,10 +20429,6 @@ ul, ol {
 				first: summarizeChapterForDebug(firstEntry),
 				last: summarizeChapterForDebug(lastEntry),
 				navigation: {
-					history: {
-						count: history.value.length,
-						tail: tailStrings(history.value)
-					},
 					loadedUrls: summarizeUrlSet(loadedUrls.value),
 					vipBlockedUrls: summarizeUrlSet(vipBlockedUrls.value),
 					blockedNavUrls: summarizeUrlSet(blockedNavUrls.value),
@@ -20348,10 +20447,7 @@ ul, ol {
 						indexUrl: redactUrl(cacheBook.indexUrl)
 					} : null,
 					progress: { ...cacheProgress.value },
-					queue: {
-						count: cacheQueue.value.length,
-						tail: tailStrings(cacheQueue.value)
-					},
+					task: getCacheDebugSnapshot(),
 					memory: {
 						count: cachedContents.value.size,
 						tail: Array.from(cachedContents.value.entries()).slice(-8).map(([url, cached]) => ({
@@ -20365,6 +20461,9 @@ ul, ol {
 					persistedUrls: summarizeUrlSet(persistedUrls.value)
 				},
 				toc: {
+					lastLoad: tocActions.getLoadDiagnostic(),
+					firstUrls: tocOriginal.value.slice(0, 4).map((entry) => redactUrl(entry.url)),
+					lastUrls: tocOriginal.value.slice(-4).map((entry) => redactUrl(entry.url)),
 					loading: tocLoading.value,
 					count: toc.value.length,
 					originalCount: tocOriginal.value.length,
@@ -20424,7 +20523,6 @@ ul, ol {
 			error,
 			toastType,
 			scrollPercent,
-			history,
 			cacheProgress,
 			toc,
 			tocLoading,
