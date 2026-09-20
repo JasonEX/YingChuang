@@ -115,6 +115,50 @@ describe('isSectionLikeUrl', () => {
     ).toBe(true);
   });
 
+  it('detects directory-style section URLs without a file extension', () => {
+    expect(
+      isSectionLikeUrl(
+        'https://m.kudushu.org/html/1088392/146537150/',
+        'https://m.kudushu.org/html/1088392/146537150_2/'
+      )
+    ).toBe(true);
+    expect(
+      isSectionLikeUrl(
+        'https://m.kudushu.org/html/1088392/146537150_2/',
+        'https://m.kudushu.org/html/1088392/146537150_3/'
+      )
+    ).toBe(true);
+  });
+
+  it('does not treat the next chapter as a section of the current one', () => {
+    expect(
+      isSectionLikeUrl(
+        'https://m.kudushu.org/html/1088392/146537150_3/',
+        'https://m.kudushu.org/html/1088392/146537151/'
+      )
+    ).toBe(false);
+  });
+
+  it('does not treat date-style or short numeric slugs as sections', () => {
+    // /archive/2024-12/ and /book/123-45/ are ordinary slugs, not page 12/45 of
+    // /archive/2024/ or /book/123/.
+    expect(
+      isSectionLikeUrl(
+        'https://example.com/archive/2024-12/',
+        'https://example.com/archive/2024-13/'
+      )
+    ).toBe(false);
+    expect(
+      isSectionLikeUrl(
+        'https://example.com/archive/2024_12/',
+        'https://example.com/archive/2024_13/'
+      )
+    ).toBe(false);
+    expect(
+      isSectionLikeUrl('https://example.com/book/123-45/', 'https://example.com/book/123-46/')
+    ).toBe(false);
+  });
+
   it('detects query-based pagination (page increments)', () => {
     expect(
       isSectionLikeUrl(
@@ -191,6 +235,33 @@ describe('getSectionBaseUrl', () => {
     expect(getSectionBaseUrl('https://m.goboo.cc/gb_1/94443/1/2')).toBe(
       'https://m.goboo.cc/gb_1/94443/1'
     );
+  });
+
+  it('normalizes directory-style sections to the first page', () => {
+    expect(getSectionBaseUrl('https://m.kudushu.org/html/1088392/146537150_2/')).toBe(
+      'https://m.kudushu.org/html/1088392/146537150/'
+    );
+    expect(getSectionBaseUrl('https://m.kudushu.org/html/1088392/146537150/')).toBe(null);
+  });
+
+  it('leaves date-style and short numeric slugs alone', () => {
+    expect(getSectionBaseUrl('https://example.com/archive/2024-12/')).toBe(null);
+    expect(getSectionBaseUrl('https://example.com/archive/2024_12/')).toBe(null);
+    expect(getSectionBaseUrl('https://example.com/book/123-45/')).toBe(null);
+  });
+
+  it('does not treat section-shaped query values or fragments as chapter paths', () => {
+    expect(getSectionBaseUrl('https://example.com/read?chapter=/12345_2/')).toBe(null);
+    expect(getSectionBaseUrl('https://example.com/read#/12345_2/')).toBe(null);
+    expect(getSectionBaseUrl('https://example.com/book/12345_2/?from=/98765_3/#/54321_4/')).toBe(
+      'https://example.com/book/12345/?from=/98765_3/#/54321_4/'
+    );
+  });
+
+  it('rejects zero and out-of-range directory section numbers', () => {
+    for (const page of ['0', '00', '100']) {
+      expect(getSectionBaseUrl(`https://example.com/book/12345_${page}/`)).toBe(null);
+    }
   });
 
   it('normalizes query-based pagination to the first page', () => {

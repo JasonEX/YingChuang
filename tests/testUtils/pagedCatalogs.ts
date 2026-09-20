@@ -65,14 +65,36 @@ export function makePagedCatalog(site: PagedCatalogSite, page: number): string {
 }
 
 export function makePagedCatalogChapter(site: PagedCatalogSite, chapter: number): string {
-  const contentId = site.id === 'wxsl' ? 'content' : 'novelcontent';
-  return `<!doctype html><html><head><title>第${chapter}章 测试正文_测试书名</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1"></head><body>
-    ${site.id === 'kudushu' ? `<div class="content_top"><a href="${site.tocPath(1)}">返回书页</a></div>` : ''}
+  const body = '<p>山间的风吹过树梢，他停下来仔细查看地图，沿着河岸继续赶路。</p>'.repeat(60);
+  const head = `<!doctype html><html><head><title>第${chapter}章 测试正文_测试书名</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1"></head><body>`;
+
+  if (site.id === 'kudushu') {
+    // Live mobile chapter page: nav labels use a full-width dash instead of 一,
+    // and the button row plus the site watermark are repeated inside #novelcontent.
+    const navRow = `<ul class="novelbutton">
+      <li><p class="p1"><a href="${site.chapterPath(chapter - 1)}">上—章</a></p></li>
+      <li><p class="p2"><a href="${site.tocPath(1)}">返&nbsp;回&nbsp;目&nbsp;录</a></p></li>
+      <li><p class="p2"><a href="/bookcase.php">进入书架</a></p></li>
+      <li><p class="p1 p3"><a href="${site.chapterPath(chapter + 1)}">下—章</a></p></li>
+    </ul>`;
+    return `${head}
+      <div class="content_top"><a href="${site.tocPath(1)}">返回书页</a></div>
+      <h1 id="chaptertitle">第${chapter}章 测试正文</h1>
+      <div class="content_novel">${navRow}
+        <div id="novelcontent" class="novelcontent">
+          <div id="content_tip"><b>最新网址：m.kudushu.org</b></div>
+          ${body}${navRow}
+        </div>
+      </div>
+    </body></html>`;
+  }
+
+  return `${head}
     <h1>第${chapter}章 测试正文</h1>
     <nav><a href="${site.chapterPath(chapter - 1)}">上一章</a>
-      <a href="${site.tocPath(1)}">${site.id === 'wxsl' ? '章节列表' : '返&nbsp;回&nbsp;目&nbsp;录'}</a>
+      <a href="${site.tocPath(1)}">章节列表</a>
       <a href="${site.chapterPath(chapter + 1)}">下一章</a></nav>
-    <div id="${contentId}">${'<p>山间的风吹过树梢，他停下来仔细查看地图，沿着河岸继续赶路。</p>'.repeat(60)}</div>
+    <div id="content">${body}</div>
   </body></html>`;
 }
