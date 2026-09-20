@@ -297,7 +297,9 @@ export function createNavigation(ctx: NavigationContext) {
       return;
     }
 
-    const blockReason = getChapterDocumentBlockReason(result.doc);
+    const blockReason = getChapterDocumentBlockReason(result.doc, {
+      contentSelector: (current.rule ?? current.chapter.rule)?.content?.selector,
+    });
     if (blockReason === 'cloudflare') {
       ctx.showToast('Cloudflare 验证页面，请完成验证后重试', 'info', 4000);
       return;

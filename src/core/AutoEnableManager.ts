@@ -97,6 +97,39 @@ export class AutoEnableManager {
   private currentDecision?: AutoEnableDecision;
   private currentDecisionUrl?: string;
 
+  /**
+   * content.selector of the rule that matches this URL, when one does.
+   *
+   * Passed to the chapter-document classifier so a site whose subscription copy sits next to a
+   * real chapter shell is not mistaken for a paywall. Keeping the lookup here — rather than a
+   * hostname check inside the classifier — keeps site knowledge in src/core/rules/sites/*.
+   */
+  private async classifyChapterDocument(
+    doc: Document,
+    url: string
+  ): Promise<ReturnType<typeof getChapterDocumentBlockReason>> {
+    const reason = getChapterDocumentBlockReason(doc);
+    // Only a VIP verdict is worth a rule lookup. Cloudflare and clean pages keep the cheap
+    // short-circuit they have always had, so this stays off the hot path.
+    if (reason !== 'vip') return reason;
+
+    const contentSelector = await this.resolveContentSelector(url);
+    if (!contentSelector) return reason;
+    return getChapterDocumentBlockReason(doc, { contentSelector });
+  }
+
+  private async resolveContentSelector(url: string): Promise<string | undefined> {
+    try {
+      const ruleManager = getRuleManager();
+      await ruleManager.initialize();
+      const match = await ruleManager.matchRule(url);
+      return match?.rule.content.selector;
+    } catch (e) {
+      console.debug('[AutoEnableManager] Failed to resolve rule for classification:', e);
+      return undefined;
+    }
+  }
+
   private recordDecision(url: string, decision: AutoEnableDecision): AutoEnableDecision {
     this.currentDecision = decision;
     this.currentDecisionUrl = url;
@@ -162,7 +195,7 @@ export class AutoEnableManager {
     const decide = (decision: AutoEnableDecision): AutoEnableDecision =>
       this.recordDecision(url, decision);
 
-    const blockReason = getChapterDocumentBlockReason(doc);
+    const blockReason = await this.classifyChapterDocument(doc, url);
     if (blockReason === 'cloudflare') {
       return decide({
         shouldEnable: false,
@@ -446,7 +479,10 @@ export class AutoEnableManager {
    * Manual enable (force launch without detection)
    */
   async manualEnable(doc: Document = document): Promise<void> {
-    const blockReason = getChapterDocumentBlockReason(doc);
+    const blockReason = await this.classifyChapterDocument(
+      doc,
+      doc.location?.href || window.location.href
+    );
     if (blockReason) {
       console.info(`[AutoEnableManager] Manual enable skipped: ${blockReason}`);
       this.deactivateProtection();

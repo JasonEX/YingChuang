@@ -2,7 +2,6 @@ import { MAX_NAV_FAILURES, VIP_BLOCK_TOAST } from './types';
 import type { ParsedChapter, Parser } from '@/core/parser';
 
 import { fetchAndParseUrl } from '@/core/utils/network';
-import { fetchCiweimaoApiDocument } from '@/core/rules/sites/ciweimao';
 import { getChapterDocumentBlockReason } from '@/core/detection';
 import type { LoadSource } from './types';
 import type { NavigationContext } from './navigationContext';
@@ -108,9 +107,9 @@ export async function loadFetchDocument(
   runId: number,
   referer: string
 ): Promise<FetchDocumentResult> {
-  const ciweimaoDoc = await loadRuleApiDocument(load.targetUrl, load.refChapter);
+  const ruleDoc = await loadRuleApiDocument(load.targetUrl, load.refChapter);
   if (ctx.runtime.isViewStale(runId)) return 'abort';
-  if (ciweimaoDoc) return ciweimaoDoc;
+  if (ruleDoc) return ruleDoc;
 
   const fetchLoader = fetchAndParseUrl(load.targetUrl, referer);
   const abort = fetchLoader.abort;
@@ -140,18 +139,29 @@ export async function loadFetchDocument(
   return fetchResult.doc;
 }
 
+/**
+ * Let the matched site rule supply the chapter document from its own API.
+ *
+ * The generic loader knows nothing about which sites do this: a rule opts in by declaring
+ * `hooks.fetchDocument`, and returning null falls through to the ordinary page fetch.
+ */
 export async function loadRuleApiDocument(
   url: string,
   reference: { chapter: ParsedChapter; rule?: SiteRule }
 ): Promise<Document | null> {
-  const ruleId = reference.rule?.id || reference.chapter.rule?.id || '';
-  if (ruleId !== 'ciweimao' && ruleId !== 'ciweimao-wap') return null;
+  const fetchDocument = (reference.rule ?? reference.chapter.rule)?.hooks?.fetchDocument;
+  if (!fetchDocument) return null;
 
-  return fetchCiweimaoApiDocument(url, {
-    bookTitle: reference.chapter.bookTitle,
-    indexUrl: reference.chapter.indexUrl,
-    url: reference.chapter.url,
-  });
+  try {
+    return await fetchDocument(url, {
+      bookTitle: reference.chapter.bookTitle,
+      indexUrl: reference.chapter.indexUrl,
+      refererUrl: reference.chapter.url,
+    });
+  } catch (e) {
+    console.debug('[MNR] Rule fetchDocument hook failed:', e);
+    return null;
+  }
 }
 
 export async function parseCandidateDocument(
@@ -164,7 +174,9 @@ export async function parseCandidateDocument(
   source: LoadSource
 ): Promise<ParsedCandidateResult> {
   if (ctx.runtime.isViewStale(runId)) return 'abort';
-  const blockReason = getChapterDocumentBlockReason(doc);
+  const blockReason = getChapterDocumentBlockReason(doc, {
+    contentSelector: (load.refChapter.rule ?? load.refChapter.chapter.rule)?.content?.selector,
+  });
   if (blockReason) {
     recordDebugEvent('chapter.rejected', { url: load.targetUrl, reason: blockReason });
   }

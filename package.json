@@ -6,6 +6,7 @@
   "description": "萤窗 - 小说阅读脚本，统一阅读样式，智能内容检测，自动翻页",
   "scripts": {
     "build": "vite build",
+    "check:cycles": "node tools/checkImportCycles.mjs",
     "check:size": "node tools/checkBundleSize.mjs",
     "dev": "vite build --watch",
     "preview": "vite preview",
@@ -27,7 +28,7 @@
     "e2e:local:run": "playwright test tests/e2e/local-fixture-smoke.spec.ts --workers=1",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:tests": "tsc -p tests/tsconfig.json --noEmit",
-    "validate": "npm run lint:strict && npm run typecheck && npm run typecheck:tests && npm run test:coverage && npm run e2e:local",
+    "validate": "npm run lint:strict && npm run check:cycles && npm run typecheck && npm run typecheck:tests && npm run test:coverage && npm run e2e:local",
     "prepare": "husky"
   },
   "lint-staged": {

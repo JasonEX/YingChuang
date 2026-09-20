@@ -100,10 +100,7 @@ function normalizeQidianHydratedParagraphIndent(doc: Document): void {
   }
 }
 
-export function resolveQidianMobileBookPreviewChapterUrl(
-  doc: Document,
-  url: string
-): string | null {
+function resolveQidianMobileBookPreviewChapterUrl(doc: Document, url: string): string | null {
   let parsedUrl: URL;
   try {
     parsedUrl = new URL(url);
@@ -228,6 +225,9 @@ export const qidianMobileRule: SiteRule = {
   },
   hooks: {
     ...qidianHooks,
+    // m.qidian.com/book/<id>/ embeds the first chapter but sits outside this rule's match on
+    // purpose, so the entry redirect is declared here instead of hard-coded in SectionMerger.
+    resolveEntryUrl: resolveQidianMobileBookPreviewChapterUrl,
   },
   advanced: {
     mutationSelector: 'main[id^="c-"]',

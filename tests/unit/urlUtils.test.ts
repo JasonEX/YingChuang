@@ -7,8 +7,8 @@ import {
   getSectionBaseUrl,
   isSectionLikeUrl,
   normalizeAbsoluteUrl,
-  normalizeCiwemaoChapterUrl,
   normalizeRedundantFirstPageParam,
+  normalizeSiteChapterUrl,
 } from '@/core/utils/urlUtils';
 
 afterEach(() => {
@@ -56,22 +56,22 @@ describe('normalizeAbsoluteUrl', () => {
   });
 });
 
-describe('normalizeCiwemaoChapterUrl', () => {
+describe('normalizeSiteChapterUrl', () => {
   it('should rewrite get_par_tsu_list to chapter URL', () => {
     const input =
       'https://wap.ciweimao.com/chapter/get_par_tsu_list?chapter_id=113493242&data-pgid=0';
-    const output = normalizeCiwemaoChapterUrl(input);
+    const output = normalizeSiteChapterUrl(input);
     expect(output).toBe('https://wap.ciweimao.com/chapter/113493242');
   });
 
   it('should keep original URL when not a ciweimao tsukkomi page', () => {
     const input = 'https://wap.ciweimao.com/chapter/113493242';
-    expect(normalizeCiwemaoChapterUrl(input)).toBe(input);
+    expect(normalizeSiteChapterUrl(input)).toBe(input);
   });
 
   it('should keep original URL when chapter_id is missing', () => {
     const input = 'https://wap.ciweimao.com/chapter/get_par_tsu_list?data-pgid=0';
-    expect(normalizeCiwemaoChapterUrl(input)).toBe(input);
+    expect(normalizeSiteChapterUrl(input)).toBe(input);
   });
 });
 

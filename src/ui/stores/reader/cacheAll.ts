@@ -203,7 +203,9 @@ export function createCacheAll(ctx: CacheAllContext) {
             if (!isCurrent()) break;
             ctx.cacheAbort.value = null;
             if (loaded) {
-              blockReason = getChapterDocumentBlockReason(loaded.doc);
+              blockReason = getChapterDocumentBlockReason(loaded.doc, {
+                contentSelector: rule?.content?.selector,
+              });
               if (!blockReason) parsed = await parseDocument(loaded.doc);
             }
             cleanupIframe?.();
@@ -232,7 +234,9 @@ export function createCacheAll(ctx: CacheAllContext) {
                 });
             }
             if (doc) {
-              blockReason = getChapterDocumentBlockReason(doc);
+              blockReason = getChapterDocumentBlockReason(doc, {
+                contentSelector: rule?.content?.selector,
+              });
               if (!blockReason) parsed = await parseDocument(doc);
             }
           }

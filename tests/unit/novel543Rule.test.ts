@@ -10,13 +10,16 @@ import {
 } from '../testUtils/novel543';
 
 import { getSectionBaseUrl, isSectionLikeUrl } from '@/core/utils';
-import { novel543Rule, parseNovel543Url } from '@/core/rules/sites/novel543';
 import { builtInRules } from '@/core/rules/builtInRules';
 import { collectTocCandidates } from '@/ui/stores/reader/tocEntries';
+import { getRuleManager } from '@/core/rules/RuleManager';
+import { novel543Rule } from '@/core/rules/sites/novel543';
 import { Parser } from '@/core/parser';
 import { SectionMerger } from '@/core/auto-enable/SectionMerger';
 
 const url = (chapter: number, page = 1) => novel543Origin + novel543ChapterPath(chapter, page);
+// The site declares its section-URL shape on the rule; the generic helpers read it from there.
+const parseSectionUrl = (value: string) => getRuleManager().parseSectionUrl(value);
 const doc = (html: string) => {
   const parsed = new DOMParser().parseFromString(html, 'text/html');
   const base = parsed.createElement('base');
@@ -43,18 +46,25 @@ describe('Novel543 rule', () => {
     expect(match.test(url(941))).toBe(true);
     expect(match.test(url(941, 2))).toBe(true);
     expect(match.test(`${novel543Origin}/1019622989/dir`)).toBe(false);
-    expect(parseNovel543Url('https://example.com/1019622989/8096_941.html')).toBeNull();
-    expect(parseNovel543Url(`${novel543Origin}/1019622989/dir`)).toBeNull();
-    expect(parseNovel543Url('invalid')).toBeNull();
+    expect(parseSectionUrl('https://example.com/1019622989/8096_941.html')).toBeNull();
+    expect(parseSectionUrl(`${novel543Origin}/1019622989/dir`)).toBeNull();
+    expect(parseSectionUrl('invalid')).toBeNull();
+    expect(parseSectionUrl(url(941, 2))).toEqual({ chapterUrl: url(941), page: 2 });
   });
 
   it.each([1, 2, 99, 941])('keeps chapter %i separate from section suffixes', chapter => {
-    expect(getSectionBaseUrl(url(chapter))).toBeNull();
-    expect(getSectionBaseUrl(`${url(chapter, 2)}?lang=zh#top`)).toBe(`${url(chapter)}?lang=zh`);
-    expect(isSectionLikeUrl(url(chapter), url(chapter, 2))).toBe(true);
-    expect(isSectionLikeUrl(url(chapter), url(chapter + 1))).toBe(false);
-    expect(isSectionLikeUrl(url(chapter, 2), url(chapter + 1))).toBe(false);
-    expect(isSectionLikeUrl(url(chapter), `${novel543Origin}/1019622989/dir`)).toBe(false);
+    expect(getSectionBaseUrl(url(chapter), parseSectionUrl)).toBeNull();
+    expect(getSectionBaseUrl(`${url(chapter, 2)}?lang=zh#top`, parseSectionUrl)).toBe(
+      `${url(chapter)}?lang=zh`
+    );
+    expect(isSectionLikeUrl(url(chapter), url(chapter, 2), parseSectionUrl)).toBe(true);
+    expect(isSectionLikeUrl(url(chapter), url(chapter + 1), parseSectionUrl)).toBe(false);
+    expect(isSectionLikeUrl(url(chapter, 2), url(chapter + 1), parseSectionUrl)).toBe(false);
+    expect(
+      isSectionLikeUrl(url(chapter), `${novel543Origin}/1019622989/dir`, parseSectionUrl)
+    ).toBe(false);
+    // Without the site shape the generic split would mis-read the chapter id as a page number.
+    expect(getSectionBaseUrl(url(chapter, 2))).not.toBe(`${url(chapter)}`);
   });
 
   it.each([1, 2])('merges the whole chapter when opened at page %i', async page => {

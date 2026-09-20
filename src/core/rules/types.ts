@@ -126,7 +126,36 @@ interface AdvancedConfig {
    * Some sites require this to prevent 403 errors
    */
   withReferer?: boolean;
+  /**
+   * Declarative override for how multi-page chapter (分页章节) URLs are shaped on this site.
+   *
+   * Generic derivation assumes `/…/{chapterId}_{page}.html`. Declare this when the chapter id
+   * itself contains the separator, so the generic split would otherwise read a plain chapter as
+   * "page N of a shorter id". Without it the generic layer would need to know the host name.
+   */
+  sectionUrl?: SectionUrlShape;
 }
+
+/** Site-declared shape of a section (multi-page chapter) URL. */
+export interface SectionUrlShape {
+  /** Regex source matched against the full URL. */
+  pattern: string;
+  /** Replacement producing the page-1 chapter *pathname*; $1…$9 reference capture groups. */
+  chapterPath: string;
+  /** Capture group holding the page number. An unmatched group means page 1. */
+  pageGroup: number;
+}
+
+/** Result of applying a SectionUrlShape. */
+export interface ParsedSectionUrl {
+  /** Page-1 URL of the chapter, query preserved and hash dropped. */
+  chapterUrl: string;
+  /** 1-based page number within the chapter. */
+  page: number;
+}
+
+/** Parses a URL into its chapter/page parts, or null when no site shape applies. */
+export type SectionUrlParser = (url: string) => ParsedSectionUrl | null;
 
 export interface HookFetchOptions {
   timeoutMs?: number;
@@ -146,10 +175,41 @@ export type BeforeParseHook = (
   helpers?: HookHelpers
 ) => Promise<void> | void;
 
+/** Reference chapter that a fetch is navigating from. */
+export interface FetchDocumentContext {
+  /** Book title as parsed from the referring chapter, when known. */
+  bookTitle?: string;
+  /** TOC/index URL of the referring chapter, when known. */
+  indexUrl?: string;
+  /** URL of the referring chapter; use it to resolve relative links. */
+  refererUrl: string;
+}
+
+/**
+ * Build a chapter document for `url` without a normal page fetch.
+ *
+ * Sites that serve chapter bodies from a private API register this so the generic loader
+ * never has to name them. Return `null` to fall through to the standard fetch path.
+ */
+export type FetchDocumentHook = (
+  url: string,
+  context: FetchDocumentContext
+) => Promise<Document | null>;
+
 /** JavaScript hooks for built-in site adapters */
 interface HooksConfig {
   /** Typed hook to run before parsing. */
   beforeParse?: BeforeParseHook;
+  /** Typed hook that supplies a chapter document from a site API instead of a page fetch. */
+  fetchDocument?: FetchDocumentHook;
+  /**
+   * Redirect a non-chapter entry page to the chapter that should actually be read.
+   *
+   * Some sites land the user on a book page that embeds the first chapter. Such a URL is
+   * deliberately outside this rule's `match`, so the hook self-guards and returns null for
+   * anything it does not recognise. Keeps the generic entry flow free of host names.
+   */
+  resolveEntryUrl?: (doc: Document, url: string) => string | null;
 }
 
 /** Rule metadata */

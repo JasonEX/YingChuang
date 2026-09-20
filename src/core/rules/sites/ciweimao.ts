@@ -491,7 +491,7 @@ function createCiweimaoApiDocument(options: {
   return doc;
 }
 
-export async function fetchCiweimaoApiDocument(
+async function fetchCiweimaoApiDocument(
   targetUrl: string,
   refChapter: CiweimaoRefChapter
 ): Promise<Document | null> {
@@ -565,6 +565,12 @@ const ciweimaoContent: SiteRule['content'] = {
 
 const ciweimaoHooks: SiteRule['hooks'] = {
   beforeParse: ciweimaoBeforeParse,
+  fetchDocument: (url, context) =>
+    fetchCiweimaoApiDocument(url, {
+      bookTitle: context.bookTitle,
+      indexUrl: context.indexUrl,
+      url: context.refererUrl,
+    }),
 };
 
 export const ciweimaoRule: SiteRule = {

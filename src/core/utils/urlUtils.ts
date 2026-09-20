@@ -3,7 +3,7 @@
  */
 
 import { parseChapterSectionFromPathname } from './sectionPath';
-import { parseNovel543Url } from '@/core/rules/sites/novel543';
+import type { SectionUrlParser } from '@/core/rules/types';
 
 /**
  * Normalize absolute URL
@@ -36,9 +36,11 @@ export function normalizeAbsoluteUrl(href: string, base?: string): string {
  * Get base URL for section pages
  * /123_2.html or /123-2.html -> /123.html
  */
-export function getSectionBaseUrl(url: string): string | null {
-  const novel543 = parseNovel543Url(url);
-  if (novel543) return novel543.page > 1 ? novel543.chapterUrl : null;
+export function getSectionBaseUrl(url: string, parseSectionUrl?: SectionUrlParser): string | null {
+  // A site may declare its own section-URL shape (advanced.sectionUrl); when it does, that
+  // wins over the generic /{id}_{page}.html split below.
+  const declared = parseSectionUrl?.(url);
+  if (declared) return declared.page > 1 ? declared.chapterUrl : null;
 
   // /123_2.html -> /123.html
   const m = url.match(/^(.*\/\d+)[_-]\d+(\.html?)$/i);
@@ -117,14 +119,18 @@ export function getSectionBaseUrl(url: string): string | null {
  * Check if nextUrl looks like a section/page URL relative to currentUrl.
  * E.g., /123.html -> /123_2.html or /123_2.html -> /123_3.html
  */
-export function isSectionLikeUrl(currentUrl: string, nextUrl: string): boolean {
+export function isSectionLikeUrl(
+  currentUrl: string,
+  nextUrl: string,
+  parseSectionUrl?: SectionUrlParser
+): boolean {
   try {
     const current = new URL(currentUrl);
     const next = new URL(nextUrl, current);
     if (current.host !== next.host) return false;
 
-    const currentPage = parseNovel543Url(current.href);
-    const nextPage = parseNovel543Url(next.href);
+    const currentPage = parseSectionUrl?.(current.href) ?? null;
+    const nextPage = parseSectionUrl?.(next.href) ?? null;
     if (currentPage || nextPage) {
       return (
         currentPage?.chapterUrl === nextPage?.chapterUrl &&
@@ -222,23 +228,38 @@ export function joinHtml(a: string, b: string): string {
 }
 
 /**
- * Normalize Ciweimao "paragraph tsukkomi" pages back to chapter URL.
+ * Rewrite host-specific AJAX endpoints back to the canonical chapter URL.
  *
- * Example:
+ * This runs inside the generic fetch path, so it is a declared table rather than a chain of
+ * per-site helpers: adding a site means adding one entry, and the generic code never learns a
+ * new brand name. Keep each entry narrow — it must only fire on URLs that cannot be chapters.
+ *
+ * Ciweimao example:
  * - https://wap.ciweimao.com/chapter/get_par_tsu_list?chapter_id=113493242&data-pgid=0
  *   -> https://wap.ciweimao.com/chapter/113493242
  */
-export function normalizeCiwemaoChapterUrl(url: string): string {
-  try {
-    const u = new URL(url);
+const CHAPTER_URL_REWRITES: Array<(url: URL) => string | null> = [
+  url => {
+    if (url.hostname !== 'wap.ciweimao.com' && url.hostname !== 'mip.ciweimao.com') return null;
     if (
-      (u.hostname === 'wap.ciweimao.com' || u.hostname === 'mip.ciweimao.com') &&
-      (u.pathname === '/chapter/get_par_tsu_list' || u.pathname === '/chapter/get_par_tsu_list/')
+      url.pathname !== '/chapter/get_par_tsu_list' &&
+      url.pathname !== '/chapter/get_par_tsu_list/'
     ) {
-      const chapterId = u.searchParams.get('chapter_id');
-      if (chapterId && /^\d+$/.test(chapterId)) {
-        return `${u.origin}/chapter/${chapterId}`;
-      }
+      return null;
+    }
+    const chapterId = url.searchParams.get('chapter_id');
+    if (!chapterId || !/^\d+$/.test(chapterId)) return null;
+    return `${url.origin}/chapter/${chapterId}`;
+  },
+];
+
+/** Apply the site chapter-URL rewrite table. Returns the input unchanged when nothing matches. */
+export function normalizeSiteChapterUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    for (const rewrite of CHAPTER_URL_REWRITES) {
+      const rewritten = rewrite(parsed);
+      if (rewritten) return rewritten;
     }
     return url;
   } catch {

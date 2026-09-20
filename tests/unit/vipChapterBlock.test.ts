@@ -20,7 +20,10 @@ type MockGmXhrOpts = {
 };
 
 describe('VIP chapter block', () => {
-  it('does not pre-block Ciweimao encrypted chapter shells as VIP pages', () => {
+  it('treats a rule content container without subscription copy as a chapter shell', () => {
+    // Ciweimao ships an empty, JavaScript-filled shell next to a subscription dialog. The
+    // container is empty on purpose, so "has text" cannot be the discriminator — what proves
+    // this is a chapter is that the VIP copy lives outside the rule's content container.
     const doc = new JSDOM(
       `<!DOCTYPE html>
       <html><body>
@@ -31,7 +34,31 @@ describe('VIP chapter block', () => {
       { url: 'https://www.ciweimao.com/chapter/113914324' }
     ).window.document;
 
-    expect(isVipChapterPage(doc)).toBe(false);
+    expect(isVipChapterPage(doc, { contentSelector: '#J_BookRead' })).toBe(false);
+    // Without a matched rule there is nothing to prove the shell, so the generic heuristic wins.
+    expect(isVipChapterPage(doc)).toBe(true);
+  });
+
+  it('still blocks when the subscription copy sits inside the content container', () => {
+    const doc = new JSDOM(
+      `<!DOCTYPE html>
+      <html><body>
+        <div id="J_BookRead">本章为VIP章节，订阅后可阅读</div>
+      </body></html>`,
+      { url: 'https://www.ciweimao.com/chapter/113914324' }
+    ).window.document;
+
+    expect(isVipChapterPage(doc, { contentSelector: '#J_BookRead' })).toBe(true);
+  });
+
+  it('ignores a degenerate body selector so a real paywall is not whitelisted', () => {
+    const doc = new JSDOM(
+      `<!DOCTYPE html>
+      <html><body><div class="content">本章为VIP章节，订阅后可阅读</div></body></html>`,
+      { url: 'https://example.com/book/1/2.html' }
+    ).window.document;
+
+    expect(isVipChapterPage(doc, { contentSelector: 'body' })).toBe(true);
   });
 
   it('blocks VIP page on loadNextChapter and shows toast', async () => {

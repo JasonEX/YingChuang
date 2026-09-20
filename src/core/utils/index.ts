@@ -7,7 +7,7 @@ export { generateCssSelector } from './selectorUtils';
 export {
   normalizeAbsoluteUrl,
   joinHtml,
-  normalizeCiwemaoChapterUrl,
+  normalizeSiteChapterUrl,
   normalizeRedundantFirstPageParam,
   isSectionLikeUrl,
   getSectionBaseUrl,

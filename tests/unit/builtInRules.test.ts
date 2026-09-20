@@ -1,11 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 
-import {
-  ciweimaoRule,
-  ciweimaoWapRule,
-  fetchCiweimaoApiDocument,
-} from '@/core/rules/sites/ciweimao';
+import { ciweimaoRule, ciweimaoWapRule } from '@/core/rules/sites/ciweimao';
 import { qidianMobileRule, qidianRule } from '@/core/rules/sites/qidian';
 import { builtInRules } from '@/core/rules/builtInRules';
 import { createSectionMerger } from '@/core/auto-enable/SectionMerger';
@@ -411,10 +407,14 @@ describe('builtInRules', () => {
     vi.stubGlobal('fetch', fetchMock);
     win.fetch = fetchMock as unknown as typeof fetch;
 
-    const apiDoc = await fetchCiweimaoApiDocument('https://www.ciweimao.com/chapter/113927226', {
+    // Reached through the rule's declared extension point, not a direct import: this is the
+    // contract the generic chapter loader relies on.
+    const fetchDocument = ciweimaoRule.hooks?.fetchDocument;
+    expect(fetchDocument).toBeTypeOf('function');
+    const apiDoc = await fetchDocument!('https://www.ciweimao.com/chapter/113927226', {
       bookTitle: '无奥世界，但是群友全是奥特曼',
       indexUrl: 'https://www.ciweimao.com/chapter-list/100452963',
-      url: 'https://www.ciweimao.com/chapter/113926737',
+      refererUrl: 'https://www.ciweimao.com/chapter/113926737',
     });
 
     expect(apiDoc?.querySelector('#J_BtnPagePrev')?.getAttribute('href')).toBe(

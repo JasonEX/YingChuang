@@ -4,7 +4,7 @@
  * Handles HTTP requests, CORS (via GM_xmlhttpRequest), and basic parsing.
  */
 
-import { normalizeCiwemaoChapterUrl, normalizeRedundantFirstPageParam } from './index';
+import { normalizeRedundantFirstPageParam, normalizeSiteChapterUrl } from './index';
 
 /** Result of fetchAndParseUrl operation */
 export interface FetchAndParseResult {
@@ -34,7 +34,7 @@ export function getGmXhr(): typeof GM_xmlhttpRequest | null {
  * Normalize URL for fetching (removes hash, handles special cases)
  */
 export function normalizeUrlForFetch(url: string): string {
-  const normalized = normalizeRedundantFirstPageParam(normalizeCiwemaoChapterUrl(url));
+  const normalized = normalizeRedundantFirstPageParam(normalizeSiteChapterUrl(url));
   try {
     const u = new URL(normalized);
     u.hash = '';
