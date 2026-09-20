@@ -2,8 +2,8 @@ import { MAX_NAV_FAILURES, VIP_BLOCK_TOAST } from './types';
 import type { ParsedChapter, Parser } from '@/core/parser';
 
 import { fetchAndParseUrl } from '@/core/utils/network';
-import { fetchCiweimaoApiDocument } from '@/core/rules/sites/ciweimao';
 import { getChapterDocumentBlockReason } from '@/core/detection';
+import { getRuleManager } from '@/core/rules/RuleManager';
 import type { LoadSource } from './types';
 import type { NavigationContext } from './navigationContext';
 import { normalizeUrlForBlock } from './utils';
@@ -11,7 +11,6 @@ import { parseWithSectionMerge } from './section';
 import type { PreparedChapterLoad } from './chapterLoadGuards';
 import { recordDebugEvent } from '@/core/debug/events';
 import { recordNavFailure } from './navFailure';
-import type { SiteRule } from '@/core/rules/types';
 
 export type FetchDocumentResult = Document | 'abort' | null;
 export type ParsedCandidateResult = ParsedChapter | 'abort' | 'blocked' | null;
@@ -108,9 +107,9 @@ export async function loadFetchDocument(
   runId: number,
   referer: string
 ): Promise<FetchDocumentResult> {
-  const ciweimaoDoc = await loadRuleApiDocument(load.targetUrl, load.refChapter);
+  const ruleDoc = await loadRuleApiDocument(load.targetUrl, load.refChapter.chapter);
   if (ctx.runtime.isViewStale(runId)) return 'abort';
-  if (ciweimaoDoc) return ciweimaoDoc;
+  if (ruleDoc) return ruleDoc;
 
   const fetchLoader = fetchAndParseUrl(load.targetUrl, referer);
   const abort = fetchLoader.abort;
@@ -140,17 +139,22 @@ export async function loadFetchDocument(
   return fetchResult.doc;
 }
 
+/**
+ * Executable hooks come from the current rule for the target URL, never a cached rule
+ * snapshot: JSON persistence retains chapter data but drops functions.
+ */
 export async function loadRuleApiDocument(
   url: string,
-  reference: { chapter: ParsedChapter; rule?: SiteRule }
+  reference: Pick<ParsedChapter, 'bookTitle' | 'indexUrl' | 'url'>
 ): Promise<Document | null> {
-  const ruleId = reference.rule?.id || reference.chapter.rule?.id || '';
-  if (ruleId !== 'ciweimao' && ruleId !== 'ciweimao-wap') return null;
+  const match = await getRuleManager().matchRule(url);
+  const fetchDocument = match?.rule.hooks?.fetchDocument;
+  if (!fetchDocument) return null;
 
-  return fetchCiweimaoApiDocument(url, {
-    bookTitle: reference.chapter.bookTitle,
-    indexUrl: reference.chapter.indexUrl,
-    url: reference.chapter.url,
+  return fetchDocument(url, {
+    bookTitle: reference.bookTitle,
+    indexUrl: reference.indexUrl,
+    refererUrl: reference.url,
   });
 }
 

@@ -1,15 +1,17 @@
 import { describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 
-import {
-  ciweimaoRule,
-  ciweimaoWapRule,
-  fetchCiweimaoApiDocument,
-} from '@/core/rules/sites/ciweimao';
+import { ciweimaoRule, ciweimaoWapRule } from '@/core/rules/sites/ciweimao';
 import { qidianMobileRule, qidianRule } from '@/core/rules/sites/qidian';
 import { builtInRules } from '@/core/rules/builtInRules';
 import { createSectionMerger } from '@/core/auto-enable/SectionMerger';
 import { Parser } from '@/core/parser';
+
+import { createGmStorageMock, stubGmStorage } from '../testUtils/gmStorage';
+import { createPinia, setActivePinia } from 'pinia';
+import { getPersistedCachedChapter, persistCachedChapter } from '@/ui/stores/reader/persistence';
+import type { CachedChapter } from '@/ui/stores/reader/types';
+import { useReaderStore } from '@/ui/stores/reader';
 
 describe('builtInRules', () => {
   it('contains active built-in rules', () => {
@@ -356,7 +358,7 @@ describe('builtInRules', () => {
     expect(chapter?.content).not.toContain('Qw9Er');
   });
 
-  it('builds Ciweimao chapter documents from API and TOC when the shell page is blocked', async () => {
+  it.each([false, true])('loads Ciweimao next chapter via API (restored: %s)', async restored => {
     const win = window as typeof window & { CryptoJS?: unknown };
     const apiParagraph =
       '南夕子认真确认了计划，北斗也点了点头，两人决定继续行动，所有队员都保持警戒。'.repeat(3);
@@ -411,29 +413,36 @@ describe('builtInRules', () => {
     vi.stubGlobal('fetch', fetchMock);
     win.fetch = fetchMock as unknown as typeof fetch;
 
-    const apiDoc = await fetchCiweimaoApiDocument('https://www.ciweimao.com/chapter/113927226', {
-      bookTitle: '无奥世界，但是群友全是奥特曼',
-      indexUrl: 'https://www.ciweimao.com/chapter-list/100452963',
-      url: 'https://www.ciweimao.com/chapter/113926737',
-    });
+    let cached: CachedChapter = {
+      chapter: {
+        bookTitle: '无奥世界，但是群友全是奥特曼',
+        indexUrl: 'https://www.ciweimao.com/chapter-list/100452963',
+        url: 'https://www.ciweimao.com/chapter/113926737',
+        nextUrl: 'https://www.ciweimao.com/chapter/113927226',
+        title: '9.决战！异次元超人！',
+        content: '',
+        rawContent: '',
+        confidence: 1,
+        method: 'rule',
+        rule: ciweimaoRule,
+      },
+      rule: ciweimaoRule,
+      cachedAt: Date.now(),
+    };
+    stubGmStorage(createGmStorageMock());
+    if (restored) {
+      const book = { bookId: '100452963', indexUrl: cached.chapter.indexUrl! };
+      expect(persistCachedChapter(book, cached.chapter.url, cached)).toBe(true);
+      cached = getPersistedCachedChapter(book, cached.chapter.url)!;
+      expect(cached.rule?.hooks?.fetchDocument).toBeUndefined();
+      expect(cached.chapter.rule?.hooks?.fetchDocument).toBeUndefined();
+    }
 
-    expect(apiDoc?.querySelector('#J_BtnPagePrev')?.getAttribute('href')).toBe(
-      'https://www.ciweimao.com/chapter/113926737'
-    );
-    expect(apiDoc?.querySelector('#J_BtnPageNext')?.getAttribute('href')).toBe(
-      'https://www.ciweimao.com/chapter/113930500'
-    );
-
-    const chapter = await (async () => {
-      const debug = vi.spyOn(console, 'debug').mockImplementation(() => {});
-      try {
-        return apiDoc
-          ? await new Parser().parse(apiDoc, 'https://www.ciweimao.com/chapter/113927226')
-          : null;
-      } finally {
-        debug.mockRestore();
-      }
-    })();
+    setActivePinia(createPinia());
+    const store = useReaderStore();
+    store.setChapter(cached.chapter, cached.rule);
+    expect(await store.loadNextChapter()).toBe(true);
+    const chapter = store.chapters.at(-1)?.chapter;
     expect(chapter?.title).toBe('10.南夕子：我抄，盒！');
     expect(chapter?.bookTitle).toBe('无奥世界，但是群友全是奥特曼');
     expect(chapter?.prevUrl).toBe('https://www.ciweimao.com/chapter/113926737');

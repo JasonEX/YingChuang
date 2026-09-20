@@ -138,11 +138,13 @@ test('Ciweimao keeps short closing prose across initial parsing and chapter navi
       <div id="J_BookCnt" data-id="${id}"></div><div id="J_BookRead">
       ${`<p class="chapter">${'队员们在山中继续寻找失踪的同伴。'.repeat(20)}</p>`.repeat(6)}
       <p class="chapter">回家。</p><p class="chapter">“我知道了。”</p><p class="chapter">他没有回头</p>
+      <p class="chapter">屏幕上写着立即购买，他却关掉了页面。</p>
       <p class="chapter"><span>Qw9Er</span></p></div></body></html>`,
     });
   });
   await addYingChuangUserscript(context);
   await page.goto(`${origin}/chapter/120`);
+  await expect(page.locator('#mnr-reader-root .mnr-reader')).toBeVisible();
   await waitForMnrReader(page);
   const root = page.locator('#mnr-reader-root');
   for (const id of [120, 121]) {
@@ -151,6 +153,7 @@ test('Ciweimao keeps short closing prose across initial parsing and chapter navi
       await expect(page).toHaveURL(`${origin}/chapter/121`);
     }
     const article = root.locator(`article[data-chapter-url="${origin}/chapter/${id}"]`);
+    await expect(article).toContainText('屏幕上写着立即购买，他却关掉了页面。');
     await expect(article).toContainText('回家。');
     await expect(article).toContainText('“我知道了。”');
     await expect(article).toContainText('他没有回头');

@@ -3,7 +3,7 @@
  * Handles matching curated built-in rules
  */
 
-import { RuleMatchResult, SiteRule } from './types';
+import { ParsedSectionUrl, RuleMatchResult, SiteRule } from './types';
 import { builtInRules as curatedBuiltInRules } from './builtInRules';
 
 /** Glob to regex conversion */
@@ -27,6 +27,13 @@ export class RuleManager {
   private builtInRules: SiteRule[] = curatedBuiltInRules;
   private initialized: boolean = false;
   private compiledCache = new WeakMap<SiteRule, { main: RegExp; excludes: RegExp[] }>();
+  // Curated rules are static; collect only participating hooks once, not per link.
+  private readonly sectionUrlParsers = this.builtInRules.flatMap(rule =>
+    rule.hooks?.parseSectionUrl ? [rule.hooks.parseSectionUrl] : []
+  );
+  private readonly entryResolvers = this.builtInRules.flatMap(rule =>
+    rule.hooks?.resolveEntryUrl ? [rule.hooks.resolveEntryUrl] : []
+  );
 
   /**
    * Initialize the rule manager
@@ -35,6 +42,24 @@ export class RuleManager {
   async initialize(): Promise<void> {
     if (this.initialized) return;
     this.initialized = true;
+  }
+
+  /** Synchronous so URL helpers and detectors can use the same site parser. */
+  parseSectionUrl = (url: string): ParsedSectionUrl | null => {
+    for (const parse of this.sectionUrlParsers) {
+      const parsed = parse(url);
+      if (parsed) return parsed;
+    }
+    return null;
+  };
+
+  /** Entry pages can sit outside chapter-rule matches; each hook checks its own URL. */
+  resolveEntryUrl(doc: Document, url: string): string | null {
+    for (const resolve of this.entryResolvers) {
+      const resolved = resolve(doc, url);
+      if (resolved) return resolved;
+    }
+    return null;
   }
 
   /**

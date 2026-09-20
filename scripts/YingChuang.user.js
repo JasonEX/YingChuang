@@ -411,56 +411,6 @@
 		};
 		return null;
 	}
-	var novel543_exports = __exportAll({
-		novel543Rule: () => novel543Rule,
-		parseNovel543Url: () => parseNovel543Url
-	});
-	var CHAPTER_URL = /^https?:\/\/(?:www\.)?novel543\.com(\/\d+\/\d+_\d+)(?:_(\d+))?\.html(?:[?#].*)?$/;
-	function parseNovel543Url(url) {
-		const match = url.match(CHAPTER_URL);
-		if (!match) return null;
-		const parsed = new URL(url);
-		parsed.pathname = `${match[1]}.html`;
-		parsed.hash = "";
-		return {
-			chapterUrl: parsed.href,
-			page: Number(match[2] || 1)
-		};
-	}
-	var novel543Rule = {
-		id: "novel543",
-		name: "稷下書院",
-		version: 1,
-		match: { pattern: CHAPTER_URL.source },
-		content: {
-			selector: ".chapter-content > .content",
-			remove: ".adBlock, .gadBlock, [id^=div-onead-], div:has(> img[src=\"/images/vip.png\"]):has(> a[href$=\"/auth/govip.html\"]), div:has(> p img[src=\"/images/vip.png\"]):has(> a[href$=\"/auth/govip.html\"])"
-		},
-		navigation: {
-			prev: ".foot-nav a:contains(上一章)",
-			index: ".foot-nav a[href$=\"/dir\"]",
-			next: ".foot-nav a:contains(下一章)"
-		},
-		title: {
-			selector: ".chapter-content > h1",
-			replace: "\\s*[（(]\\d+\\s*/\\s*\\d+[）)]\\s*$",
-			bookSelector: ".header .nav li:last-child a"
-		},
-		toc: { excludeAncestors: ".chaplist > ul:not(.all)" },
-		hooks: { beforeParse: (doc) => {
-			const bookLink = doc.querySelector(".header .nav li:last-child a");
-			const bookTitle = doc.querySelector("meta[name=keywords]")?.content.match(/^(.+?)官方首[發发](?:[,，]|$)/)?.[1];
-			if (bookLink && !bookLink.textContent?.trim() && bookTitle) bookLink.textContent = bookTitle;
-			for (const p of doc.querySelectorAll("#chapterWarp .content > div > p")) {
-				const label = p.firstChild;
-				if (label?.nodeName === "SPAN" && /^[溫温]馨提示[:：]$/.test(label.textContent?.trim() || "")) p.remove();
-			}
-		} },
-		meta: {
-			source: "builtin",
-			exampleUrl: "https://www.novel543.com/1019622989/8096_941.html"
-		}
-	};
 	function normalizeAbsoluteUrl(href, base) {
 		const baseCandidates = [base];
 		if (typeof document !== "undefined") baseCandidates.push(document.baseURI);
@@ -477,9 +427,9 @@
 			return href;
 		}
 	}
-	function getSectionBaseUrl(url) {
-		const novel543 = parseNovel543Url(url);
-		if (novel543) return novel543.page > 1 ? novel543.chapterUrl : null;
+	function getSectionBaseUrl(url, parseSectionUrl) {
+		const declared = parseSectionUrl?.(url);
+		if (declared) return declared.page > 1 ? declared.chapterUrl : null;
 		const m = url.match(/^(.*\/\d+)[_-]\d+(\.html?)$/i);
 		if (m) return `${m[1]}${m[2]}`;
 		try {
@@ -539,13 +489,13 @@
 		} catch {}
 		return null;
 	}
-	function isSectionLikeUrl(currentUrl, nextUrl) {
+	function isSectionLikeUrl(currentUrl, nextUrl, parseSectionUrl) {
 		try {
 			const current = new URL(currentUrl);
 			const next = new URL(nextUrl, current);
 			if (current.host !== next.host) return false;
-			const currentPage = parseNovel543Url(current.href);
-			const nextPage = parseNovel543Url(next.href);
+			const currentPage = parseSectionUrl?.(current.href) ?? null;
+			const nextPage = parseSectionUrl?.(next.href) ?? null;
 			if (currentPage || nextPage) return currentPage?.chapterUrl === nextPage?.chapterUrl && nextPage?.page === (currentPage?.page ?? 0) + 1;
 			const currentPath = current.pathname;
 			const nextPath = next.pathname;
@@ -3034,6 +2984,1947 @@
 		/https?:\/\/[^\s<>"]+/gi,
 		/www\.[a-z0-9]+\.(com|net|org|cc)/gi
 	];
+	var ciweimao_exports = __exportAll({
+		ciweimaoRule: () => ciweimaoRule,
+		ciweimaoWapRule: () => ciweimaoWapRule
+	});
+	function asRecord(value) {
+		return value && typeof value === "object" ? value : null;
+	}
+	function isSuccessCode(value) {
+		return value === 1e5 || value === "100000";
+	}
+	function getUnsafeWindow() {
+		return typeof unsafeWindow !== "undefined" ? unsafeWindow : null;
+	}
+	function getCrypto() {
+		return (typeof window !== "undefined" ? window : null)?.CryptoJS || getUnsafeWindow()?.CryptoJS || null;
+	}
+	function normalizeCiweimaoUrl(value, baseUrl) {
+		if (!value) return "";
+		try {
+			return new URL(value, baseUrl).href;
+		} catch {
+			return value;
+		}
+	}
+	function getCiweimaoChapterId(url) {
+		return (url.match(/\/chapter\/(\d+)/) || [])[1] || "";
+	}
+	function getCiweimaoBookIdFromIndex(url) {
+		if (!url) return "";
+		return (url.match(/\/chapter-list\/(\d+)/) || [])[1] || "";
+	}
+	function fixCiweimaoNavHref(doc, selector, pageUrl) {
+		const el = doc.querySelector(selector);
+		if (!el) return;
+		let href = el.getAttribute("data-href") || el.getAttribute("data-url") || el.getAttribute("data-next") || el.getAttribute("data-prev") || el.getAttribute("data-link") || "";
+		if (!href) href = el.getAttribute("href") || "";
+		if (!href || href.startsWith("javascript")) {
+			const match = (el.outerHTML || "").match(/https?:\/\/(?:www|wap)\.ciweimao\.com\/chapter\/\d+/);
+			if (match) href = match[0];
+		}
+		if (href && !href.startsWith("javascript")) el.setAttribute("href", normalizeCiweimaoUrl(href, pageUrl));
+		else el.removeAttribute("href");
+	}
+	async function fetchCiweimaoJson(target, pageUrl, helpers) {
+		try {
+			const unsafeWin = getUnsafeWindow();
+			const currentWin = typeof window !== "undefined" ? window : null;
+			const fetcher = unsafeWin?.fetch || currentWin?.fetch || (typeof fetch === "function" ? fetch : null);
+			if (fetcher) {
+				const fetchThis = unsafeWin?.fetch ? unsafeWin : currentWin?.fetch ? currentWin : void 0;
+				const response = await fetcher.call(fetchThis, target, {
+					credentials: "include",
+					referrer: pageUrl
+				});
+				if (response?.ok) return asRecord(await response.json());
+			}
+		} catch {}
+		if (!helpers?.fetchJson) return null;
+		return helpers.fetchJson(target, {
+			headers: { Referer: pageUrl },
+			withCredentials: true
+		});
+	}
+	async function fetchCiweimaoText(target, referrer) {
+		try {
+			const unsafeWin = getUnsafeWindow();
+			const currentWin = typeof window !== "undefined" ? window : null;
+			const fetcher = unsafeWin?.fetch || currentWin?.fetch || (typeof fetch === "function" ? fetch : null);
+			if (!fetcher) return null;
+			const fetchThis = unsafeWin?.fetch ? unsafeWin : currentWin?.fetch ? currentWin : void 0;
+			const response = await fetcher.call(fetchThis, target, {
+				credentials: "include",
+				referrer
+			});
+			if (!response?.ok) return null;
+			return response.text();
+		} catch {
+			return null;
+		}
+	}
+	function decryptCiweimaoContent(chapterContent, encryptedKeys, accessKey, crypto) {
+		const chars = accessKey.split("");
+		const total = encryptedKeys.length;
+		if (!total || !chars.length) return "";
+		const keyChain = [encryptedKeys[chars[chars.length - 1].charCodeAt(0) % total], encryptedKeys[chars[0].charCodeAt(0) % total]];
+		const decode = (str) => atob(str);
+		const encode = (str) => btoa(str);
+		let current = chapterContent;
+		for (let i = 0; i < keyChain.length; i++) {
+			const decoded = decode(typeof current === "string" ? current : current.toString());
+			const key = keyChain[i];
+			const iv = encode(decoded.substring(0, 16));
+			const encrypted = encode(decoded.substring(16));
+			const parsed = crypto.format.OpenSSL.parse(encrypted);
+			const decrypted = crypto.AES.decrypt(parsed, crypto.enc.Base64.parse(key), {
+				iv: crypto.enc.Base64.parse(iv),
+				format: crypto.format.OpenSSL
+			});
+			current = i < keyChain.length - 1 ? decode(decrypted.toString(crypto.enc.Base64)) : decrypted;
+		}
+		return typeof current === "string" ? current : current.toString(crypto.enc.Utf8);
+	}
+	async function fetchCiweimaoContent(chapterId, pageUrl, helpers) {
+		const origin = new URL(pageUrl).origin;
+		const session = await fetchCiweimaoJson(`${origin}/chapter/ajax_get_session_code?chapter_id=${chapterId}`, pageUrl, helpers);
+		if (!session || !isSuccessCode(session.code)) return "";
+		const accessKeyValue = session.chapter_access_key;
+		if (accessKeyValue === void 0 || accessKeyValue === null) return "";
+		const accessKey = String(accessKeyValue);
+		const data = await fetchCiweimaoJson(`${origin}/chapter/get_book_chapter_detail_info?chapter_id=${chapterId}&chapter_access_key=${accessKey}`, pageUrl, helpers);
+		if (!data || !isSuccessCode(data.code)) return "";
+		const chapterContent = data.chapter_content;
+		const encryptedKeys = Array.isArray(data.encryt_keys) ? data.encryt_keys.filter((key) => typeof key === "string") : [];
+		const crypto = getCrypto();
+		if (typeof chapterContent !== "string" || encryptedKeys.length === 0 || !crypto) return "";
+		return decryptCiweimaoContent(chapterContent, encryptedKeys, accessKey, crypto);
+	}
+	async function decryptCiweimaoIfNeeded(doc, contentEl, pageUrl, helpers) {
+		const hasWatermark = !!contentEl.querySelector("#J_BookRead_WaterMark, .watermark");
+		const text = (contentEl.textContent || "").replace(/\s+/g, "").trim();
+		const chapterParas = contentEl.querySelectorAll("p.chapter").length;
+		if (!(hasWatermark || text.length < 200 || chapterParas < 3)) return;
+		const chapterId = doc.querySelector("#J_BookCnt")?.getAttribute("data-id") || (pageUrl.match(/chapter\/(\d+)/) || [])[1];
+		if (!chapterId) return;
+		const html = await fetchCiweimaoContent(chapterId, pageUrl, helpers);
+		if (html) contentEl.innerHTML = html;
+	}
+	function normalizeWatermarkText(value) {
+		return value.replace(/\s+/g, "").replace(/[\u200b-\u200d\ufeff]/g, "").trim();
+	}
+	function isLikelyWatermarkToken(token) {
+		if (!/^[A-Za-z0-9]{4,12}$/.test(token)) return false;
+		const hasDigit = /\d/.test(token);
+		const hasLower = /[a-z]/.test(token);
+		const hasUpper = /[A-Z]/.test(token);
+		return hasDigit && (hasLower || hasUpper) || hasLower && hasUpper;
+	}
+	function isCjk(ch) {
+		return /[\u4e00-\u9fff]/.test(ch);
+	}
+	function isCjkPunct(ch) {
+		return /[，。！？、“”‘’（）()【】[\]<>《》:：;；·~…—-]/.test(ch);
+	}
+	function getPrevNonSpace(text, index) {
+		for (let i = index - 1; i >= 0; i--) {
+			const ch = text[i];
+			if (!/\s/.test(ch)) return ch;
+		}
+		return "";
+	}
+	function getNextNonSpace(text, index) {
+		for (let i = index; i < text.length; i++) {
+			const ch = text[i];
+			if (!/\s/.test(ch)) return ch;
+		}
+		return "";
+	}
+	function shouldStripWatermarkToken(token, before, after) {
+		if (!isLikelyWatermarkToken(token)) return false;
+		const beforeCjk = before && (isCjk(before) || isCjkPunct(before));
+		const afterCjk = after && (isCjk(after) || isCjkPunct(after));
+		if (!beforeCjk && !afterCjk) return false;
+		const beforeAscii = before && /[A-Za-z0-9]/.test(before);
+		const afterAscii = after && /[A-Za-z0-9]/.test(after);
+		if (beforeAscii && afterAscii) return false;
+		return true;
+	}
+	function stripWatermarkText(value) {
+		if (!value || !/[\u4e00-\u9fff]/.test(value)) return value;
+		let result = "";
+		let i = 0;
+		while (i < value.length) {
+			const ch = value[i];
+			if (/[A-Za-z0-9]/.test(ch)) {
+				let j = i + 1;
+				while (j < value.length && /[A-Za-z0-9]/.test(value[j])) j++;
+				const token = value.slice(i, j);
+				if (token.length >= 4 && token.length <= 12) {
+					if (shouldStripWatermarkToken(token, getPrevNonSpace(value, i), getNextNonSpace(value, j))) {
+						i = j;
+						continue;
+					}
+				}
+				result += token;
+				i = j;
+				continue;
+			}
+			result += ch;
+			i += 1;
+		}
+		return result;
+	}
+	function cleanupCiweimaoWatermarks(doc, contentEl) {
+		contentEl.querySelectorAll("span, i, em, b, strong, font").forEach((node) => {
+			if (isLikelyWatermarkToken(normalizeWatermarkText(node.textContent || ""))) node.remove();
+		});
+		const showText = doc.defaultView?.NodeFilter?.SHOW_TEXT ?? 4;
+		const walker = doc.createTreeWalker(contentEl, showText);
+		const textNodes = [];
+		while (walker.nextNode()) textNodes.push(walker.currentNode);
+		textNodes.forEach((node) => {
+			const parent = node.parentElement;
+			if (!parent) return;
+			const tag = parent.tagName;
+			if (tag === "SCRIPT" || tag === "STYLE" || tag === "NOSCRIPT") return;
+			const text = node.nodeValue || "";
+			const cleaned = stripWatermarkText(text);
+			if (cleaned !== text) node.nodeValue = cleaned;
+		});
+		contentEl.querySelectorAll("p.chapter span").forEach((span) => span.remove());
+		contentEl.querySelectorAll("p.chapter").forEach((p) => {
+			const hasImg = p.querySelector("img");
+			const text = (p.textContent || "").replace(/\s+/g, "").trim();
+			if (hasImg && text.length <= 6) p.remove();
+		});
+	}
+	var tocCache = new Map();
+	function parseCiweimaoToc(html, tocUrl, fallbackBookTitle = "") {
+		const doc = new DOMParser().parseFromString(html, "text/html");
+		const seen = new Set();
+		const entries = [];
+		doc.querySelectorAll("a[href*=\"/chapter/\"]").forEach((anchor) => {
+			const url = normalizeCiweimaoUrl(anchor.getAttribute("href") || "", tocUrl);
+			if (!/\/chapter\/\d+/.test(url) || seen.has(url)) return;
+			const title = (anchor.textContent || "").replace(/\s+/g, " ").trim();
+			if (!title) return;
+			seen.add(url);
+			entries.push({
+				title,
+				url
+			});
+		});
+		const titleText = (doc.querySelector("title")?.textContent || "").trim();
+		return {
+			bookTitle: fallbackBookTitle || titleText.replace(/最新章节.*$/u, "").replace(/无弹窗全文阅读.*$/u, "").trim(),
+			entries
+		};
+	}
+	async function getCiweimaoToc(indexUrl, referrer, fallbackBookTitle = "") {
+		const cacheKey = getCiweimaoBookIdFromIndex(indexUrl) || indexUrl;
+		if (!cacheKey) return null;
+		let cached = tocCache.get(cacheKey);
+		if (!cached) {
+			cached = (async () => {
+				const html = await fetchCiweimaoText(indexUrl, referrer);
+				if (!html || /man-machine-verify|验证码|人机验证/i.test(html)) return null;
+				return parseCiweimaoToc(html, indexUrl, fallbackBookTitle);
+			})();
+			cached.then((toc) => {
+				if (!toc) tocCache.delete(cacheKey);
+			});
+			tocCache.set(cacheKey, cached);
+		}
+		return cached;
+	}
+	function createCiweimaoApiDocument(options) {
+		const doc = document.implementation.createHTMLDocument(options.title);
+		const safeSetText = (el, text) => {
+			el.textContent = text;
+			return el;
+		};
+		const breadcrumb = doc.createElement("div");
+		breadcrumb.className = "breadcrumb";
+		const bookLink = doc.createElement("a");
+		bookLink.href = options.indexUrl || options.url;
+		safeSetText(bookLink, options.bookTitle);
+		breadcrumb.append(bookLink);
+		const box = doc.createElement("div");
+		box.className = "book-read-box";
+		const cnt = doc.createElement("div");
+		cnt.id = "J_BookCnt";
+		cnt.setAttribute("data-id", getCiweimaoChapterId(options.url));
+		const header = doc.createElement("div");
+		header.className = "read-hd";
+		const h1 = doc.createElement("h1");
+		h1.className = "chapter";
+		safeSetText(h1, options.title);
+		header.append(h1);
+		const content = doc.createElement("div");
+		content.className = "read-bd";
+		content.id = "J_BookRead";
+		content.innerHTML = options.contentHtml;
+		const nav = doc.createElement("div");
+		nav.className = "book-read-page";
+		if (options.prevUrl) {
+			const prev = doc.createElement("a");
+			prev.id = "J_BtnPagePrev";
+			prev.href = options.prevUrl;
+			safeSetText(prev, "上一章");
+			nav.append(prev);
+		}
+		if (options.indexUrl) {
+			const index = doc.createElement("a");
+			index.href = options.indexUrl;
+			safeSetText(index, "目录");
+			nav.append(index);
+		}
+		if (options.nextUrl) {
+			const next = doc.createElement("a");
+			next.id = "J_BtnPageNext";
+			next.href = options.nextUrl;
+			safeSetText(next, "下一章");
+			nav.append(next);
+		}
+		cnt.append(header, content);
+		box.append(cnt, nav);
+		doc.body.append(breadcrumb, box);
+		return doc;
+	}
+	async function fetchCiweimaoApiDocument(targetUrl, refChapter) {
+		try {
+			const chapterId = getCiweimaoChapterId(targetUrl);
+			if (!chapterId || !/\/\/(?:www|wap)\.ciweimao\.com\/chapter\//.test(targetUrl)) return null;
+			const indexUrl = refChapter.indexUrl || "";
+			const toc = indexUrl ? await getCiweimaoToc(indexUrl, refChapter.url, refChapter.bookTitle || "") : null;
+			const normalizedTargetUrl = normalizeCiweimaoUrl(targetUrl, refChapter.url);
+			const tocIndex = toc?.entries.findIndex((entry) => normalizeCiweimaoUrl(entry.url, refChapter.url) === normalizedTargetUrl) ?? -1;
+			if (!toc || tocIndex < 0) return null;
+			const entry = toc.entries[tocIndex];
+			const prevUrl = toc.entries[tocIndex - 1]?.url || "";
+			const nextUrl = toc.entries[tocIndex + 1]?.url || "";
+			const html = await fetchCiweimaoContent(chapterId, normalizedTargetUrl);
+			if (!html) return null;
+			const doc = createCiweimaoApiDocument({
+				bookTitle: toc.bookTitle || refChapter.bookTitle || "",
+				contentHtml: html,
+				indexUrl,
+				nextUrl,
+				prevUrl,
+				title: entry.title,
+				url: normalizedTargetUrl
+			});
+			const contentEl = doc.querySelector("#J_BookRead");
+			if (contentEl) cleanupCiweimaoWatermarks(doc, contentEl);
+			return doc;
+		} catch (e) {
+			console.warn("[YingChuang] Ciweimao API document error:", e);
+			return null;
+		}
+	}
+	var ciweimaoBeforeParse = async (doc, url, helpers) => {
+		try {
+			const contentEl = doc.querySelector("#J_BookRead");
+			if (!contentEl) return;
+			const fallbackUrl = typeof window !== "undefined" && typeof window.location?.href === "string" ? window.location.href : "";
+			const pageUrl = url || doc.location?.href || fallbackUrl;
+			if (!pageUrl) return;
+			fixCiweimaoNavHref(doc, "#J_BtnPagePrev", pageUrl);
+			fixCiweimaoNavHref(doc, ".J_BtnPagePrev", pageUrl);
+			fixCiweimaoNavHref(doc, "#J_BtnPageNext", pageUrl);
+			fixCiweimaoNavHref(doc, ".J_BtnPageNext", pageUrl);
+			await decryptCiweimaoIfNeeded(doc, contentEl, pageUrl, helpers);
+			cleanupCiweimaoWatermarks(doc, contentEl);
+		} catch (e) {
+			console.warn("[YingChuang] Ciweimao beforeParse error:", e);
+		}
+	};
+	var ciweimaoContent = {
+		selector: "#J_BookRead",
+		remove: "i.J_Num, .chapter span, #J_BookRead_WaterMark, .watermark"
+	};
+	var ciweimaoHooks = {
+		beforeParse: ciweimaoBeforeParse,
+		fetchDocument: (url, context) => fetchCiweimaoApiDocument(url, {
+			bookTitle: context.bookTitle,
+			indexUrl: context.indexUrl,
+			url: context.refererUrl
+		})
+	};
+	var ciweimaoRule = {
+		id: "ciweimao",
+		name: "刺猬猫",
+		version: 2,
+		match: { pattern: "^https?://www\\.ciweimao\\.com/chapter/\\d+" },
+		content: { ...ciweimaoContent },
+		navigation: {
+			prev: "#J_BtnPagePrev[href^=\"http\"]",
+			index: ".book-read-page a[href*=\"/chapter-list/\"]",
+			next: "#J_BtnPageNext[href^=\"http\"]"
+		},
+		title: {
+			selector: ".read-hd .chapter",
+			bookSelector: ".breadcrumb > a:last()"
+		},
+		hooks: { ...ciweimaoHooks },
+		advanced: {
+			mutationSelector: "#J_BookRead",
+			mutationChildCount: 2,
+			timeout: 3e3
+		},
+		meta: {
+			source: "builtin",
+			exampleUrl: "https://www.ciweimao.com/chapter/113909523"
+		}
+	};
+	var ciweimaoWapRule = {
+		id: "ciweimao-wap",
+		name: "刺猬猫(移动端)",
+		version: 2,
+		match: { pattern: "^https?://wap\\.ciweimao\\.com/chapter/\\d+/?(?:[?#].*)?$" },
+		content: { ...ciweimaoContent },
+		navigation: {
+			prev: ".J_BtnPagePrev[href^=\"http\"]",
+			index: ".book-read-page .btn-list[href*=\"/chapter/\"]",
+			next: ".J_BtnPageNext[href^=\"http\"]"
+		},
+		title: { selector: "h1.read-hd" },
+		hooks: { ...ciweimaoHooks },
+		advanced: {
+			mutationSelector: "#J_BookRead",
+			mutationChildCount: 2,
+			timeout: 3e3
+		},
+		meta: {
+			source: "builtin",
+			exampleUrl: "https://wap.ciweimao.com/chapter/113489050"
+		}
+	};
+	function getScriptText(doc) {
+		return Array.from(doc.scripts).map((script) => script.textContent || "").join("\n");
+	}
+	function appendHiddenLink(doc, id, href, text, base) {
+		if (!href || href === "#" || /^javascript:/i.test(href) || doc.getElementById(id)) return;
+		try {
+			const link = doc.createElement("a");
+			link.id = id;
+			link.href = new URL(href, base).toString();
+			link.textContent = text;
+			link.style.display = "none";
+			doc.body?.appendChild(link);
+		} catch {}
+	}
+	function extractChapterNav(scriptText) {
+		const match = scriptText.match(/if\s*\(\s*direction\s*===\s*['"]prev['"]\s*\)\s*\{[\s\S]*?chapterUrl\s*=\s*['"]([^'"]+)['"][\s\S]*?\}\s*else\s*\{[\s\S]*?chapterUrl\s*=\s*['"]([^'"]+)['"]/);
+		return {
+			prev: match?.[1] || null,
+			next: match?.[2] || null
+		};
+	}
+	var deqixs_exports = __exportAll({
+		deqixsCoRule: () => deqixsCoRule,
+		deqixsRule: () => deqixsRule
+	});
+	function extractJsValue(source, name) {
+		const pattern = new RegExp(`(?:var|let|const)\\s+${name}\\s*=\\s*(?:['"]([^'"]+)['"]|([^;\\s]+))\\s*;`);
+		const match = source.match(pattern);
+		return match?.[1] || match?.[2] || null;
+	}
+	var deqixsCoBeforeParse = async (doc, url, helpers) => {
+		try {
+			const pageUrl = url || doc.location?.href || location.href;
+			const pathMatch = new URL(pageUrl).pathname.match(/^\/books\/(\d+)\/(\d+)\.html$/);
+			if (!pathMatch) return;
+			const [, articleId, chapterId] = pathMatch;
+			const nav = extractChapterNav(getScriptText(doc));
+			appendHiddenLink(doc, "mnr-deqixs-co-prev", nav.prev, "上一章", pageUrl);
+			appendHiddenLink(doc, "mnr-deqixs-co-next", nav.next, "下一章", pageUrl);
+			const tokenScriptSrc = doc.querySelector("script[src*=\"/scripts/chapter.js.php\"]")?.getAttribute("src");
+			if (!tokenScriptSrc || !helpers) return;
+			const tokenScriptUrl = new URL(tokenScriptSrc, pageUrl).toString();
+			const tokenScript = await helpers.fetchText(tokenScriptUrl, {
+				timeoutMs: 15e3,
+				referrer: pageUrl,
+				withCredentials: true
+			});
+			if (!tokenScript) return;
+			const token = extractJsValue(tokenScript, "chapterToken");
+			const timestamp = extractJsValue(tokenScript, "timestamp");
+			const nonce = extractJsValue(tokenScript, "nonce");
+			if (!token || !timestamp || !nonce) return;
+			const params = new URLSearchParams({
+				aid: articleId,
+				cid: chapterId,
+				token,
+				timestamp,
+				nonce
+			});
+			const ajaxUrl = new URL(`/modules/article/ajax2.php?${params.toString()}`, pageUrl).toString();
+			const responseText = await helpers.fetchText(ajaxUrl, {
+				timeoutMs: 2e4,
+				referrer: pageUrl,
+				withCredentials: true,
+				headers: {
+					Accept: "application/json, text/javascript, */*; q=0.01",
+					"X-Requested-With": "XMLHttpRequest"
+				}
+			});
+			if (!responseText) return;
+			const payload = JSON.parse(responseText);
+			const content = payload.data?.content;
+			if (payload.status !== 1 || typeof content !== "string" || !content.trim()) return;
+			const contentEl = doc.querySelector("#chapter-content");
+			if (contentEl) {
+				contentEl.innerHTML = content;
+				contentEl.setAttribute("data-mnr-deqixs-full", "1");
+			}
+		} catch (e) {
+			console.warn("[YingChuang] Deqixs.co beforeParse error:", e);
+		}
+	};
+	var deqixsRule = {
+		id: "deqixs",
+		name: "得奇小说网",
+		version: 1,
+		match: { pattern: "^https?://www\\.deqixs\\.org/\\d+/\\d+(?:_\\d+)?\\.html(?:[?#].*)?$" },
+		content: {
+			selector: ".con",
+			remove: "script, style, iframe, ins"
+		},
+		navigation: {
+			prev: ".prenext span:first-child a[href$=\".html\"]",
+			index: ".prenext > a",
+			next: ".prenext span:last-child a[href$=\".html\"]"
+		},
+		title: {
+			selector: ".submenu h1",
+			replace: "^.*?>\\s*",
+			bookSelector: ".submenu h1 > a[href$=\"/\"]"
+		},
+		toc: { excludeAncestors: ".new, .item, h1, h2" },
+		advanced: {
+			checkSection: true,
+			sectionDelayMs: 800
+		},
+		meta: {
+			source: "builtin",
+			exampleUrl: "https://www.deqixs.org/24/18442_6.html"
+		}
+	};
+	var deqixsCoRule = {
+		id: "deqixs-co",
+		name: "得奇小说网(.co)",
+		version: 2,
+		match: { pattern: "^https?://www\\.deqixs\\.co/books/\\d+/\\d+\\.html(?:[?#].*)?$" },
+		content: {
+			selector: "#chapter-content",
+			remove: "script, style, iframe, ins, .loading, .error",
+			replace: [{
+				pattern: "当&前@章#节\\$内%容\\^不&完\\*整！要~查!看-完_整\\|章;节\\)请\\(退&出%阅#读\\|模\\*式！",
+				replacement: "",
+				flags: "g"
+			}, {
+				pattern: "本章节未完.+?请订阅",
+				replacement: "",
+				flags: "g"
+			}]
+		},
+		navigation: {
+			prev: "#mnr-deqixs-co-prev",
+			index: ".breadcrumb a[href*=\"/books/\"][href$=\"/\"]",
+			next: "#mnr-deqixs-co-next"
+		},
+		title: {
+			selector: "h1.pt10",
+			replace: "\\(第[^)]*页\\)\\s*$",
+			bookSelector: ".breadcrumb a[href*=\"/books/\"][href$=\"/\"]"
+		},
+		hooks: { beforeParse: deqixsCoBeforeParse },
+		meta: {
+			source: "builtin",
+			exampleUrl: "https://www.deqixs.co/books/325/266271.html"
+		}
+	};
+	var dingdianzww_exports = __exportAll({ dingdianzwwRule: () => dingdianzwwRule });
+	function extractChapterIds(pageUrl, scriptText) {
+		const pathMatch = new URL(pageUrl).pathname.match(/^\/(\d+)\/(\d+)(?:_\d+)?\.html$/);
+		const articleId = pathMatch?.[1] || scriptText.match(/const\s+articleId\s*=\s*(\d+)/)?.[1];
+		const chapterId = pathMatch?.[2] || scriptText.match(/const\s+chapterId\s*=\s*(\d+)/)?.[1];
+		if (!articleId || !chapterId) return null;
+		return {
+			articleId,
+			chapterId
+		};
+	}
+	function fixPageIndexLink(doc, base) {
+		const index = doc.querySelector(".page1 .page-index[data-href]");
+		const dataHref = index?.getAttribute("data-href");
+		if (!index || !dataHref) return;
+		try {
+			index.href = new URL(dataHref, base).toString();
+		} catch {}
+	}
+	var dingdianzwwBeforeParse = async (doc, url, helpers) => {
+		try {
+			const pageUrl = url || doc.location?.href || location.href;
+			const scriptText = getScriptText(doc);
+			const nav = extractChapterNav(scriptText);
+			appendHiddenLink(doc, "mnr-dingdianzww-prev", nav.prev, "上一章", pageUrl);
+			appendHiddenLink(doc, "mnr-dingdianzww-next", nav.next, "下一章", pageUrl);
+			fixPageIndexLink(doc, pageUrl);
+			appendHiddenLink(doc, "mnr-dingdianzww-index", doc.querySelector(".page1 .page-index")?.href || doc.querySelector(".bread a[href$=\"/\"]:not([href=\"/\"])")?.href || null, "目录", pageUrl);
+			const contentEl = doc.querySelector("#chapter-content");
+			if (!contentEl || !helpers?.fetchText) return;
+			const ids = extractChapterIds(pageUrl, scriptText);
+			if (!ids) return;
+			const ajaxUrl = new URL("/modules/article/ajax_chapter.php", pageUrl);
+			ajaxUrl.searchParams.set("aid", ids.articleId);
+			ajaxUrl.searchParams.set("cid", ids.chapterId);
+			const responseText = await helpers.fetchText(ajaxUrl.toString(), {
+				timeoutMs: 2e4,
+				withCredentials: true,
+				headers: {
+					Accept: "application/json, text/javascript, */*; q=0.01",
+					"X-Requested-With": "XMLHttpRequest"
+				}
+			});
+			if (!responseText) return;
+			const payload = JSON.parse(responseText);
+			const content = payload.data?.content;
+			if (payload.status !== 1 || typeof content !== "string" || !content.trim()) return;
+			contentEl.innerHTML = content;
+			contentEl.setAttribute("data-mnr-dingdianzww-full", "1");
+		} catch (e) {
+			console.warn("[YingChuang] Dingdianzww beforeParse error:", e);
+		}
+	};
+	var dingdianzwwRule = {
+		id: "dingdianzww",
+		name: "顶点小说",
+		version: 2,
+		match: { pattern: "^https?://dingdianzww\\.org/\\d+/\\d+\\.html(?:[?#].*)?$" },
+		content: {
+			selector: ".txtnav",
+			remove: "script, style, iframe, ins, .txtinfo.hide720, .readinline, .ad_content",
+			replace: [{
+				pattern: "PC站点如章节文字不全请用手机访问dingdianzww\\.org",
+				replacement: "",
+				flags: "g"
+			}, {
+				pattern: "当&前@章#节\\$内%容\\^不&完\\*整！要~查!看-完_整\\|章;节\\)请\\(退&出%阅#读\\|模\\*式！",
+				replacement: "",
+				flags: "g"
+			}]
+		},
+		navigation: {
+			prev: "#mnr-dingdianzww-prev, .page1 a:contains(\"上一章\")",
+			index: "#mnr-dingdianzww-index, .page1 a:contains(\"章节目录\"), .page1 a:contains(\"目录\")",
+			next: "#mnr-dingdianzww-next, .page1 a:contains(\"下一章\")"
+		},
+		title: {
+			selector: ".txtnav > h1, h1",
+			replace: "\\(第[^)]*页\\)\\s*$",
+			bookSelector: ".bread a[href^=\"/\"]:not([href=\"/\"]):not([href=\"/index.html\"])[href$=\"/\"]"
+		},
+		hooks: { beforeParse: dingdianzwwBeforeParse },
+		advanced: {
+			useIframe: true,
+			noSection: true
+		},
+		meta: {
+			source: "builtin",
+			exampleUrl: "https://dingdianzww.org/27543/13341609.html?page=1"
+		}
+	};
+	var goboo_exports$1 = __exportAll({ gobooRule: () => gobooRule });
+	var gobooBeforeParse = (doc, url) => {
+		try {
+			const fallbackUrl = typeof location !== "undefined" && typeof location.href === "string" ? location.href : "";
+			const pageUrl = url || doc.location?.href || fallbackUrl;
+			const match = (pageUrl ? new URL(pageUrl).pathname : "").match(/^\/gb_(\d+)\/(\d+)\/\d+/);
+			if (match && !doc.querySelector("#mnr-goboo-index")) {
+				const index = doc.createElement("a");
+				index.id = "mnr-goboo-index";
+				index.href = `/ml_${match[1]}/${match[2]}`;
+				index.textContent = "目录";
+				index.style.display = "none";
+				doc.body.appendChild(index);
+			}
+			const hasEncodedContent = Array.from(doc.scripts).some((script) => /p_key\s*=\s*['"][A-Za-z0-9+/=]{80,}['"]/.test(script.textContent || ""));
+			doc.querySelectorAll(".content p").forEach((p) => {
+				const text = (p.textContent || "").replace(/\s+/g, "");
+				const isPromotion = /小说免费阅读，请收藏.*goboo\.cc/i.test(text);
+				const isLoadMoreBlocker = /阅\|读\|模\|式\|或\|畅\|读\|模\|式/.test(text) || /加\|载\|更\|多/.test(text);
+				if (isPromotion || !hasEncodedContent && isLoadMoreBlocker) p.remove();
+			});
+		} catch (e) {
+			console.warn("[YingChuang] Goboo beforeParse error:", e);
+		}
+	};
+	var gobooRule = {
+		id: "goboo-m",
+		name: "钢笔小说(手机版)",
+		version: 1,
+		match: { pattern: "^https?://m\\.goboo\\.cc/gb_\\d+/\\d+/\\d+(?:/\\d+)?/?$" },
+		content: {
+			selector: ".content",
+			remove: "script, iframe, ins, .page, .emgoouqv_b",
+			replace: [
+				{
+					pattern: "【[^】]+】小说免费阅读，请收藏\\s*钢笔小说【goboo\\.cc】",
+					replacement: "",
+					flags: "g"
+				},
+				{
+					pattern: "阅\\|读\\|模\\|式\\|或\\|畅\\|读\\|模\\|式\\|下，?无\\|法\\|显\\|示\\|本\\|章\\|节\\|全\\|部\\|内\\|容，请\\|返\\|回\\|原\\|网\\|页阅\\|读。?加\\|载\\|更\\|多",
+					replacement: "",
+					flags: "g"
+				},
+				{
+					pattern: "本章未完，点击\\[下一页\\]继续阅读-->",
+					replacement: "",
+					flags: "g"
+				}
+			]
+		},
+		navigation: {
+			prev: ".page .left a",
+			index: "#mnr-goboo-index, .page .center a, a[href*=\"/ml_\"]",
+			next: ".page .right a"
+		},
+		title: {
+			pattern: "^(.+?)(?:\\(\\d+/\\d+\\))?\\s+-\\s+(.+?)小说\\s+-\\s+钢笔小说$",
+			patternIndex: 1,
+			bookPatternIndex: 2
+		},
+		hooks: { beforeParse: gobooBeforeParse },
+		advanced: {
+			checkSection: true,
+			sectionDelayMs: 1200,
+			progressiveSectionMerge: true
+		},
+		meta: {
+			source: "builtin",
+			exampleUrl: "https://m.goboo.cc/gb_1/94443/1"
+		}
+	};
+	var hetushu_exports = __exportAll({ hetushuRule: () => hetushuRule });
+	var SUBSTEP_READY_TIMEOUT_MS = 4e3;
+	var MAPPED_VISIBLE_ATTRIBUTE = "data-mnr-hetushu-visible";
+	async function waitForLiveContentElement(doc) {
+		const existing = doc.querySelector("#content");
+		const view = doc.defaultView;
+		if (existing || !view || !doc.documentElement) return existing;
+		return new Promise((resolve) => {
+			let settled = false;
+			let observer = null;
+			const finish = (contentEl) => {
+				if (settled) return;
+				settled = true;
+				view.clearTimeout(timeoutId);
+				observer?.disconnect();
+				resolve(contentEl);
+			};
+			const timeoutId = view.setTimeout(() => finish(null), SUBSTEP_READY_TIMEOUT_MS);
+			observer = new view.MutationObserver(() => {
+				const contentEl = doc.querySelector("#content");
+				if (contentEl) finish(contentEl);
+			});
+			observer.observe(doc.documentElement, {
+				attributes: true,
+				attributeFilter: ["id"],
+				childList: true,
+				subtree: true
+			});
+			const contentEl = doc.querySelector("#content");
+			if (contentEl) finish(contentEl);
+		});
+	}
+	function hasPendingSubstepContent(doc, contentEl) {
+		return doc.body?.dataset.randomtype === "substep" && contentEl.firstElementChild?.classList.contains("mask") === true;
+	}
+	function hasRestoredSubstepContent(doc, contentEl) {
+		if (doc.body?.dataset.randomtype !== "substep") return true;
+		if (hasPendingSubstepContent(doc, contentEl)) return false;
+		if (Array.from(contentEl.children).some((element) => element.tagName === "P")) return true;
+		const rows = Array.from(contentEl.children).filter((element) => element.tagName === "DIV" && !element.classList.contains("chapter"));
+		return rows.length > 0 && rows.every((element) => element.classList.length > 0 || element.hasAttribute(MAPPED_VISIBLE_ATTRIBUTE));
+	}
+	async function waitForLiveSubstepContent(doc, contentEl) {
+		const view = doc.defaultView;
+		if (!view || !hasPendingSubstepContent(doc, contentEl)) return true;
+		return new Promise((resolve) => {
+			let settled = false;
+			let observer = null;
+			const finish = (ready) => {
+				if (settled) return;
+				settled = true;
+				view.clearTimeout(timeoutId);
+				observer?.disconnect();
+				resolve(ready);
+			};
+			const timeoutId = view.setTimeout(() => finish(false), SUBSTEP_READY_TIMEOUT_MS);
+			observer = new view.MutationObserver(() => {
+				if (!hasPendingSubstepContent(doc, contentEl)) finish(true);
+			});
+			observer.observe(contentEl, { childList: true });
+			if (!hasPendingSubstepContent(doc, contentEl)) finish(true);
+		});
+	}
+	function decodeSubstepMapping(token) {
+		try {
+			if (typeof atob !== "function") return null;
+			const values = atob(token).split(/[A-Z]+%/);
+			if (!values.length || values.some((value) => !/^\d+$/.test(value))) return null;
+			return values.map(Number);
+		} catch {
+			return null;
+		}
+	}
+	function applySubstepMapping(contentEl, mapping) {
+		const firstElement = contentEl.firstElementChild;
+		const mask = firstElement?.classList.contains("mask") ? firstElement : null;
+		const nodes = Array.from(contentEl.childNodes).filter((node) => node !== mask && (node.nodeType !== 3 || !!node.textContent?.trim()));
+		let contentStart = 0;
+		for (let index = 0; index < nodes.length; index++) {
+			const node = nodes[index];
+			if (node.nodeType !== 1) continue;
+			const element = node;
+			if (element.tagName === "H2") contentStart = index + 1;
+			if (element.tagName === "DIV" && element.className !== "chapter") break;
+		}
+		const sourceNodes = nodes.slice(contentStart);
+		if (mapping.length !== sourceNodes.length) return false;
+		const ordered = new Array(sourceNodes.length);
+		let lowTargetCount = 0;
+		for (let index = 0; index < mapping.length; index++) {
+			const encodedTarget = mapping[index];
+			const target = encodedTarget < 5 ? encodedTarget : encodedTarget - lowTargetCount;
+			if (encodedTarget < 5) lowTargetCount++;
+			if (target < 0 || target >= ordered.length || ordered[target]) return false;
+			ordered[target] = sourceNodes[index];
+		}
+		if (ordered.some((node) => !node)) return false;
+		for (const node of ordered) if (node?.nodeType === 1) node.setAttribute(MAPPED_VISIBLE_ATTRIBUTE, "true");
+		contentEl.replaceChildren(...nodes.slice(0, contentStart), ...ordered);
+		return true;
+	}
+	async function restoreSubstepContent(doc, contentEl, pageUrl) {
+		if (doc.body?.dataset.randomtype !== "substep") return true;
+		if (typeof fetch !== "function") return false;
+		let parsedUrl;
+		try {
+			parsedUrl = new URL(pageUrl);
+		} catch {
+			return false;
+		}
+		const chapterId = parsedUrl.pathname.match(/\/(\d+)\.html$/)?.[1];
+		if (!chapterId || parsedUrl.hostname !== "www.hetushu.com") return false;
+		const controller = new AbortController();
+		const timeoutId = setTimeout(() => controller.abort(), SUBSTEP_READY_TIMEOUT_MS);
+		try {
+			const response = await fetch(new URL(`r${chapterId}.json`, parsedUrl).href, {
+				credentials: "include",
+				headers: { "X-Requested-With": "XMLHttpRequest" },
+				signal: controller.signal
+			});
+			if (!response.ok) return false;
+			const token = response.headers.get("token");
+			const mapping = token ? decodeSubstepMapping(token) : null;
+			return mapping ? applySubstepMapping(contentEl, mapping) : false;
+		} catch {
+			return false;
+		} finally {
+			clearTimeout(timeoutId);
+		}
+	}
+	var hetushuBeforeParse = async (doc, url, helpers) => {
+		try {
+			const contentEl = await waitForLiveContentElement(doc);
+			if (!contentEl) return;
+			const win = doc.defaultView || (typeof window !== "undefined" ? window : null);
+			const fallbackUrl = typeof window !== "undefined" && typeof window.location?.href === "string" ? window.location.href : "";
+			const pageUrl = url || doc.location?.href || fallbackUrl;
+			if (!hasRestoredSubstepContent(doc, contentEl)) {
+				if (doc.defaultView && hasPendingSubstepContent(doc, contentEl)) await waitForLiveSubstepContent(doc, contentEl);
+				let ready = hasRestoredSubstepContent(doc, contentEl);
+				if (!ready && (!doc.defaultView || !hasPendingSubstepContent(doc, contentEl))) ready = await restoreSubstepContent(doc, contentEl, pageUrl);
+				if (!ready) console.warn("[YingChuang] Hetushu content reorder did not complete:", pageUrl);
+			}
+			const titleEl = contentEl.querySelector("h2");
+			const watermarkSelector = "acronym, bdo, big, cite, code, dfn, kbd, q, s, samp, strike, tt, u, var, ins";
+			const normalizeWatermarkText = (value) => value.replace(/[\s\u3000]+/g, "").replace(/[ｗwＷW]+[.．•·。]*[hｈ][eｅ][tｔ][uｕ][sｓ][hｈ][uｕ][.．。]*(?:com|ｃｏｍ)(?:[.．。]*(?:com|ｃｏｍ))?/gi, "");
+			const collectStyleText = async () => {
+				const texts = Array.from(doc.querySelectorAll("style")).map((style) => style.textContent || "").filter(Boolean);
+				const links = Array.from(doc.querySelectorAll("link[rel~=\"stylesheet\"][href]"));
+				for (const link of links) {
+					if (!helpers?.fetchText) continue;
+					try {
+						const href = link.getAttribute("href");
+						if (!href) continue;
+						const styleUrl = new URL(href, pageUrl).href;
+						const text = await helpers.fetchText(styleUrl, {
+							timeoutMs: 4e3,
+							withCredentials: true
+						});
+						if (text) texts.push(text);
+					} catch {}
+				}
+				return texts.join("\n");
+			};
+			const extractDisplayClasses = (cssText) => {
+				const block = new Set();
+				const none = new Set();
+				const ruleRe = /([^{}]+)\{([^{}]+)\}/g;
+				let match;
+				while (match = ruleRe.exec(cssText)) {
+					const selector = match[1] || "";
+					const body = match[2] || "";
+					if (!selector.includes("#content")) continue;
+					const displayBlock = /display\s*:\s*block\b/i.test(body);
+					const displayNone = /display\s*:\s*none\b/i.test(body);
+					if (!displayBlock && !displayNone) continue;
+					const classRe = /#content\s+\.([A-Za-z0-9_-]+)/g;
+					let classMatch;
+					while (classMatch = classRe.exec(selector)) {
+						if (displayBlock) block.add(classMatch[1]);
+						if (displayNone) none.add(classMatch[1]);
+					}
+				}
+				return {
+					block,
+					none
+				};
+			};
+			const styleClasses = extractDisplayClasses(await collectStyleText());
+			const hasLayout = (el) => {
+				if (!win) return false;
+				const rect = el.getBoundingClientRect();
+				return rect.width > 0 && rect.height > 0;
+			};
+			const isVisibleByClass = (el) => {
+				const classes = Array.from(el.classList || []);
+				if (!classes.length) return false;
+				if (classes.some((cls) => styleClasses.none.has(cls))) return false;
+				if (styleClasses.block.size > 0) return classes.some((cls) => styleClasses.block.has(cls));
+				return true;
+			};
+			const isVisible = (el) => {
+				if (el.hasAttribute(MAPPED_VISIBLE_ATTRIBUTE)) return true;
+				if (!win || !hasLayout(el)) return isVisibleByClass(el);
+				const style = win.getComputedStyle(el);
+				if (style.display === "none") return false;
+				if (style.visibility === "hidden" || style.visibility === "collapse") return false;
+				if (Number(style.opacity) === 0) return false;
+				return true;
+			};
+			const cleanClone = (el) => {
+				const clone = el.cloneNode(true);
+				clone.querySelectorAll(watermarkSelector).forEach((node) => node.remove());
+				const showText = doc.defaultView?.NodeFilter?.SHOW_TEXT ?? 4;
+				const walker = doc.createTreeWalker(clone, showText);
+				const textNodes = [];
+				while (walker.nextNode()) textNodes.push(walker.currentNode);
+				textNodes.forEach((node) => {
+					const cleaned = normalizeWatermarkText(node.nodeValue || "");
+					if (cleaned !== node.nodeValue) node.nodeValue = cleaned;
+				});
+				return clone;
+			};
+			const rows = Array.from(contentEl.children).filter((el) => el !== titleEl && el.tagName !== "SCRIPT" && el.tagName !== "STYLE").filter(isVisible).map((el, index) => {
+				const rect = win && hasLayout(el) ? el.getBoundingClientRect() : {
+					top: index,
+					left: 0
+				};
+				return {
+					index,
+					top: rect.top + (win ? win.scrollY : 0),
+					left: rect.left + (win ? win.scrollX : 0),
+					el
+				};
+			}).sort((a, b) => a.top - b.top || a.left - b.left || a.index - b.index);
+			if (!rows.length) return;
+			const fragment = doc.createDocumentFragment();
+			if (titleEl) fragment.appendChild(titleEl.cloneNode(true));
+			rows.forEach(({ el }) => {
+				const paragraph = doc.createElement("p");
+				const clone = cleanClone(el);
+				paragraph.innerHTML = clone.innerHTML || clone.textContent || "";
+				if (paragraph.textContent && paragraph.textContent.replace(/\s+/g, "").trim()) fragment.appendChild(paragraph);
+			});
+			contentEl.innerHTML = "";
+			contentEl.appendChild(fragment);
+		} catch (e) {
+			console.warn("[YingChuang] Hetushu beforeParse error:", e);
+		}
+	};
+	var hetushuRule = {
+		id: "hetushu",
+		name: "和图书",
+		version: 3,
+		match: { pattern: "^https?://www\\.hetushu\\.com/book/\\d+/\\d+\\.html$" },
+		content: {
+			selector: "#content",
+			remove: "h2, acronym, bdo, big, cite, code, dfn, kbd, q, s, samp, strike, tt, u, var, ins"
+		},
+		navigation: {
+			next: "a#next",
+			prev: "a#pre",
+			index: "#left h3 a"
+		},
+		title: { bookSelector: "#left h3" },
+		hooks: { beforeParse: hetushuBeforeParse },
+		advanced: { useIframe: true },
+		meta: {
+			source: "builtin",
+			exampleUrl: "https://www.hetushu.com/book/9145/6567989.html"
+		}
+	};
+	var kudushu_exports = __exportAll({
+		kudushuPcRule: () => kudushuPcRule,
+		kudushuRule: () => kudushuRule
+	});
+	var kudushuRule = {
+		id: "kudushu",
+		name: "苦读书（移动版）",
+		version: 2,
+		match: { pattern: "^https?://m\\.kudushu\\.org/html/\\d+/\\d+(?:_\\d+)?/(?:[?#].*)?$" },
+		content: {
+			selector: "#novelcontent",
+			remove: "#content_tip, ul.novelbutton",
+			replace: [{
+				pattern: "^[\\s\\S]*?[（(]第\\d+[/／]\\d+页[）)]",
+				replacement: "",
+				flags: ""
+			}]
+		},
+		navigation: {
+			prev: ".content_novel > ul.novelbutton p.p1:not(.p3) > a[href*=\"/html/\"]",
+			next: ".content_novel > ul.novelbutton p.p3 > a[href*=\"/html/\"]",
+			index: ".content_novel > ul.novelbutton p.p2 > a[href*=\"/book/\"]"
+		},
+		title: { selector: "#chaptertitle" },
+		toc: { selector: ".info_menu1 .list_xm:has(> .listpage) > ul" },
+		advanced: {
+			checkSection: true,
+			sectionDelayMs: 800
+		},
+		meta: {
+			source: "builtin",
+			exampleUrl: "https://m.kudushu.org/html/1088392/146537150/"
+		}
+	};
+	var kudushuPcRule = {
+		id: "kudushu-pc",
+		name: "苦读书（PC版）",
+		version: 1,
+		match: { pattern: "^https?://www\\.kudushu\\.org/html/\\d+/\\d+/\\d+\\.html(?:[?#].*)?$" },
+		content: {
+			selector: "#clickeye_content",
+			remove: ".style3",
+			replace: [{
+				pattern: "[（(]?\\s*苦读书\\s*www\\.kudushu\\.org\\s*[）)]?",
+				replacement: "",
+				flags: "g"
+			}]
+		},
+		navigation: {
+			prev: ".P_Nav .inforight a:not([href$=\"index.html\"]):contains(\"上一页\")",
+			next: ".P_Nav .inforight a:not([href$=\"index.html\"]):contains(\"下一页\")",
+			index: ".P_Nav .inforight a[href$=\"index.html\"]"
+		},
+		title: { selector: "#cont h1" },
+		toc: { selector: ".index > ul.chapters" },
+		meta: {
+			source: "builtin",
+			exampleUrl: "https://www.kudushu.org/html/1088/1088392/146537150.html"
+		}
+	};
+	var novel543_exports = __exportAll({ novel543Rule: () => novel543Rule });
+	var CHAPTER_URL = /^https?:\/\/(?:www\.)?novel543\.com(\/\d+\/\d+_\d+)(?:_(\d+))?\.html(?:[?#].*)?$/;
+	function parseNovel543Url(url) {
+		const match = url.match(CHAPTER_URL);
+		if (!match) return null;
+		const parsed = new URL(url);
+		parsed.pathname = `${match[1]}.html`;
+		parsed.hash = "";
+		return {
+			chapterUrl: parsed.href,
+			page: Number(match[2] || 1)
+		};
+	}
+	var novel543Rule = {
+		id: "novel543",
+		name: "稷下書院",
+		version: 1,
+		match: { pattern: CHAPTER_URL.source },
+		content: {
+			selector: ".chapter-content > .content",
+			remove: ".adBlock, .gadBlock, [id^=div-onead-], div:has(> img[src=\"/images/vip.png\"]):has(> a[href$=\"/auth/govip.html\"]), div:has(> p img[src=\"/images/vip.png\"]):has(> a[href$=\"/auth/govip.html\"])"
+		},
+		navigation: {
+			prev: ".foot-nav a:contains(上一章)",
+			index: ".foot-nav a[href$=\"/dir\"]",
+			next: ".foot-nav a:contains(下一章)"
+		},
+		title: {
+			selector: ".chapter-content > h1",
+			replace: "\\s*[（(]\\d+\\s*/\\s*\\d+[）)]\\s*$",
+			bookSelector: ".header .nav li:last-child a"
+		},
+		toc: { excludeAncestors: ".chaplist > ul:not(.all)" },
+		hooks: {
+			parseSectionUrl: parseNovel543Url,
+			beforeParse: (doc) => {
+				const bookLink = doc.querySelector(".header .nav li:last-child a");
+				const bookTitle = doc.querySelector("meta[name=keywords]")?.content.match(/^(.+?)官方首[發发](?:[,，]|$)/)?.[1];
+				if (bookLink && !bookLink.textContent?.trim() && bookTitle) bookLink.textContent = bookTitle;
+				for (const p of doc.querySelectorAll("#chapterWarp .content > div > p")) {
+					const label = p.firstChild;
+					if (label?.nodeName === "SPAN" && /^[溫温]馨提示[:：]$/.test(label.textContent?.trim() || "")) p.remove();
+				}
+			}
+		},
+		meta: {
+			source: "builtin",
+			exampleUrl: "https://www.novel543.com/1019622989/8096_941.html"
+		}
+	};
+	var qidian_exports$1 = __exportAll({
+		qidianMobileRule: () => qidianMobileRule,
+		qidianRule: () => qidianRule
+	});
+	function hasQidianChapterId(value) {
+		return value !== void 0 && value !== null && String(value) !== "-1" && String(value) !== "";
+	}
+	function readQidianPageContext(doc) {
+		const script = doc.querySelector("#vite-plugin-ssr_pageContext");
+		if (!script) return null;
+		try {
+			return JSON.parse(script.textContent || "{}");
+		} catch {
+			return null;
+		}
+	}
+	function extractBookIdFromQidianUrl(url) {
+		if (!url) return null;
+		try {
+			return new URL(url, typeof location !== "undefined" ? location.href : void 0).pathname.match(/\/(?:book|chapter)\/(\d+)(?:\/|$)/)?.[1] || null;
+		} catch {
+			return null;
+		}
+	}
+	function extractChapterIdFromQidianUrl(url) {
+		if (!url) return null;
+		try {
+			return new URL(url, typeof location !== "undefined" ? location.href : void 0).pathname.match(/\/chapter\/\d+\/(\d+)(?:\/|$)/)?.[1] || null;
+		} catch {
+			return null;
+		}
+	}
+	function resolveQidianBookId(data, url) {
+		const bookId = data?.pageContext?.pageProps?.pageData?.bookInfo?.bookId ?? data?.pageContext?.routeParams?.bookId ?? extractBookIdFromQidianUrl(url);
+		return bookId === void 0 || bookId === null || String(bookId) === "" ? null : String(bookId);
+	}
+	function resolveQidianFirstChapterId(data) {
+		const pageData = data?.pageContext?.pageProps?.pageData;
+		return pageData?.firstChapterId ?? pageData?.chapterContentInfo?.firstChapterId;
+	}
+	function resolveQidianNextPreviewChapterId(data) {
+		const pageData = data?.pageContext?.pageProps?.pageData;
+		return pageData?.nextChapterId ?? pageData?.chapterContentInfo?.nextChapterId;
+	}
+	function normalizeQidianHydratedParagraphIndent(doc) {
+		const spans = doc.querySelectorAll("main[id^=\"c-\"] p > span.content-text:first-child");
+		for (const span of spans) {
+			const firstChild = span.firstChild;
+			if (!firstChild || firstChild.nodeType !== 3) continue;
+			const text = firstChild.nodeValue || "";
+			const normalized = text.replace(/^[\s\u3000]+/u, "");
+			if (normalized !== text) firstChild.nodeValue = normalized;
+		}
+	}
+	function resolveQidianMobileBookPreviewChapterUrl(doc, url) {
+		let parsedUrl;
+		try {
+			parsedUrl = new URL(url);
+		} catch {
+			return null;
+		}
+		if (parsedUrl.hostname !== "m.qidian.com") return null;
+		if (!/^\/book\/\d+\/?$/.test(parsedUrl.pathname)) return null;
+		const data = readQidianPageContext(doc);
+		const bookId = resolveQidianBookId(data, url);
+		const firstChapterId = resolveQidianFirstChapterId(data);
+		if (!bookId || !hasQidianChapterId(firstChapterId)) return null;
+		return new URL(`/chapter/${bookId}/${String(firstChapterId)}/`, parsedUrl.origin).toString();
+	}
+	var qidianBeforeParse = (doc, url) => {
+		normalizeQidianHydratedParagraphIndent(doc);
+		try {
+			doc.querySelectorAll("h1 .review, h2 .review").forEach((el) => el.remove());
+		} catch (e) {
+			console.debug("[MNR] Failed to remove review elements:", e);
+		}
+		try {
+			const data = readQidianPageContext(doc);
+			const pageData = data?.pageContext?.pageProps?.pageData;
+			if (!pageData) return;
+			const bookId = resolveQidianBookId(data, url);
+			const currentChapterId = extractChapterIdFromQidianUrl(url);
+			const firstChapterId = resolveQidianFirstChapterId(data);
+			const chapterInfo = pageData.chapterInfo;
+			const prevChapterId = chapterInfo?.prev;
+			let nextChapterId = chapterInfo?.next;
+			if (!hasQidianChapterId(nextChapterId) && currentChapterId && hasQidianChapterId(firstChapterId) && String(firstChapterId) === currentChapterId) nextChapterId = resolveQidianNextPreviewChapterId(data);
+			const host = url ? new URL(url).hostname : location.hostname;
+			const navContainer = doc.createElement("div");
+			navContainer.id = "mnr-qidian-nav";
+			navContainer.style.display = "none";
+			if (bookId && hasQidianChapterId(prevChapterId)) {
+				const prev = doc.createElement("a");
+				prev.id = "mnr-qidian-prev";
+				prev.href = `//${host}/chapter/${bookId}/${prevChapterId}/`;
+				prev.textContent = "上一章";
+				navContainer.appendChild(prev);
+			}
+			if (bookId && hasQidianChapterId(nextChapterId)) {
+				const next = doc.createElement("a");
+				next.id = "mnr-qidian-next";
+				next.href = `//${host}/chapter/${bookId}/${nextChapterId}/`;
+				next.textContent = "下一章";
+				navContainer.appendChild(next);
+			}
+			if (bookId) {
+				const index = doc.createElement("a");
+				index.id = "mnr-qidian-index";
+				index.href = `//${host}/book/${bookId}/`;
+				index.textContent = "目录";
+				navContainer.appendChild(index);
+			}
+			doc.body.appendChild(navContainer);
+		} catch (e) {
+			console.warn("[YingChuang] Qidian beforeParse error:", e);
+		}
+	};
+	var qidianContent = {
+		selector: "main[id^=\"c-\"]",
+		remove: ".review, #r-titlePage, .tooltip-wrapper, .chapter-end-qrcode, section[id^=\"r-\"]"
+	};
+	var qidianNavigation = {
+		prev: "#mnr-qidian-prev, .nav-btn-group a:contains(\"上一章\"), a.nav-btn:contains(\"上一章\")",
+		index: "#mnr-qidian-index",
+		next: "#mnr-qidian-next, .nav-btn-group a:contains(\"下一章\"), a.nav-btn:contains(\"下一章\")"
+	};
+	var qidianTitle = { selector: "h1.title, h2.title, h1.text-1\\.3em, h2.text-1\\.3em, #r-nav-chapter-title" };
+	var qidianHooks = { beforeParse: qidianBeforeParse };
+	var qidianMobileRule = {
+		id: "qidian-mobile",
+		name: "起点中文网手机版",
+		version: 1,
+		match: { pattern: "^https?://m\\.qidian\\.com/chapter/.*" },
+		content: { ...qidianContent },
+		navigation: { ...qidianNavigation },
+		title: { ...qidianTitle },
+		hooks: {
+			...qidianHooks,
+			resolveEntryUrl: resolveQidianMobileBookPreviewChapterUrl
+		},
+		advanced: {
+			mutationSelector: "main[id^=\"c-\"]",
+			mutationChildCount: 0
+		},
+		meta: { source: "builtin" }
+	};
+	var qidianRule = {
+		id: "qidian",
+		name: "起点中文网",
+		version: 9,
+		match: { pattern: "^https?://www\\.qidian\\.com/chapter/.*" },
+		content: { ...qidianContent },
+		navigation: { ...qidianNavigation },
+		title: { ...qidianTitle },
+		hooks: { ...qidianHooks },
+		advanced: {
+			useIframe: true,
+			mutationSelector: "main[id^=\"c-\"]",
+			mutationChildCount: 0
+		},
+		meta: { source: "builtin" }
+	};
+	var shu69_exports = __exportAll({ shu69Rule: () => shu69Rule });
+	var shu69BeforeParse = (doc, url) => {
+		try {
+			const fallbackUrl = typeof location !== "undefined" && typeof location.href === "string" ? location.href : "";
+			const pageUrl = url || doc.location?.href || fallbackUrl;
+			const text = Array.from(doc.querySelectorAll("script")).find((item) => (item.textContent || "").includes("bookinfo"))?.textContent || "";
+			if (!text) return;
+			const extractString = (key) => {
+				return text.match(new RegExp(`${key}\\s*:\\s*(["'])([^"'\\r\\n]{1,300})\\1`, "i"))?.[2]?.trim() || "";
+			};
+			const normalizeUrl = (value) => {
+				if (!value) return "";
+				try {
+					return new URL(value, pageUrl).href;
+				} catch {
+					return value;
+				}
+			};
+			const ensureAnchor = (id, href, label) => {
+				if (!href || doc.querySelector(`#${id}`)) return;
+				const parent = doc.body || doc.documentElement;
+				if (!parent) return;
+				const anchor = doc.createElement("a");
+				anchor.id = id;
+				anchor.href = normalizeUrl(href);
+				anchor.textContent = label;
+				anchor.style.display = "none";
+				parent.appendChild(anchor);
+			};
+			const bookTitle = extractString("articlename");
+			const chapterTitle = extractString("chaptername");
+			const indexUrl = extractString("index_page");
+			const prevUrl = extractString("preview_page");
+			const nextUrl = extractString("next_page");
+			ensureAnchor("mnr-69shu-book", indexUrl || prevUrl, bookTitle);
+			ensureAnchor("mnr-69shu-index", indexUrl, "目录");
+			ensureAnchor("mnr-69shu-prev", prevUrl, "上一章");
+			ensureAnchor("mnr-69shu-next", nextUrl, "下一章");
+			if (chapterTitle && !doc.querySelector("#mnr-69shu-title")) {
+				const parent = doc.body || doc.documentElement;
+				if (!parent) return;
+				const title = doc.createElement("h1");
+				title.id = "mnr-69shu-title";
+				title.textContent = chapterTitle;
+				title.style.display = "none";
+				parent.appendChild(title);
+			}
+		} catch (e) {
+			console.warn("[YingChuang] 69shu beforeParse error:", e);
+		}
+	};
+	var shu69Rule = {
+		id: "69shu",
+		name: "69书吧",
+		version: 2,
+		match: { pattern: "^https?://(?:www\\.)?69(?:shu|yuedu)[a-z0-9]*?\\.(?:pro|top|com|cx|net|co|me|biz)/(?:txt|c|r)/\\d+/\\d+/?(?:[?#].*)?$" },
+		content: {
+			selector: "#txtcontent, .txtnav",
+			remove: "script, style, iframe, ins, .txtinfo.hide720, #txtright, .bottom-ad, .bottom-ad2, .page1, .readinline, .ad_content",
+			replace: [{
+				pattern: ".*[6六].*[9九].*书.*吧.*",
+				replacement: "",
+				flags: "g"
+			}, {
+				pattern: "请收藏本站.*?最新网址.*?(?:<br\\s*/?>)?",
+				replacement: "",
+				flags: "g"
+			}]
+		},
+		navigation: {
+			prev: "#mnr-69shu-prev, .page1 a:contains(\"上一章\"), .page1 a:nth-child(1)",
+			index: "#mnr-69shu-index, .page1 a:contains(\"目录\"), .page1 a:contains(\"書目\"), .page1 a:nth-child(3)",
+			next: "#mnr-69shu-next, .page1 a:contains(\"下一章\"), .page1 a:nth-child(4)"
+		},
+		title: {
+			selector: "#mnr-69shu-title, h1",
+			bookSelector: "#mnr-69shu-book, .mytitle .bread a[href*=\"/book/\"][href$=\".htm\"], .txtinfo a:first-child, .con_top a:nth-child(3)"
+		},
+		hooks: { beforeParse: shu69BeforeParse },
+		advanced: {
+			noSection: true,
+			useIframe: true
+		},
+		meta: {
+			source: "builtin",
+			exampleUrl: "https://www.69shuba.com/txt/58672/38147713"
+		}
+	};
+	var sto9_exports$1 = __exportAll({ sto9Rule: () => sto9Rule });
+	var sto9BeforeParse = (doc) => {
+		const content = doc.querySelector(".txtnav");
+		if (!content) return;
+		const showText = doc.defaultView?.NodeFilter.SHOW_TEXT ?? 4;
+		const walker = doc.createTreeWalker(content, showText);
+		let node;
+		while (node = walker.nextNode()) if ((node.nodeValue || "").toLowerCase().replace(/[^a-z0-9]/g, "").includes("sto9com")) node.nodeValue = "";
+	};
+	var sto9Rule = {
+		id: "sto9",
+		name: "思兔阅读",
+		version: 2,
+		match: { pattern: "^https?://(?:www\\.)?sto9\\.com/txt/\\d+/\\d+\\.html(?:[?#].*)?$" },
+		content: {
+			selector: ".txtnav",
+			remove: "script, style, iframe, ins, .txtright, .txtad, .txtcenter",
+			replace: [{
+				pattern: "[（(]\\s*還有更新耶\\s*[）)]",
+				replacement: "",
+				flags: "g"
+			}]
+		},
+		navigation: {
+			prev: ".page1 a:contains(\"上一章\")",
+			index: ".page1 a:contains(\"目錄\"), .page1 a:contains(\"目录\")",
+			next: ".page1 a:not([href$=\"/end.html\"]):contains(\"下一章\")"
+		},
+		title: {
+			selector: ".txtnav > h1",
+			bookSelector: ".bread a[href*=\"/book/\"][href$=\"/index.html\"]"
+		},
+		hooks: { beforeParse: sto9BeforeParse },
+		meta: {
+			source: "builtin",
+			exampleUrl: "https://sto9.com/txt/7974/7627078.html"
+		}
+	};
+	var sudugu_exports = __exportAll({ suduguRule: () => suduguRule });
+	var suduguRule = {
+		id: "sudugu",
+		name: "速读谷",
+		version: 1,
+		match: { pattern: "^https?://www\\.shudugu\\.org/\\d+/\\d+(?:-\\d+)?\\.html(?:[?#].*)?$" },
+		content: {
+			selector: ".con",
+			remove: "script, style, iframe, ins"
+		},
+		navigation: {
+			prev: ".prenext span:first-child a",
+			index: ".prenext > a[href*=\"#dir\"]",
+			next: ".prenext span:last-child a"
+		},
+		title: {
+			selector: ".submenu h1",
+			replace: "^.*?>\\s*",
+			bookSelector: ".submenu h1 > a[href^=\"/\"][href$=\"/\"]"
+		},
+		toc: { excludeAncestors: ".new, .item, h1, h2" },
+		advanced: {
+			checkSection: true,
+			sectionDelayMs: 800
+		},
+		meta: {
+			source: "builtin",
+			exampleUrl: "https://www.shudugu.org/109/1226047.html"
+		}
+	};
+	var tiantang_exports = __exportAll({ tiantangRule: () => tiantangRule });
+	var tiantangRule = {
+		id: "tiantang",
+		name: "格格党（tiantang100）",
+		version: 1,
+		match: { pattern: "^https?://www\\.tiantang100\\.org/\\d+/\\d+/\\d+(?:_\\d+)?\\.html(?:[?#].*)?$" },
+		content: { selector: "#content" },
+		navigation: { index: "#mnr-tiantang-index" },
+		hooks: { beforeParse(doc, url) {
+			if (!url || !new RegExp(tiantangRule.match.pattern).test(url)) return;
+			appendHiddenLink(doc, "mnr-tiantang-index", ".", "目录", url);
+		} },
+		meta: {
+			source: "builtin",
+			exampleUrl: "http://www.tiantang100.org/337/337644/1889083.html"
+		}
+	};
+	var ttks_exports = __exportAll({ ttksRule: () => ttksRule });
+	var WATERMARK_TAIL_PATTERN = /\s*(?:[（(【]\s*)?(?:[寫写]到[這这][裡里]我希望[讀读]者[記记]一下我[們们]域名|由[於于][緩缓]存原因[，,]?[請请]用[戶户]直接(?:瀏覽|浏览)器(?:訪問|访问)|本[書书]首[發发]|天天看[小小說说]{2}解[書书]荒|[記记]住本站域名)[\s\S]*$/u;
+	var ttksBeforeParse = (doc) => {
+		const content = doc.querySelector(".frame_body > .title + .content");
+		if (!content) return;
+		const paragraphs = Array.from(content.querySelectorAll(":scope > p"));
+		for (const paragraph of paragraphs) {
+			const text = paragraph.textContent || "";
+			const cleaned = text.replace(WATERMARK_TAIL_PATTERN, "").trimEnd();
+			if (cleaned !== text) {
+				if (cleaned) paragraph.textContent = cleaned;
+				else paragraph.remove();
+			}
+		}
+		const trailingParagraphs = Array.from(content.querySelectorAll(":scope > p"));
+		for (let index = trailingParagraphs.length - 1; index >= 0; index--) {
+			const paragraph = trailingParagraphs[index];
+			const text = (paragraph.textContent || "").replace(/\s+/g, "").trim();
+			if (!text) {
+				paragraph.remove();
+				continue;
+			}
+			if (/^(?:>|福)$/.test(text)) {
+				paragraph.remove();
+				continue;
+			}
+			break;
+		}
+	};
+	var ttksRule = {
+		id: "ttks",
+		name: "天天看小說",
+		version: 1,
+		match: { pattern: "^https?://(?:www\\.)?ttks\\.tw/novel/chapters/[^/?#]+/\\d+\\.html(?:[?#].*)?$" },
+		content: {
+			selector: ".frame_body > .title + .content",
+			remove: ".anchor_bookmark, .txtcenter, .div_feedback, .social_share_frame"
+		},
+		navigation: {
+			prev: "#linkPrev",
+			index: ".breadcrumb_nav a[href$=\"/index.html\"]",
+			next: "#linkNext"
+		},
+		title: {
+			selector: ".frame_body > .title h1, .frame_body > .title",
+			bookSelector: ".breadcrumb_nav a[href$=\"/index.html\"]"
+		},
+		hooks: { beforeParse: ttksBeforeParse },
+		advanced: {
+			noSection: true,
+			useIframe: true
+		},
+		meta: {
+			source: "builtin",
+			exampleUrl: "https://ttks.tw/novel/chapters/kaijuxiangqinnvshenbuhuodugujiujian/83.html"
+		}
+	};
+	var twkan_exports$1 = __exportAll({ twkanRule: () => twkanRule });
+	var twkanRule = {
+		id: "twkan",
+		name: "台灣小說網",
+		version: 1,
+		match: { pattern: "^https?://twkan\\.com/txt/\\d+/\\d+/?(?:[?#].*)?$" },
+		content: {
+			selector: "#txtcontent0, .txtnav",
+			remove: "script, style, iframe, ins, .page1, .readinline, .read-link, .ad_content, .top-ad, .bottom-ad",
+			replace: [
+				{
+					pattern: "^[\\s\\u00a0\\u3000\\u2000-\\u200a]*第[一二三四五六七八九十百千\\d]+(?:章|节|節|回|话|話|篇|集|卷)[^<]{0,120}(?:<br\\s*/?>\\s*)+",
+					replacement: "",
+					flags: "g"
+				},
+				{
+					pattern: "（?請記住臺灣小説網[^<\\n]*?）?",
+					replacement: "",
+					flags: "g"
+				},
+				{
+					pattern: "（?请记住[臺台]湾小[説说]网[^<\\n]{0,160}(?:章节更新|網站|网站)[^<\\n]{0,40}）?",
+					replacement: "",
+					flags: "g"
+				},
+				{
+					pattern: "〖[^〗]*分享[^〗]*運營[^〗]*〗",
+					replacement: "",
+					flags: "g"
+				},
+				{
+					pattern: "【[^】]{0,100}(?:域名|[臺台]湾小[説说]网|[臺台]湾好书)[^】]{0,160}】",
+					replacement: "",
+					flags: "g"
+				},
+				{
+					pattern: "本章完。?",
+					replacement: "",
+					flags: "g"
+				}
+			]
+		},
+		navigation: {
+			prev: "a:contains(\"上一章\")",
+			index: "a:contains(\"目錄\"), a:contains(\"目录\"), a:contains(\"書頁\"), a:contains(\"书页\")",
+			next: "a:contains(\"下一章\")"
+		},
+		title: {
+			selector: ".txtnav > h1, h1",
+			pattern: "^(.+?)-(.+?)-[^-]+-.*?台灣小說網$",
+			patternIndex: 1,
+			bookPatternIndex: 2,
+			bookSelector: "a[href*=\"/book/\"][href$=\"/index.html\"]"
+		},
+		advanced: { useIframe: true },
+		meta: {
+			source: "builtin",
+			exampleUrl: "https://twkan.com/txt/93181/53052605"
+		}
+	};
+	var uuread_exports = __exportAll({ uureadRule: () => uureadRule });
+	var uureadRule = {
+		id: "uuread",
+		name: "UU看书",
+		version: 2,
+		match: { pattern: "^https?://www\\.uuread\\.tw/chapter/\\d+/\\d+(?:_\\d+)?\\.html$" },
+		content: { selector: ".txt_tcontent" },
+		navigation: {
+			next: "a.btn-primary:nth-child(4)",
+			prev: "a.btn-primary:nth-child(1)",
+			index: "a.btn-primary:nth-child(3)"
+		},
+		title: {
+			selector: ".chatit",
+			replace: "\\s*[（(]\\s*\\d+\\s*/\\s*\\d+\\s*[）)]\\s*$",
+			bookSelector: ".bread > li:nth-child(4) > a:nth-child(1)"
+		},
+		advanced: { checkSection: true },
+		meta: {
+			source: "builtin",
+			exampleUrl: "https://www.uuread.tw/chapter/1880014/2545609.html"
+		}
+	};
+	var wxsl_exports = __exportAll({ wxslRule: () => wxslRule });
+	var wxslRule = {
+		id: "wxsl",
+		name: "森林文学",
+		version: 1,
+		match: { pattern: "^https?://www\\.2wxsl\\.com/book/\\d+/\\d+(?:_\\d+)?\\.html(?:[?#].*)?$" },
+		content: { selector: "#content" },
+		toc: { selector: ".row-section .section-box:has(+ .listpage) > .section-list" },
+		meta: {
+			source: "builtin",
+			exampleUrl: "http://www.2wxsl.com/book/132139/50723047.html"
+		}
+	};
+	var xszj_exports = __exportAll({ xszjRule: () => xszjRule });
+	var xszjRule = {
+		id: "xszj",
+		name: "小说之家",
+		version: 1,
+		match: { pattern: "^https?://(?:m\\.)?xszj\\.org/b/\\d+/c/\\d+(?:[?#].*)?$" },
+		content: {
+			selector: "#booktxt",
+			remove: "script, style, iframe, ins"
+		},
+		navigation: {
+			prev: ".bottem1 a:contains(\"上一章\"), .bottem1 a:contains(\"上一页\"), .bottem1 a:contains(\"上一頁\")",
+			index: ".bottem1 a[href*=\"/cs/\"], .bottem1 a:contains(\"目录\"), .bottem1 a:contains(\"目錄\")",
+			next: ".bottem1 a:contains(\"下一章\"), .bottem1 a:contains(\"下一页\"), .bottem1 a:contains(\"下一頁\")"
+		},
+		title: {
+			selector: "h1.bookname",
+			replace: "\\s*[（(]\\d+/\\d+[)）]\\s*$",
+			bookSelector: ".con_top a[href^=\"/b/\"]"
+		},
+		advanced: {
+			checkSection: true,
+			sectionMaxPages: 99,
+			sectionDelayMs: 800,
+			progressiveSectionMerge: true
+		},
+		meta: {
+			source: "builtin",
+			exampleUrl: "https://xszj.org/b/490346/c/1534359"
+		}
+	};
+	var modules$1 = Object.assign({
+		"./ciweimao.ts": ciweimao_exports,
+		"./deqixs.ts": deqixs_exports,
+		"./dingdianzww.ts": dingdianzww_exports,
+		"./goboo.ts": goboo_exports$1,
+		"./hetushu.ts": hetushu_exports,
+		"./kudushu.ts": kudushu_exports,
+		"./novel543.ts": novel543_exports,
+		"./qidian.ts": qidian_exports$1,
+		"./shu69.ts": shu69_exports,
+		"./sto9.ts": sto9_exports$1,
+		"./sudugu.ts": sudugu_exports,
+		"./tiantang.ts": tiantang_exports,
+		"./ttks.ts": ttks_exports,
+		"./twkan.ts": twkan_exports$1,
+		"./uuread.ts": uuread_exports,
+		"./wxsl.ts": wxsl_exports,
+		"./xszj.ts": xszj_exports
+	});
+	function isSiteRule(value) {
+		if (!value || typeof value !== "object") return false;
+		const maybe = value;
+		return typeof maybe.id === "string" && typeof maybe.version === "number" && !!maybe.match && typeof maybe.match.pattern === "string" && !!maybe.content && typeof maybe.content.selector === "string";
+	}
+	var siteRules = Object.keys(modules$1).sort().flatMap((path) => Object.values(modules$1[path]).filter(isSiteRule));
+	var specialRules = [{
+		id: "gongzicp",
+		name: "长佩文学网",
+		version: 1,
+		match: { pattern: "^https?://www\\.gongzicp\\.com/read-\\d+\\.html" },
+		content: {
+			selector: ".content",
+			replace: [{
+				pattern: "来源长佩文学网（https://www\\.gongzicp\\.com）",
+				replacement: ""
+			}]
+		},
+		title: { bookSelector: ".novel" },
+		advanced: {
+			useIframe: true,
+			mutationSelector: ".novel",
+			mutationChildCount: 2
+		},
+		meta: {
+			source: "builtin",
+			exampleUrl: "https://www.gongzicp.com/read-246381.html"
+		}
+	}];
+	var simplifiedRules = [
+		{
+			id: "ldks-2baoe",
+			name: "零点看书（ldks）",
+			version: 1,
+			match: { pattern: "^https?://(?:23\\.225\\.121\\.247|www\\.2baoe\\.com)/ldks/\\d+/\\d+(?:[_-]\\d+)?\\.html$" },
+			content: {
+				selector: "#content",
+				remove: "h1.title, script"
+			},
+			navigation: {
+				prev: ".section-opt a:contains(\"上一章\"), .section-opt a:contains(\"上一页\")",
+				index: ".section-opt a:contains(\"章节列表\"), a:contains(\"章节列表\")",
+				next: ".section-opt a:contains(\"下一章\"), .section-opt a:contains(\"下一页\")"
+			},
+			title: { selector: "h1.title" },
+			advanced: { checkSection: true },
+			meta: {
+				source: "builtin",
+				exampleUrl: "http://23.225.121.247/ldks/111291/42509753_2.html"
+			}
+		},
+		{
+			id: "tadu",
+			name: "塔读文学",
+			version: 1,
+			match: { pattern: "^https?://www\\.tadu\\.com/book/\\d+/\\d+/?" },
+			content: { selector: "#partContent" },
+			title: {
+				selector: "h4",
+				bookSelector: ".chapter_details > span"
+			},
+			advanced: {
+				useIframe: true,
+				mutationSelector: "#partContent",
+				mutationChildCount: 0
+			},
+			meta: { source: "builtin" }
+		},
+		{
+			id: "sfacg",
+			name: "SF 轻小说",
+			version: 1,
+			match: { pattern: "^https?://book.sfacg.com/Novel/\\d+/\\d+/\\d+/" },
+			content: { selector: "#ChapterBody" },
+			title: { pattern: "(.*?)-(.*?)-.*" },
+			meta: {
+				source: "builtin",
+				exampleUrl: "https://book.sfacg.com/Novel/601991/795722/7137683/"
+			}
+		},
+		{
+			id: "piaotia",
+			name: "飘天文学",
+			version: 1,
+			match: { pattern: "^https?://www\\.piaotia\\.com/html/\\d+/\\d+/\\d+\\.html" },
+			content: {
+				selector: "#content",
+				remove: "h1, table, .toplink"
+			},
+			title: { bookSelector: "#content > h1 > a" },
+			advanced: { useIframe: true },
+			meta: {
+				source: "builtin",
+				exampleUrl: "https://www.piaotia.com/html/15/15083/10323993.html"
+			}
+		},
+		{
+			id: "shushan",
+			name: "书山中文网",
+			version: 1,
+			match: { pattern: "https?://shushan\\.zhangyue\\.net/book/\\d+/\\d+/" },
+			content: { selector: ".art_con" },
+			navigation: {
+				next: ".next-cha",
+				prev: ".last-cha",
+				index: "a:contains(书页)"
+			},
+			meta: {
+				source: "builtin",
+				exampleUrl: "https://shushan.zhangyue.net/book/105835/15038074/"
+			}
+		},
+		{
+			id: "esjzone",
+			name: "ESJ",
+			version: 1,
+			match: { pattern: "^https?://www\\.esjzone\\.(?:me|cc)/forum/\\d+/\\d+\\.html" },
+			content: { selector: ".mt-3.forum-content" },
+			navigation: {
+				next: ".btn-next.btn-sm.btn-outline-secondary.btn",
+				prev: ".btn-prev.btn-sm.btn-outline-secondary.btn",
+				index: ".view-all.btn-outline-secondary.btn"
+			},
+			title: { selector: "h2" },
+			meta: {
+				source: "builtin",
+				exampleUrl: "https://www.esjzone.cc/forum/1677032544/162585.html"
+			}
+		},
+		{
+			id: "ixdzs",
+			name: "爱下电子书",
+			version: 1,
+			match: { pattern: "https://ixdzs8.com/read/\\d+/p\\d+.html" },
+			content: { selector: ".page-content section" },
+			navigation: {
+				next: ".chapter-next",
+				prev: ".chapter-pre",
+				index: "a:contains(书籍页)"
+			},
+			meta: {
+				source: "builtin",
+				exampleUrl: "https://ixdzs8.com/read/42730/p1.html"
+			}
+		},
+		{
+			id: "xs321",
+			name: "小说321",
+			version: 1,
+			match: { pattern: "https?://www\\.xs321\\.net/book/\\d+/\\d+/\\d+(_\\d+)?\\.html" },
+			content: { selector: "#content" },
+			advanced: { checkSection: true },
+			meta: {
+				source: "builtin",
+				exampleUrl: "http://www.xs321.net/book/671/671539/1.html"
+			}
+		},
+		{
+			id: "ilwxs",
+			name: "乐文小说",
+			version: 2,
+			match: { pattern: "https://m\\.ilwxs\\.com/shu/\\d+/\\d+\\.html" },
+			content: { selector: ".content" },
+			navigation: {
+				prev: ".pager a:contains(\"上一章\"), .pager a:contains(\"上一页\")",
+				next: ".pager a:contains(\"下一章\"), .pager a:contains(\"下一页\")",
+				index: ".pager a[href^=\"/shu/\"][href$=\"/\"], .pager a[href*=\"/shu/\"][href$=\"/\"], .pager a:contains(\"目 录\"), .pager a:contains(\"目录\")"
+			},
+			title: {
+				selector: ".headline",
+				bookSelector: ".path > a:nth-child(2)"
+			},
+			advanced: { checkSection: true },
+			meta: {
+				source: "builtin",
+				exampleUrl: "https://m.ilwxs.com/shu/36354/171272950.html"
+			}
+		},
+		{
+			id: "faloo",
+			name: "飞卢小说网",
+			version: 1,
+			match: { pattern: "^https?://[a-z]\\.faloo\\.com/\\d+_\\d+\\.html" },
+			content: { selector: ".noveContent" },
+			navigation: {
+				prev: "#pre_page, a:contains(\"上一章\")",
+				next: "#next_page, a:contains(\"下一章\")",
+				index: "#huimulu, a:contains(\"目录\")"
+			},
+			toc: { excludeAncestors: ".c_con_relation" },
+			title: {
+				selector: ".c_l_title > h1, h1",
+				bookSelector: "#novelName",
+				replace: "^\\s*\\S+\\s+"
+			},
+			meta: {
+				source: "builtin",
+				exampleUrl: "https://b.faloo.com/412421_1.html"
+			}
+		},
+		{
+			id: "kanunu8",
+			name: "努努书坊",
+			version: 1,
+			match: { pattern: "^https?://www\\.kanunu8\\.com/.+/\\d+\\.html$" },
+			content: { selector: "td[width=\"820\"] > p, td[width=\"820\"] p" },
+			navigation: {
+				prev: "table[width=\"700\"] td:first-child a",
+				index: "table[width=\"700\"] td:nth-child(2) a",
+				next: "table[width=\"700\"] td:last-child a"
+			},
+			title: { selector: "font[color=\"#dc143c\"][size=\"4\"]" },
+			toc: { excludeAncestors: "#header, .nav, .nav2, td[bgcolor=\"#A5BDC6\"], td[bgcolor=\"#CEDFE5\"]" },
+			advanced: { noSection: true },
+			meta: {
+				source: "builtin",
+				exampleUrl: "https://www.kanunu8.com/book3/7748/170164.html"
+			}
+		}
+	];
+	var builtInRules = [
+		...siteRules,
+		...specialRules,
+		...simplifiedRules
+	];
+	function globToRegex(glob) {
+		const escaped = glob.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".");
+		return new RegExp(`^${escaped}$`, "i");
+	}
+	function toRegExp(pattern, type = "regex") {
+		if (type === "glob") return globToRegex(pattern);
+		return new RegExp(pattern, "i");
+	}
+	var RuleManager = class {
+		constructor() {
+			this.builtInRules = builtInRules;
+			this.initialized = false;
+			this.compiledCache = new WeakMap();
+			this.sectionUrlParsers = this.builtInRules.flatMap((rule) => rule.hooks?.parseSectionUrl ? [rule.hooks.parseSectionUrl] : []);
+			this.entryResolvers = this.builtInRules.flatMap((rule) => rule.hooks?.resolveEntryUrl ? [rule.hooks.resolveEntryUrl] : []);
+			this.parseSectionUrl = (url) => {
+				for (const parse of this.sectionUrlParsers) {
+					const parsed = parse(url);
+					if (parsed) return parsed;
+				}
+				return null;
+			};
+		}
+		async initialize() {
+			if (this.initialized) return;
+			this.initialized = true;
+		}
+		resolveEntryUrl(doc, url) {
+			for (const resolve of this.entryResolvers) {
+				const resolved = resolve(doc, url);
+				if (resolved) return resolved;
+			}
+			return null;
+		}
+		async matchRule(url) {
+			if (!this.initialized) await this.initialize();
+			for (const rule of this.builtInRules) if (this.matchesUrl(rule, url)) return {
+				rule,
+				source: "builtin",
+				matchedPattern: rule.match.pattern
+			};
+			return null;
+		}
+		getCompiledRule(rule) {
+			const cached = this.compiledCache.get(rule);
+			if (cached) return cached;
+			const compiled = {
+				main: toRegExp(rule.match.pattern, rule.match.type),
+				excludes: (rule.match.exclude ?? []).map((e) => new RegExp(e, "i"))
+			};
+			this.compiledCache.set(rule, compiled);
+			return compiled;
+		}
+		matchesUrl(rule, url) {
+			try {
+				const { main, excludes } = this.getCompiledRule(rule);
+				if (!main.test(url)) return false;
+				for (const exclude of excludes) if (exclude.test(url)) return false;
+				return true;
+			} catch (e) {
+				console.debug("[RuleManager] Rule match error for pattern:", rule.match.pattern, e);
+				return false;
+			}
+		}
+	};
+	var ruleManagerInstance = null;
+	function getRuleManager() {
+		if (!ruleManagerInstance) ruleManagerInstance = new RuleManager();
+		return ruleManagerInstance;
+	}
 	var INVALID_URL_PATTERNS = [
 		/(?:index|list|last|LastPage|end)\.(?:html?|php|aspx)/i,
 		/^javascript:/i,
@@ -3357,7 +5248,7 @@
 					isSection: false,
 					confidence: 0
 				};
-				if (isSectionLikeUrl(currentUrl, nextUrl)) {
+				if (isSectionLikeUrl(currentUrl, nextUrl, getRuleManager().parseSectionUrl)) {
 					const currentInfo = parseChapterSectionFromPathname(currentPath);
 					const nextInfo = parseChapterSectionFromPathname(nextPath);
 					if (currentInfo && nextInfo && currentInfo.chapterKey === nextInfo.chapterKey && nextInfo.section === currentInfo.section + 1 && nextInfo.section > 1) return {
@@ -5480,1873 +7371,6 @@
 			}
 		}
 	};
-	var ciweimao_exports = __exportAll({
-		ciweimaoRule: () => ciweimaoRule,
-		ciweimaoWapRule: () => ciweimaoWapRule,
-		fetchCiweimaoApiDocument: () => fetchCiweimaoApiDocument
-	});
-	function asRecord(value) {
-		return value && typeof value === "object" ? value : null;
-	}
-	function isSuccessCode(value) {
-		return value === 1e5 || value === "100000";
-	}
-	function getUnsafeWindow() {
-		return typeof unsafeWindow !== "undefined" ? unsafeWindow : null;
-	}
-	function getCrypto() {
-		return (typeof window !== "undefined" ? window : null)?.CryptoJS || getUnsafeWindow()?.CryptoJS || null;
-	}
-	function normalizeCiweimaoUrl(value, baseUrl) {
-		if (!value) return "";
-		try {
-			return new URL(value, baseUrl).href;
-		} catch {
-			return value;
-		}
-	}
-	function getCiweimaoChapterId(url) {
-		return (url.match(/\/chapter\/(\d+)/) || [])[1] || "";
-	}
-	function getCiweimaoBookIdFromIndex(url) {
-		if (!url) return "";
-		return (url.match(/\/chapter-list\/(\d+)/) || [])[1] || "";
-	}
-	function fixCiweimaoNavHref(doc, selector, pageUrl) {
-		const el = doc.querySelector(selector);
-		if (!el) return;
-		let href = el.getAttribute("data-href") || el.getAttribute("data-url") || el.getAttribute("data-next") || el.getAttribute("data-prev") || el.getAttribute("data-link") || "";
-		if (!href) href = el.getAttribute("href") || "";
-		if (!href || href.startsWith("javascript")) {
-			const match = (el.outerHTML || "").match(/https?:\/\/(?:www|wap)\.ciweimao\.com\/chapter\/\d+/);
-			if (match) href = match[0];
-		}
-		if (href && !href.startsWith("javascript")) el.setAttribute("href", normalizeCiweimaoUrl(href, pageUrl));
-		else el.removeAttribute("href");
-	}
-	async function fetchCiweimaoJson(target, pageUrl, helpers) {
-		try {
-			const unsafeWin = getUnsafeWindow();
-			const currentWin = typeof window !== "undefined" ? window : null;
-			const fetcher = unsafeWin?.fetch || currentWin?.fetch || (typeof fetch === "function" ? fetch : null);
-			if (fetcher) {
-				const fetchThis = unsafeWin?.fetch ? unsafeWin : currentWin?.fetch ? currentWin : void 0;
-				const response = await fetcher.call(fetchThis, target, {
-					credentials: "include",
-					referrer: pageUrl
-				});
-				if (response?.ok) return asRecord(await response.json());
-			}
-		} catch {}
-		if (!helpers?.fetchJson) return null;
-		return helpers.fetchJson(target, {
-			headers: { Referer: pageUrl },
-			withCredentials: true
-		});
-	}
-	async function fetchCiweimaoText(target, referrer) {
-		try {
-			const unsafeWin = getUnsafeWindow();
-			const currentWin = typeof window !== "undefined" ? window : null;
-			const fetcher = unsafeWin?.fetch || currentWin?.fetch || (typeof fetch === "function" ? fetch : null);
-			if (!fetcher) return null;
-			const fetchThis = unsafeWin?.fetch ? unsafeWin : currentWin?.fetch ? currentWin : void 0;
-			const response = await fetcher.call(fetchThis, target, {
-				credentials: "include",
-				referrer
-			});
-			if (!response?.ok) return null;
-			return response.text();
-		} catch {
-			return null;
-		}
-	}
-	function decryptCiweimaoContent(chapterContent, encryptedKeys, accessKey, crypto) {
-		const chars = accessKey.split("");
-		const total = encryptedKeys.length;
-		if (!total || !chars.length) return "";
-		const keyChain = [encryptedKeys[chars[chars.length - 1].charCodeAt(0) % total], encryptedKeys[chars[0].charCodeAt(0) % total]];
-		const decode = (str) => atob(str);
-		const encode = (str) => btoa(str);
-		let current = chapterContent;
-		for (let i = 0; i < keyChain.length; i++) {
-			const decoded = decode(typeof current === "string" ? current : current.toString());
-			const key = keyChain[i];
-			const iv = encode(decoded.substring(0, 16));
-			const encrypted = encode(decoded.substring(16));
-			const parsed = crypto.format.OpenSSL.parse(encrypted);
-			const decrypted = crypto.AES.decrypt(parsed, crypto.enc.Base64.parse(key), {
-				iv: crypto.enc.Base64.parse(iv),
-				format: crypto.format.OpenSSL
-			});
-			current = i < keyChain.length - 1 ? decode(decrypted.toString(crypto.enc.Base64)) : decrypted;
-		}
-		return typeof current === "string" ? current : current.toString(crypto.enc.Utf8);
-	}
-	async function fetchCiweimaoContent(chapterId, pageUrl, helpers) {
-		const origin = new URL(pageUrl).origin;
-		const session = await fetchCiweimaoJson(`${origin}/chapter/ajax_get_session_code?chapter_id=${chapterId}`, pageUrl, helpers);
-		if (!session || !isSuccessCode(session.code)) return "";
-		const accessKeyValue = session.chapter_access_key;
-		if (accessKeyValue === void 0 || accessKeyValue === null) return "";
-		const accessKey = String(accessKeyValue);
-		const data = await fetchCiweimaoJson(`${origin}/chapter/get_book_chapter_detail_info?chapter_id=${chapterId}&chapter_access_key=${accessKey}`, pageUrl, helpers);
-		if (!data || !isSuccessCode(data.code)) return "";
-		const chapterContent = data.chapter_content;
-		const encryptedKeys = Array.isArray(data.encryt_keys) ? data.encryt_keys.filter((key) => typeof key === "string") : [];
-		const crypto = getCrypto();
-		if (typeof chapterContent !== "string" || encryptedKeys.length === 0 || !crypto) return "";
-		return decryptCiweimaoContent(chapterContent, encryptedKeys, accessKey, crypto);
-	}
-	async function decryptCiweimaoIfNeeded(doc, contentEl, pageUrl, helpers) {
-		const hasWatermark = !!contentEl.querySelector("#J_BookRead_WaterMark, .watermark");
-		const text = (contentEl.textContent || "").replace(/\s+/g, "").trim();
-		const chapterParas = contentEl.querySelectorAll("p.chapter").length;
-		if (!(hasWatermark || text.length < 200 || chapterParas < 3)) return;
-		const chapterId = doc.querySelector("#J_BookCnt")?.getAttribute("data-id") || (pageUrl.match(/chapter\/(\d+)/) || [])[1];
-		if (!chapterId) return;
-		const html = await fetchCiweimaoContent(chapterId, pageUrl, helpers);
-		if (html) contentEl.innerHTML = html;
-	}
-	function normalizeWatermarkText(value) {
-		return value.replace(/\s+/g, "").replace(/[\u200b-\u200d\ufeff]/g, "").trim();
-	}
-	function isLikelyWatermarkToken(token) {
-		if (!/^[A-Za-z0-9]{4,12}$/.test(token)) return false;
-		const hasDigit = /\d/.test(token);
-		const hasLower = /[a-z]/.test(token);
-		const hasUpper = /[A-Z]/.test(token);
-		return hasDigit && (hasLower || hasUpper) || hasLower && hasUpper;
-	}
-	function isCjk(ch) {
-		return /[\u4e00-\u9fff]/.test(ch);
-	}
-	function isCjkPunct(ch) {
-		return /[，。！？、“”‘’（）()【】[\]<>《》:：;；·~…—-]/.test(ch);
-	}
-	function getPrevNonSpace(text, index) {
-		for (let i = index - 1; i >= 0; i--) {
-			const ch = text[i];
-			if (!/\s/.test(ch)) return ch;
-		}
-		return "";
-	}
-	function getNextNonSpace(text, index) {
-		for (let i = index; i < text.length; i++) {
-			const ch = text[i];
-			if (!/\s/.test(ch)) return ch;
-		}
-		return "";
-	}
-	function shouldStripWatermarkToken(token, before, after) {
-		if (!isLikelyWatermarkToken(token)) return false;
-		const beforeCjk = before && (isCjk(before) || isCjkPunct(before));
-		const afterCjk = after && (isCjk(after) || isCjkPunct(after));
-		if (!beforeCjk && !afterCjk) return false;
-		const beforeAscii = before && /[A-Za-z0-9]/.test(before);
-		const afterAscii = after && /[A-Za-z0-9]/.test(after);
-		if (beforeAscii && afterAscii) return false;
-		return true;
-	}
-	function stripWatermarkText(value) {
-		if (!value || !/[\u4e00-\u9fff]/.test(value)) return value;
-		let result = "";
-		let i = 0;
-		while (i < value.length) {
-			const ch = value[i];
-			if (/[A-Za-z0-9]/.test(ch)) {
-				let j = i + 1;
-				while (j < value.length && /[A-Za-z0-9]/.test(value[j])) j++;
-				const token = value.slice(i, j);
-				if (token.length >= 4 && token.length <= 12) {
-					if (shouldStripWatermarkToken(token, getPrevNonSpace(value, i), getNextNonSpace(value, j))) {
-						i = j;
-						continue;
-					}
-				}
-				result += token;
-				i = j;
-				continue;
-			}
-			result += ch;
-			i += 1;
-		}
-		return result;
-	}
-	function cleanupCiweimaoWatermarks(doc, contentEl) {
-		contentEl.querySelectorAll("span, i, em, b, strong, font").forEach((node) => {
-			if (isLikelyWatermarkToken(normalizeWatermarkText(node.textContent || ""))) node.remove();
-		});
-		const showText = doc.defaultView?.NodeFilter?.SHOW_TEXT ?? 4;
-		const walker = doc.createTreeWalker(contentEl, showText);
-		const textNodes = [];
-		while (walker.nextNode()) textNodes.push(walker.currentNode);
-		textNodes.forEach((node) => {
-			const parent = node.parentElement;
-			if (!parent) return;
-			const tag = parent.tagName;
-			if (tag === "SCRIPT" || tag === "STYLE" || tag === "NOSCRIPT") return;
-			const text = node.nodeValue || "";
-			const cleaned = stripWatermarkText(text);
-			if (cleaned !== text) node.nodeValue = cleaned;
-		});
-		contentEl.querySelectorAll("p.chapter span").forEach((span) => span.remove());
-		contentEl.querySelectorAll("p.chapter").forEach((p) => {
-			const hasImg = p.querySelector("img");
-			const text = (p.textContent || "").replace(/\s+/g, "").trim();
-			if (hasImg && text.length <= 6) p.remove();
-		});
-	}
-	var tocCache = new Map();
-	function parseCiweimaoToc(html, tocUrl, fallbackBookTitle = "") {
-		const doc = new DOMParser().parseFromString(html, "text/html");
-		const seen = new Set();
-		const entries = [];
-		doc.querySelectorAll("a[href*=\"/chapter/\"]").forEach((anchor) => {
-			const url = normalizeCiweimaoUrl(anchor.getAttribute("href") || "", tocUrl);
-			if (!/\/chapter\/\d+/.test(url) || seen.has(url)) return;
-			const title = (anchor.textContent || "").replace(/\s+/g, " ").trim();
-			if (!title) return;
-			seen.add(url);
-			entries.push({
-				title,
-				url
-			});
-		});
-		const titleText = (doc.querySelector("title")?.textContent || "").trim();
-		return {
-			bookTitle: fallbackBookTitle || titleText.replace(/最新章节.*$/u, "").replace(/无弹窗全文阅读.*$/u, "").trim(),
-			entries
-		};
-	}
-	async function getCiweimaoToc(indexUrl, referrer, fallbackBookTitle = "") {
-		const cacheKey = getCiweimaoBookIdFromIndex(indexUrl) || indexUrl;
-		if (!cacheKey) return null;
-		let cached = tocCache.get(cacheKey);
-		if (!cached) {
-			cached = (async () => {
-				const html = await fetchCiweimaoText(indexUrl, referrer);
-				if (!html || /man-machine-verify|验证码|人机验证/i.test(html)) return null;
-				return parseCiweimaoToc(html, indexUrl, fallbackBookTitle);
-			})();
-			cached.then((toc) => {
-				if (!toc) tocCache.delete(cacheKey);
-			});
-			tocCache.set(cacheKey, cached);
-		}
-		return cached;
-	}
-	function createCiweimaoApiDocument(options) {
-		const doc = document.implementation.createHTMLDocument(options.title);
-		const safeSetText = (el, text) => {
-			el.textContent = text;
-			return el;
-		};
-		const breadcrumb = doc.createElement("div");
-		breadcrumb.className = "breadcrumb";
-		const bookLink = doc.createElement("a");
-		bookLink.href = options.indexUrl || options.url;
-		safeSetText(bookLink, options.bookTitle);
-		breadcrumb.append(bookLink);
-		const box = doc.createElement("div");
-		box.className = "book-read-box";
-		const cnt = doc.createElement("div");
-		cnt.id = "J_BookCnt";
-		cnt.setAttribute("data-id", getCiweimaoChapterId(options.url));
-		const header = doc.createElement("div");
-		header.className = "read-hd";
-		const h1 = doc.createElement("h1");
-		h1.className = "chapter";
-		safeSetText(h1, options.title);
-		header.append(h1);
-		const content = doc.createElement("div");
-		content.className = "read-bd";
-		content.id = "J_BookRead";
-		content.innerHTML = options.contentHtml;
-		const nav = doc.createElement("div");
-		nav.className = "book-read-page";
-		if (options.prevUrl) {
-			const prev = doc.createElement("a");
-			prev.id = "J_BtnPagePrev";
-			prev.href = options.prevUrl;
-			safeSetText(prev, "上一章");
-			nav.append(prev);
-		}
-		if (options.indexUrl) {
-			const index = doc.createElement("a");
-			index.href = options.indexUrl;
-			safeSetText(index, "目录");
-			nav.append(index);
-		}
-		if (options.nextUrl) {
-			const next = doc.createElement("a");
-			next.id = "J_BtnPageNext";
-			next.href = options.nextUrl;
-			safeSetText(next, "下一章");
-			nav.append(next);
-		}
-		cnt.append(header, content);
-		box.append(cnt, nav);
-		doc.body.append(breadcrumb, box);
-		return doc;
-	}
-	async function fetchCiweimaoApiDocument(targetUrl, refChapter) {
-		try {
-			const chapterId = getCiweimaoChapterId(targetUrl);
-			if (!chapterId || !/\/\/(?:www|wap)\.ciweimao\.com\/chapter\//.test(targetUrl)) return null;
-			const indexUrl = refChapter.indexUrl || "";
-			const toc = indexUrl ? await getCiweimaoToc(indexUrl, refChapter.url, refChapter.bookTitle || "") : null;
-			const normalizedTargetUrl = normalizeCiweimaoUrl(targetUrl, refChapter.url);
-			const tocIndex = toc?.entries.findIndex((entry) => normalizeCiweimaoUrl(entry.url, refChapter.url) === normalizedTargetUrl) ?? -1;
-			if (!toc || tocIndex < 0) return null;
-			const entry = toc.entries[tocIndex];
-			const prevUrl = toc.entries[tocIndex - 1]?.url || "";
-			const nextUrl = toc.entries[tocIndex + 1]?.url || "";
-			const html = await fetchCiweimaoContent(chapterId, normalizedTargetUrl);
-			if (!html) return null;
-			const doc = createCiweimaoApiDocument({
-				bookTitle: toc.bookTitle || refChapter.bookTitle || "",
-				contentHtml: html,
-				indexUrl,
-				nextUrl,
-				prevUrl,
-				title: entry.title,
-				url: normalizedTargetUrl
-			});
-			const contentEl = doc.querySelector("#J_BookRead");
-			if (contentEl) cleanupCiweimaoWatermarks(doc, contentEl);
-			return doc;
-		} catch (e) {
-			console.warn("[YingChuang] Ciweimao API document error:", e);
-			return null;
-		}
-	}
-	var ciweimaoBeforeParse = async (doc, url, helpers) => {
-		try {
-			const contentEl = doc.querySelector("#J_BookRead");
-			if (!contentEl) return;
-			const fallbackUrl = typeof window !== "undefined" && typeof window.location?.href === "string" ? window.location.href : "";
-			const pageUrl = url || doc.location?.href || fallbackUrl;
-			if (!pageUrl) return;
-			fixCiweimaoNavHref(doc, "#J_BtnPagePrev", pageUrl);
-			fixCiweimaoNavHref(doc, ".J_BtnPagePrev", pageUrl);
-			fixCiweimaoNavHref(doc, "#J_BtnPageNext", pageUrl);
-			fixCiweimaoNavHref(doc, ".J_BtnPageNext", pageUrl);
-			await decryptCiweimaoIfNeeded(doc, contentEl, pageUrl, helpers);
-			cleanupCiweimaoWatermarks(doc, contentEl);
-		} catch (e) {
-			console.warn("[YingChuang] Ciweimao beforeParse error:", e);
-		}
-	};
-	var ciweimaoContent = {
-		selector: "#J_BookRead",
-		remove: "i.J_Num, .chapter span, #J_BookRead_WaterMark, .watermark"
-	};
-	var ciweimaoHooks = { beforeParse: ciweimaoBeforeParse };
-	var ciweimaoRule = {
-		id: "ciweimao",
-		name: "刺猬猫",
-		version: 2,
-		match: { pattern: "^https?://www\\.ciweimao\\.com/chapter/\\d+" },
-		content: { ...ciweimaoContent },
-		navigation: {
-			prev: "#J_BtnPagePrev[href^=\"http\"]",
-			index: ".book-read-page a[href*=\"/chapter-list/\"]",
-			next: "#J_BtnPageNext[href^=\"http\"]"
-		},
-		title: {
-			selector: ".read-hd .chapter",
-			bookSelector: ".breadcrumb > a:last()"
-		},
-		hooks: { ...ciweimaoHooks },
-		advanced: {
-			mutationSelector: "#J_BookRead",
-			mutationChildCount: 2,
-			timeout: 3e3
-		},
-		meta: {
-			source: "builtin",
-			exampleUrl: "https://www.ciweimao.com/chapter/113909523"
-		}
-	};
-	var ciweimaoWapRule = {
-		id: "ciweimao-wap",
-		name: "刺猬猫(移动端)",
-		version: 2,
-		match: { pattern: "^https?://wap\\.ciweimao\\.com/chapter/\\d+/?(?:[?#].*)?$" },
-		content: { ...ciweimaoContent },
-		navigation: {
-			prev: ".J_BtnPagePrev[href^=\"http\"]",
-			index: ".book-read-page .btn-list[href*=\"/chapter/\"]",
-			next: ".J_BtnPageNext[href^=\"http\"]"
-		},
-		title: { selector: "h1.read-hd" },
-		hooks: { ...ciweimaoHooks },
-		advanced: {
-			mutationSelector: "#J_BookRead",
-			mutationChildCount: 2,
-			timeout: 3e3
-		},
-		meta: {
-			source: "builtin",
-			exampleUrl: "https://wap.ciweimao.com/chapter/113489050"
-		}
-	};
-	function getScriptText(doc) {
-		return Array.from(doc.scripts).map((script) => script.textContent || "").join("\n");
-	}
-	function appendHiddenLink(doc, id, href, text, base) {
-		if (!href || href === "#" || /^javascript:/i.test(href) || doc.getElementById(id)) return;
-		try {
-			const link = doc.createElement("a");
-			link.id = id;
-			link.href = new URL(href, base).toString();
-			link.textContent = text;
-			link.style.display = "none";
-			doc.body?.appendChild(link);
-		} catch {}
-	}
-	function extractChapterNav(scriptText) {
-		const match = scriptText.match(/if\s*\(\s*direction\s*===\s*['"]prev['"]\s*\)\s*\{[\s\S]*?chapterUrl\s*=\s*['"]([^'"]+)['"][\s\S]*?\}\s*else\s*\{[\s\S]*?chapterUrl\s*=\s*['"]([^'"]+)['"]/);
-		return {
-			prev: match?.[1] || null,
-			next: match?.[2] || null
-		};
-	}
-	var deqixs_exports = __exportAll({
-		deqixsCoRule: () => deqixsCoRule,
-		deqixsRule: () => deqixsRule
-	});
-	function extractJsValue(source, name) {
-		const pattern = new RegExp(`(?:var|let|const)\\s+${name}\\s*=\\s*(?:['"]([^'"]+)['"]|([^;\\s]+))\\s*;`);
-		const match = source.match(pattern);
-		return match?.[1] || match?.[2] || null;
-	}
-	var deqixsCoBeforeParse = async (doc, url, helpers) => {
-		try {
-			const pageUrl = url || doc.location?.href || location.href;
-			const pathMatch = new URL(pageUrl).pathname.match(/^\/books\/(\d+)\/(\d+)\.html$/);
-			if (!pathMatch) return;
-			const [, articleId, chapterId] = pathMatch;
-			const nav = extractChapterNav(getScriptText(doc));
-			appendHiddenLink(doc, "mnr-deqixs-co-prev", nav.prev, "上一章", pageUrl);
-			appendHiddenLink(doc, "mnr-deqixs-co-next", nav.next, "下一章", pageUrl);
-			const tokenScriptSrc = doc.querySelector("script[src*=\"/scripts/chapter.js.php\"]")?.getAttribute("src");
-			if (!tokenScriptSrc || !helpers) return;
-			const tokenScriptUrl = new URL(tokenScriptSrc, pageUrl).toString();
-			const tokenScript = await helpers.fetchText(tokenScriptUrl, {
-				timeoutMs: 15e3,
-				referrer: pageUrl,
-				withCredentials: true
-			});
-			if (!tokenScript) return;
-			const token = extractJsValue(tokenScript, "chapterToken");
-			const timestamp = extractJsValue(tokenScript, "timestamp");
-			const nonce = extractJsValue(tokenScript, "nonce");
-			if (!token || !timestamp || !nonce) return;
-			const params = new URLSearchParams({
-				aid: articleId,
-				cid: chapterId,
-				token,
-				timestamp,
-				nonce
-			});
-			const ajaxUrl = new URL(`/modules/article/ajax2.php?${params.toString()}`, pageUrl).toString();
-			const responseText = await helpers.fetchText(ajaxUrl, {
-				timeoutMs: 2e4,
-				referrer: pageUrl,
-				withCredentials: true,
-				headers: {
-					Accept: "application/json, text/javascript, */*; q=0.01",
-					"X-Requested-With": "XMLHttpRequest"
-				}
-			});
-			if (!responseText) return;
-			const payload = JSON.parse(responseText);
-			const content = payload.data?.content;
-			if (payload.status !== 1 || typeof content !== "string" || !content.trim()) return;
-			const contentEl = doc.querySelector("#chapter-content");
-			if (contentEl) {
-				contentEl.innerHTML = content;
-				contentEl.setAttribute("data-mnr-deqixs-full", "1");
-			}
-		} catch (e) {
-			console.warn("[YingChuang] Deqixs.co beforeParse error:", e);
-		}
-	};
-	var deqixsRule = {
-		id: "deqixs",
-		name: "得奇小说网",
-		version: 1,
-		match: { pattern: "^https?://www\\.deqixs\\.org/\\d+/\\d+(?:_\\d+)?\\.html(?:[?#].*)?$" },
-		content: {
-			selector: ".con",
-			remove: "script, style, iframe, ins"
-		},
-		navigation: {
-			prev: ".prenext span:first-child a[href$=\".html\"]",
-			index: ".prenext > a",
-			next: ".prenext span:last-child a[href$=\".html\"]"
-		},
-		title: {
-			selector: ".submenu h1",
-			replace: "^.*?>\\s*",
-			bookSelector: ".submenu h1 > a[href$=\"/\"]"
-		},
-		toc: { excludeAncestors: ".new, .item, h1, h2" },
-		advanced: {
-			checkSection: true,
-			sectionDelayMs: 800
-		},
-		meta: {
-			source: "builtin",
-			exampleUrl: "https://www.deqixs.org/24/18442_6.html"
-		}
-	};
-	var deqixsCoRule = {
-		id: "deqixs-co",
-		name: "得奇小说网(.co)",
-		version: 2,
-		match: { pattern: "^https?://www\\.deqixs\\.co/books/\\d+/\\d+\\.html(?:[?#].*)?$" },
-		content: {
-			selector: "#chapter-content",
-			remove: "script, style, iframe, ins, .loading, .error",
-			replace: [{
-				pattern: "当&前@章#节\\$内%容\\^不&完\\*整！要~查!看-完_整\\|章;节\\)请\\(退&出%阅#读\\|模\\*式！",
-				replacement: "",
-				flags: "g"
-			}, {
-				pattern: "本章节未完.+?请订阅",
-				replacement: "",
-				flags: "g"
-			}]
-		},
-		navigation: {
-			prev: "#mnr-deqixs-co-prev",
-			index: ".breadcrumb a[href*=\"/books/\"][href$=\"/\"]",
-			next: "#mnr-deqixs-co-next"
-		},
-		title: {
-			selector: "h1.pt10",
-			replace: "\\(第[^)]*页\\)\\s*$",
-			bookSelector: ".breadcrumb a[href*=\"/books/\"][href$=\"/\"]"
-		},
-		hooks: { beforeParse: deqixsCoBeforeParse },
-		meta: {
-			source: "builtin",
-			exampleUrl: "https://www.deqixs.co/books/325/266271.html"
-		}
-	};
-	var dingdianzww_exports = __exportAll({ dingdianzwwRule: () => dingdianzwwRule });
-	function extractChapterIds(pageUrl, scriptText) {
-		const pathMatch = new URL(pageUrl).pathname.match(/^\/(\d+)\/(\d+)(?:_\d+)?\.html$/);
-		const articleId = pathMatch?.[1] || scriptText.match(/const\s+articleId\s*=\s*(\d+)/)?.[1];
-		const chapterId = pathMatch?.[2] || scriptText.match(/const\s+chapterId\s*=\s*(\d+)/)?.[1];
-		if (!articleId || !chapterId) return null;
-		return {
-			articleId,
-			chapterId
-		};
-	}
-	function fixPageIndexLink(doc, base) {
-		const index = doc.querySelector(".page1 .page-index[data-href]");
-		const dataHref = index?.getAttribute("data-href");
-		if (!index || !dataHref) return;
-		try {
-			index.href = new URL(dataHref, base).toString();
-		} catch {}
-	}
-	var dingdianzwwBeforeParse = async (doc, url, helpers) => {
-		try {
-			const pageUrl = url || doc.location?.href || location.href;
-			const scriptText = getScriptText(doc);
-			const nav = extractChapterNav(scriptText);
-			appendHiddenLink(doc, "mnr-dingdianzww-prev", nav.prev, "上一章", pageUrl);
-			appendHiddenLink(doc, "mnr-dingdianzww-next", nav.next, "下一章", pageUrl);
-			fixPageIndexLink(doc, pageUrl);
-			appendHiddenLink(doc, "mnr-dingdianzww-index", doc.querySelector(".page1 .page-index")?.href || doc.querySelector(".bread a[href$=\"/\"]:not([href=\"/\"])")?.href || null, "目录", pageUrl);
-			const contentEl = doc.querySelector("#chapter-content");
-			if (!contentEl || !helpers?.fetchText) return;
-			const ids = extractChapterIds(pageUrl, scriptText);
-			if (!ids) return;
-			const ajaxUrl = new URL("/modules/article/ajax_chapter.php", pageUrl);
-			ajaxUrl.searchParams.set("aid", ids.articleId);
-			ajaxUrl.searchParams.set("cid", ids.chapterId);
-			const responseText = await helpers.fetchText(ajaxUrl.toString(), {
-				timeoutMs: 2e4,
-				withCredentials: true,
-				headers: {
-					Accept: "application/json, text/javascript, */*; q=0.01",
-					"X-Requested-With": "XMLHttpRequest"
-				}
-			});
-			if (!responseText) return;
-			const payload = JSON.parse(responseText);
-			const content = payload.data?.content;
-			if (payload.status !== 1 || typeof content !== "string" || !content.trim()) return;
-			contentEl.innerHTML = content;
-			contentEl.setAttribute("data-mnr-dingdianzww-full", "1");
-		} catch (e) {
-			console.warn("[YingChuang] Dingdianzww beforeParse error:", e);
-		}
-	};
-	var dingdianzwwRule = {
-		id: "dingdianzww",
-		name: "顶点小说",
-		version: 2,
-		match: { pattern: "^https?://dingdianzww\\.org/\\d+/\\d+\\.html(?:[?#].*)?$" },
-		content: {
-			selector: ".txtnav",
-			remove: "script, style, iframe, ins, .txtinfo.hide720, .readinline, .ad_content",
-			replace: [{
-				pattern: "PC站点如章节文字不全请用手机访问dingdianzww\\.org",
-				replacement: "",
-				flags: "g"
-			}, {
-				pattern: "当&前@章#节\\$内%容\\^不&完\\*整！要~查!看-完_整\\|章;节\\)请\\(退&出%阅#读\\|模\\*式！",
-				replacement: "",
-				flags: "g"
-			}]
-		},
-		navigation: {
-			prev: "#mnr-dingdianzww-prev, .page1 a:contains(\"上一章\")",
-			index: "#mnr-dingdianzww-index, .page1 a:contains(\"章节目录\"), .page1 a:contains(\"目录\")",
-			next: "#mnr-dingdianzww-next, .page1 a:contains(\"下一章\")"
-		},
-		title: {
-			selector: ".txtnav > h1, h1",
-			replace: "\\(第[^)]*页\\)\\s*$",
-			bookSelector: ".bread a[href^=\"/\"]:not([href=\"/\"]):not([href=\"/index.html\"])[href$=\"/\"]"
-		},
-		hooks: { beforeParse: dingdianzwwBeforeParse },
-		advanced: {
-			useIframe: true,
-			noSection: true
-		},
-		meta: {
-			source: "builtin",
-			exampleUrl: "https://dingdianzww.org/27543/13341609.html?page=1"
-		}
-	};
-	var goboo_exports$1 = __exportAll({ gobooRule: () => gobooRule });
-	var gobooBeforeParse = (doc, url) => {
-		try {
-			const fallbackUrl = typeof location !== "undefined" && typeof location.href === "string" ? location.href : "";
-			const pageUrl = url || doc.location?.href || fallbackUrl;
-			const match = (pageUrl ? new URL(pageUrl).pathname : "").match(/^\/gb_(\d+)\/(\d+)\/\d+/);
-			if (match && !doc.querySelector("#mnr-goboo-index")) {
-				const index = doc.createElement("a");
-				index.id = "mnr-goboo-index";
-				index.href = `/ml_${match[1]}/${match[2]}`;
-				index.textContent = "目录";
-				index.style.display = "none";
-				doc.body.appendChild(index);
-			}
-			const hasEncodedContent = Array.from(doc.scripts).some((script) => /p_key\s*=\s*['"][A-Za-z0-9+/=]{80,}['"]/.test(script.textContent || ""));
-			doc.querySelectorAll(".content p").forEach((p) => {
-				const text = (p.textContent || "").replace(/\s+/g, "");
-				const isPromotion = /小说免费阅读，请收藏.*goboo\.cc/i.test(text);
-				const isLoadMoreBlocker = /阅\|读\|模\|式\|或\|畅\|读\|模\|式/.test(text) || /加\|载\|更\|多/.test(text);
-				if (isPromotion || !hasEncodedContent && isLoadMoreBlocker) p.remove();
-			});
-		} catch (e) {
-			console.warn("[YingChuang] Goboo beforeParse error:", e);
-		}
-	};
-	var gobooRule = {
-		id: "goboo-m",
-		name: "钢笔小说(手机版)",
-		version: 1,
-		match: { pattern: "^https?://m\\.goboo\\.cc/gb_\\d+/\\d+/\\d+(?:/\\d+)?/?$" },
-		content: {
-			selector: ".content",
-			remove: "script, iframe, ins, .page, .emgoouqv_b",
-			replace: [
-				{
-					pattern: "【[^】]+】小说免费阅读，请收藏\\s*钢笔小说【goboo\\.cc】",
-					replacement: "",
-					flags: "g"
-				},
-				{
-					pattern: "阅\\|读\\|模\\|式\\|或\\|畅\\|读\\|模\\|式\\|下，?无\\|法\\|显\\|示\\|本\\|章\\|节\\|全\\|部\\|内\\|容，请\\|返\\|回\\|原\\|网\\|页阅\\|读。?加\\|载\\|更\\|多",
-					replacement: "",
-					flags: "g"
-				},
-				{
-					pattern: "本章未完，点击\\[下一页\\]继续阅读-->",
-					replacement: "",
-					flags: "g"
-				}
-			]
-		},
-		navigation: {
-			prev: ".page .left a",
-			index: "#mnr-goboo-index, .page .center a, a[href*=\"/ml_\"]",
-			next: ".page .right a"
-		},
-		title: {
-			pattern: "^(.+?)(?:\\(\\d+/\\d+\\))?\\s+-\\s+(.+?)小说\\s+-\\s+钢笔小说$",
-			patternIndex: 1,
-			bookPatternIndex: 2
-		},
-		hooks: { beforeParse: gobooBeforeParse },
-		advanced: {
-			checkSection: true,
-			sectionDelayMs: 1200,
-			progressiveSectionMerge: true
-		},
-		meta: {
-			source: "builtin",
-			exampleUrl: "https://m.goboo.cc/gb_1/94443/1"
-		}
-	};
-	var hetushu_exports = __exportAll({ hetushuRule: () => hetushuRule });
-	var SUBSTEP_READY_TIMEOUT_MS = 4e3;
-	var MAPPED_VISIBLE_ATTRIBUTE = "data-mnr-hetushu-visible";
-	async function waitForLiveContentElement(doc) {
-		const existing = doc.querySelector("#content");
-		const view = doc.defaultView;
-		if (existing || !view || !doc.documentElement) return existing;
-		return new Promise((resolve) => {
-			let settled = false;
-			let observer = null;
-			const finish = (contentEl) => {
-				if (settled) return;
-				settled = true;
-				view.clearTimeout(timeoutId);
-				observer?.disconnect();
-				resolve(contentEl);
-			};
-			const timeoutId = view.setTimeout(() => finish(null), SUBSTEP_READY_TIMEOUT_MS);
-			observer = new view.MutationObserver(() => {
-				const contentEl = doc.querySelector("#content");
-				if (contentEl) finish(contentEl);
-			});
-			observer.observe(doc.documentElement, {
-				attributes: true,
-				attributeFilter: ["id"],
-				childList: true,
-				subtree: true
-			});
-			const contentEl = doc.querySelector("#content");
-			if (contentEl) finish(contentEl);
-		});
-	}
-	function hasPendingSubstepContent(doc, contentEl) {
-		return doc.body?.dataset.randomtype === "substep" && contentEl.firstElementChild?.classList.contains("mask") === true;
-	}
-	function hasRestoredSubstepContent(doc, contentEl) {
-		if (doc.body?.dataset.randomtype !== "substep") return true;
-		if (hasPendingSubstepContent(doc, contentEl)) return false;
-		if (Array.from(contentEl.children).some((element) => element.tagName === "P")) return true;
-		const rows = Array.from(contentEl.children).filter((element) => element.tagName === "DIV" && !element.classList.contains("chapter"));
-		return rows.length > 0 && rows.every((element) => element.classList.length > 0 || element.hasAttribute(MAPPED_VISIBLE_ATTRIBUTE));
-	}
-	async function waitForLiveSubstepContent(doc, contentEl) {
-		const view = doc.defaultView;
-		if (!view || !hasPendingSubstepContent(doc, contentEl)) return true;
-		return new Promise((resolve) => {
-			let settled = false;
-			let observer = null;
-			const finish = (ready) => {
-				if (settled) return;
-				settled = true;
-				view.clearTimeout(timeoutId);
-				observer?.disconnect();
-				resolve(ready);
-			};
-			const timeoutId = view.setTimeout(() => finish(false), SUBSTEP_READY_TIMEOUT_MS);
-			observer = new view.MutationObserver(() => {
-				if (!hasPendingSubstepContent(doc, contentEl)) finish(true);
-			});
-			observer.observe(contentEl, { childList: true });
-			if (!hasPendingSubstepContent(doc, contentEl)) finish(true);
-		});
-	}
-	function decodeSubstepMapping(token) {
-		try {
-			if (typeof atob !== "function") return null;
-			const values = atob(token).split(/[A-Z]+%/);
-			if (!values.length || values.some((value) => !/^\d+$/.test(value))) return null;
-			return values.map(Number);
-		} catch {
-			return null;
-		}
-	}
-	function applySubstepMapping(contentEl, mapping) {
-		const firstElement = contentEl.firstElementChild;
-		const mask = firstElement?.classList.contains("mask") ? firstElement : null;
-		const nodes = Array.from(contentEl.childNodes).filter((node) => node !== mask && (node.nodeType !== 3 || !!node.textContent?.trim()));
-		let contentStart = 0;
-		for (let index = 0; index < nodes.length; index++) {
-			const node = nodes[index];
-			if (node.nodeType !== 1) continue;
-			const element = node;
-			if (element.tagName === "H2") contentStart = index + 1;
-			if (element.tagName === "DIV" && element.className !== "chapter") break;
-		}
-		const sourceNodes = nodes.slice(contentStart);
-		if (mapping.length !== sourceNodes.length) return false;
-		const ordered = new Array(sourceNodes.length);
-		let lowTargetCount = 0;
-		for (let index = 0; index < mapping.length; index++) {
-			const encodedTarget = mapping[index];
-			const target = encodedTarget < 5 ? encodedTarget : encodedTarget - lowTargetCount;
-			if (encodedTarget < 5) lowTargetCount++;
-			if (target < 0 || target >= ordered.length || ordered[target]) return false;
-			ordered[target] = sourceNodes[index];
-		}
-		if (ordered.some((node) => !node)) return false;
-		for (const node of ordered) if (node?.nodeType === 1) node.setAttribute(MAPPED_VISIBLE_ATTRIBUTE, "true");
-		contentEl.replaceChildren(...nodes.slice(0, contentStart), ...ordered);
-		return true;
-	}
-	async function restoreSubstepContent(doc, contentEl, pageUrl) {
-		if (doc.body?.dataset.randomtype !== "substep") return true;
-		if (typeof fetch !== "function") return false;
-		let parsedUrl;
-		try {
-			parsedUrl = new URL(pageUrl);
-		} catch {
-			return false;
-		}
-		const chapterId = parsedUrl.pathname.match(/\/(\d+)\.html$/)?.[1];
-		if (!chapterId || parsedUrl.hostname !== "www.hetushu.com") return false;
-		const controller = new AbortController();
-		const timeoutId = setTimeout(() => controller.abort(), SUBSTEP_READY_TIMEOUT_MS);
-		try {
-			const response = await fetch(new URL(`r${chapterId}.json`, parsedUrl).href, {
-				credentials: "include",
-				headers: { "X-Requested-With": "XMLHttpRequest" },
-				signal: controller.signal
-			});
-			if (!response.ok) return false;
-			const token = response.headers.get("token");
-			const mapping = token ? decodeSubstepMapping(token) : null;
-			return mapping ? applySubstepMapping(contentEl, mapping) : false;
-		} catch {
-			return false;
-		} finally {
-			clearTimeout(timeoutId);
-		}
-	}
-	var hetushuBeforeParse = async (doc, url, helpers) => {
-		try {
-			const contentEl = await waitForLiveContentElement(doc);
-			if (!contentEl) return;
-			const win = doc.defaultView || (typeof window !== "undefined" ? window : null);
-			const fallbackUrl = typeof window !== "undefined" && typeof window.location?.href === "string" ? window.location.href : "";
-			const pageUrl = url || doc.location?.href || fallbackUrl;
-			if (!hasRestoredSubstepContent(doc, contentEl)) {
-				if (doc.defaultView && hasPendingSubstepContent(doc, contentEl)) await waitForLiveSubstepContent(doc, contentEl);
-				let ready = hasRestoredSubstepContent(doc, contentEl);
-				if (!ready && (!doc.defaultView || !hasPendingSubstepContent(doc, contentEl))) ready = await restoreSubstepContent(doc, contentEl, pageUrl);
-				if (!ready) console.warn("[YingChuang] Hetushu content reorder did not complete:", pageUrl);
-			}
-			const titleEl = contentEl.querySelector("h2");
-			const watermarkSelector = "acronym, bdo, big, cite, code, dfn, kbd, q, s, samp, strike, tt, u, var, ins";
-			const normalizeWatermarkText = (value) => value.replace(/[\s\u3000]+/g, "").replace(/[ｗwＷW]+[.．•·。]*[hｈ][eｅ][tｔ][uｕ][sｓ][hｈ][uｕ][.．。]*(?:com|ｃｏｍ)(?:[.．。]*(?:com|ｃｏｍ))?/gi, "");
-			const collectStyleText = async () => {
-				const texts = Array.from(doc.querySelectorAll("style")).map((style) => style.textContent || "").filter(Boolean);
-				const links = Array.from(doc.querySelectorAll("link[rel~=\"stylesheet\"][href]"));
-				for (const link of links) {
-					if (!helpers?.fetchText) continue;
-					try {
-						const href = link.getAttribute("href");
-						if (!href) continue;
-						const styleUrl = new URL(href, pageUrl).href;
-						const text = await helpers.fetchText(styleUrl, {
-							timeoutMs: 4e3,
-							withCredentials: true
-						});
-						if (text) texts.push(text);
-					} catch {}
-				}
-				return texts.join("\n");
-			};
-			const extractDisplayClasses = (cssText) => {
-				const block = new Set();
-				const none = new Set();
-				const ruleRe = /([^{}]+)\{([^{}]+)\}/g;
-				let match;
-				while (match = ruleRe.exec(cssText)) {
-					const selector = match[1] || "";
-					const body = match[2] || "";
-					if (!selector.includes("#content")) continue;
-					const displayBlock = /display\s*:\s*block\b/i.test(body);
-					const displayNone = /display\s*:\s*none\b/i.test(body);
-					if (!displayBlock && !displayNone) continue;
-					const classRe = /#content\s+\.([A-Za-z0-9_-]+)/g;
-					let classMatch;
-					while (classMatch = classRe.exec(selector)) {
-						if (displayBlock) block.add(classMatch[1]);
-						if (displayNone) none.add(classMatch[1]);
-					}
-				}
-				return {
-					block,
-					none
-				};
-			};
-			const styleClasses = extractDisplayClasses(await collectStyleText());
-			const hasLayout = (el) => {
-				if (!win) return false;
-				const rect = el.getBoundingClientRect();
-				return rect.width > 0 && rect.height > 0;
-			};
-			const isVisibleByClass = (el) => {
-				const classes = Array.from(el.classList || []);
-				if (!classes.length) return false;
-				if (classes.some((cls) => styleClasses.none.has(cls))) return false;
-				if (styleClasses.block.size > 0) return classes.some((cls) => styleClasses.block.has(cls));
-				return true;
-			};
-			const isVisible = (el) => {
-				if (el.hasAttribute(MAPPED_VISIBLE_ATTRIBUTE)) return true;
-				if (!win || !hasLayout(el)) return isVisibleByClass(el);
-				const style = win.getComputedStyle(el);
-				if (style.display === "none") return false;
-				if (style.visibility === "hidden" || style.visibility === "collapse") return false;
-				if (Number(style.opacity) === 0) return false;
-				return true;
-			};
-			const cleanClone = (el) => {
-				const clone = el.cloneNode(true);
-				clone.querySelectorAll(watermarkSelector).forEach((node) => node.remove());
-				const showText = doc.defaultView?.NodeFilter?.SHOW_TEXT ?? 4;
-				const walker = doc.createTreeWalker(clone, showText);
-				const textNodes = [];
-				while (walker.nextNode()) textNodes.push(walker.currentNode);
-				textNodes.forEach((node) => {
-					const cleaned = normalizeWatermarkText(node.nodeValue || "");
-					if (cleaned !== node.nodeValue) node.nodeValue = cleaned;
-				});
-				return clone;
-			};
-			const rows = Array.from(contentEl.children).filter((el) => el !== titleEl && el.tagName !== "SCRIPT" && el.tagName !== "STYLE").filter(isVisible).map((el, index) => {
-				const rect = win && hasLayout(el) ? el.getBoundingClientRect() : {
-					top: index,
-					left: 0
-				};
-				return {
-					index,
-					top: rect.top + (win ? win.scrollY : 0),
-					left: rect.left + (win ? win.scrollX : 0),
-					el
-				};
-			}).sort((a, b) => a.top - b.top || a.left - b.left || a.index - b.index);
-			if (!rows.length) return;
-			const fragment = doc.createDocumentFragment();
-			if (titleEl) fragment.appendChild(titleEl.cloneNode(true));
-			rows.forEach(({ el }) => {
-				const paragraph = doc.createElement("p");
-				const clone = cleanClone(el);
-				paragraph.innerHTML = clone.innerHTML || clone.textContent || "";
-				if (paragraph.textContent && paragraph.textContent.replace(/\s+/g, "").trim()) fragment.appendChild(paragraph);
-			});
-			contentEl.innerHTML = "";
-			contentEl.appendChild(fragment);
-		} catch (e) {
-			console.warn("[YingChuang] Hetushu beforeParse error:", e);
-		}
-	};
-	var hetushuRule = {
-		id: "hetushu",
-		name: "和图书",
-		version: 3,
-		match: { pattern: "^https?://www\\.hetushu\\.com/book/\\d+/\\d+\\.html$" },
-		content: {
-			selector: "#content",
-			remove: "h2, acronym, bdo, big, cite, code, dfn, kbd, q, s, samp, strike, tt, u, var, ins"
-		},
-		navigation: {
-			next: "a#next",
-			prev: "a#pre",
-			index: "#left h3 a"
-		},
-		title: { bookSelector: "#left h3" },
-		hooks: { beforeParse: hetushuBeforeParse },
-		advanced: { useIframe: true },
-		meta: {
-			source: "builtin",
-			exampleUrl: "https://www.hetushu.com/book/9145/6567989.html"
-		}
-	};
-	var kudushu_exports = __exportAll({
-		kudushuPcRule: () => kudushuPcRule,
-		kudushuRule: () => kudushuRule
-	});
-	var kudushuRule = {
-		id: "kudushu",
-		name: "苦读书（移动版）",
-		version: 2,
-		match: { pattern: "^https?://m\\.kudushu\\.org/html/\\d+/\\d+(?:_\\d+)?/(?:[?#].*)?$" },
-		content: {
-			selector: "#novelcontent",
-			remove: "#content_tip, ul.novelbutton",
-			replace: [{
-				pattern: "^[\\s\\S]*?[（(]第\\d+[/／]\\d+页[）)]",
-				replacement: "",
-				flags: ""
-			}]
-		},
-		navigation: {
-			prev: ".content_novel > ul.novelbutton p.p1:not(.p3) > a[href*=\"/html/\"]",
-			next: ".content_novel > ul.novelbutton p.p3 > a[href*=\"/html/\"]",
-			index: ".content_novel > ul.novelbutton p.p2 > a[href*=\"/book/\"]"
-		},
-		title: { selector: "#chaptertitle" },
-		toc: { selector: ".info_menu1 .list_xm:has(> .listpage) > ul" },
-		advanced: {
-			checkSection: true,
-			sectionDelayMs: 800
-		},
-		meta: {
-			source: "builtin",
-			exampleUrl: "https://m.kudushu.org/html/1088392/146537150/"
-		}
-	};
-	var kudushuPcRule = {
-		id: "kudushu-pc",
-		name: "苦读书（PC版）",
-		version: 1,
-		match: { pattern: "^https?://www\\.kudushu\\.org/html/\\d+/\\d+/\\d+\\.html(?:[?#].*)?$" },
-		content: {
-			selector: "#clickeye_content",
-			remove: ".style3",
-			replace: [{
-				pattern: "[（(]?\\s*苦读书\\s*www\\.kudushu\\.org\\s*[）)]?",
-				replacement: "",
-				flags: "g"
-			}]
-		},
-		navigation: {
-			prev: ".P_Nav .inforight a:not([href$=\"index.html\"]):contains(\"上一页\")",
-			next: ".P_Nav .inforight a:not([href$=\"index.html\"]):contains(\"下一页\")",
-			index: ".P_Nav .inforight a[href$=\"index.html\"]"
-		},
-		title: { selector: "#cont h1" },
-		toc: { selector: ".index > ul.chapters" },
-		meta: {
-			source: "builtin",
-			exampleUrl: "https://www.kudushu.org/html/1088/1088392/146537150.html"
-		}
-	};
-	var qidian_exports$1 = __exportAll({
-		qidianMobileRule: () => qidianMobileRule,
-		qidianRule: () => qidianRule,
-		resolveQidianMobileBookPreviewChapterUrl: () => resolveQidianMobileBookPreviewChapterUrl
-	});
-	function hasQidianChapterId(value) {
-		return value !== void 0 && value !== null && String(value) !== "-1" && String(value) !== "";
-	}
-	function readQidianPageContext(doc) {
-		const script = doc.querySelector("#vite-plugin-ssr_pageContext");
-		if (!script) return null;
-		try {
-			return JSON.parse(script.textContent || "{}");
-		} catch {
-			return null;
-		}
-	}
-	function extractBookIdFromQidianUrl(url) {
-		if (!url) return null;
-		try {
-			return new URL(url, typeof location !== "undefined" ? location.href : void 0).pathname.match(/\/(?:book|chapter)\/(\d+)(?:\/|$)/)?.[1] || null;
-		} catch {
-			return null;
-		}
-	}
-	function extractChapterIdFromQidianUrl(url) {
-		if (!url) return null;
-		try {
-			return new URL(url, typeof location !== "undefined" ? location.href : void 0).pathname.match(/\/chapter\/\d+\/(\d+)(?:\/|$)/)?.[1] || null;
-		} catch {
-			return null;
-		}
-	}
-	function resolveQidianBookId(data, url) {
-		const bookId = data?.pageContext?.pageProps?.pageData?.bookInfo?.bookId ?? data?.pageContext?.routeParams?.bookId ?? extractBookIdFromQidianUrl(url);
-		return bookId === void 0 || bookId === null || String(bookId) === "" ? null : String(bookId);
-	}
-	function resolveQidianFirstChapterId(data) {
-		const pageData = data?.pageContext?.pageProps?.pageData;
-		return pageData?.firstChapterId ?? pageData?.chapterContentInfo?.firstChapterId;
-	}
-	function resolveQidianNextPreviewChapterId(data) {
-		const pageData = data?.pageContext?.pageProps?.pageData;
-		return pageData?.nextChapterId ?? pageData?.chapterContentInfo?.nextChapterId;
-	}
-	function normalizeQidianHydratedParagraphIndent(doc) {
-		const spans = doc.querySelectorAll("main[id^=\"c-\"] p > span.content-text:first-child");
-		for (const span of spans) {
-			const firstChild = span.firstChild;
-			if (!firstChild || firstChild.nodeType !== 3) continue;
-			const text = firstChild.nodeValue || "";
-			const normalized = text.replace(/^[\s\u3000]+/u, "");
-			if (normalized !== text) firstChild.nodeValue = normalized;
-		}
-	}
-	function resolveQidianMobileBookPreviewChapterUrl(doc, url) {
-		let parsedUrl;
-		try {
-			parsedUrl = new URL(url);
-		} catch {
-			return null;
-		}
-		if (parsedUrl.hostname !== "m.qidian.com") return null;
-		if (!/^\/book\/\d+\/?$/.test(parsedUrl.pathname)) return null;
-		const data = readQidianPageContext(doc);
-		const bookId = resolveQidianBookId(data, url);
-		const firstChapterId = resolveQidianFirstChapterId(data);
-		if (!bookId || !hasQidianChapterId(firstChapterId)) return null;
-		return new URL(`/chapter/${bookId}/${String(firstChapterId)}/`, parsedUrl.origin).toString();
-	}
-	var qidianBeforeParse = (doc, url) => {
-		normalizeQidianHydratedParagraphIndent(doc);
-		try {
-			doc.querySelectorAll("h1 .review, h2 .review").forEach((el) => el.remove());
-		} catch (e) {
-			console.debug("[MNR] Failed to remove review elements:", e);
-		}
-		try {
-			const data = readQidianPageContext(doc);
-			const pageData = data?.pageContext?.pageProps?.pageData;
-			if (!pageData) return;
-			const bookId = resolveQidianBookId(data, url);
-			const currentChapterId = extractChapterIdFromQidianUrl(url);
-			const firstChapterId = resolveQidianFirstChapterId(data);
-			const chapterInfo = pageData.chapterInfo;
-			const prevChapterId = chapterInfo?.prev;
-			let nextChapterId = chapterInfo?.next;
-			if (!hasQidianChapterId(nextChapterId) && currentChapterId && hasQidianChapterId(firstChapterId) && String(firstChapterId) === currentChapterId) nextChapterId = resolveQidianNextPreviewChapterId(data);
-			const host = url ? new URL(url).hostname : location.hostname;
-			const navContainer = doc.createElement("div");
-			navContainer.id = "mnr-qidian-nav";
-			navContainer.style.display = "none";
-			if (bookId && hasQidianChapterId(prevChapterId)) {
-				const prev = doc.createElement("a");
-				prev.id = "mnr-qidian-prev";
-				prev.href = `//${host}/chapter/${bookId}/${prevChapterId}/`;
-				prev.textContent = "上一章";
-				navContainer.appendChild(prev);
-			}
-			if (bookId && hasQidianChapterId(nextChapterId)) {
-				const next = doc.createElement("a");
-				next.id = "mnr-qidian-next";
-				next.href = `//${host}/chapter/${bookId}/${nextChapterId}/`;
-				next.textContent = "下一章";
-				navContainer.appendChild(next);
-			}
-			if (bookId) {
-				const index = doc.createElement("a");
-				index.id = "mnr-qidian-index";
-				index.href = `//${host}/book/${bookId}/`;
-				index.textContent = "目录";
-				navContainer.appendChild(index);
-			}
-			doc.body.appendChild(navContainer);
-		} catch (e) {
-			console.warn("[YingChuang] Qidian beforeParse error:", e);
-		}
-	};
-	var qidianContent = {
-		selector: "main[id^=\"c-\"]",
-		remove: ".review, #r-titlePage, .tooltip-wrapper, .chapter-end-qrcode, section[id^=\"r-\"]"
-	};
-	var qidianNavigation = {
-		prev: "#mnr-qidian-prev, .nav-btn-group a:contains(\"上一章\"), a.nav-btn:contains(\"上一章\")",
-		index: "#mnr-qidian-index",
-		next: "#mnr-qidian-next, .nav-btn-group a:contains(\"下一章\"), a.nav-btn:contains(\"下一章\")"
-	};
-	var qidianTitle = { selector: "h1.title, h2.title, h1.text-1\\.3em, h2.text-1\\.3em, #r-nav-chapter-title" };
-	var qidianHooks = { beforeParse: qidianBeforeParse };
-	var qidianMobileRule = {
-		id: "qidian-mobile",
-		name: "起点中文网手机版",
-		version: 1,
-		match: { pattern: "^https?://m\\.qidian\\.com/chapter/.*" },
-		content: { ...qidianContent },
-		navigation: { ...qidianNavigation },
-		title: { ...qidianTitle },
-		hooks: { ...qidianHooks },
-		advanced: {
-			mutationSelector: "main[id^=\"c-\"]",
-			mutationChildCount: 0
-		},
-		meta: { source: "builtin" }
-	};
-	var qidianRule = {
-		id: "qidian",
-		name: "起点中文网",
-		version: 9,
-		match: { pattern: "^https?://www\\.qidian\\.com/chapter/.*" },
-		content: { ...qidianContent },
-		navigation: { ...qidianNavigation },
-		title: { ...qidianTitle },
-		hooks: { ...qidianHooks },
-		advanced: {
-			useIframe: true,
-			mutationSelector: "main[id^=\"c-\"]",
-			mutationChildCount: 0
-		},
-		meta: { source: "builtin" }
-	};
-	var shu69_exports = __exportAll({ shu69Rule: () => shu69Rule });
-	var shu69BeforeParse = (doc, url) => {
-		try {
-			const fallbackUrl = typeof location !== "undefined" && typeof location.href === "string" ? location.href : "";
-			const pageUrl = url || doc.location?.href || fallbackUrl;
-			const text = Array.from(doc.querySelectorAll("script")).find((item) => (item.textContent || "").includes("bookinfo"))?.textContent || "";
-			if (!text) return;
-			const extractString = (key) => {
-				return text.match(new RegExp(`${key}\\s*:\\s*(["'])([^"'\\r\\n]{1,300})\\1`, "i"))?.[2]?.trim() || "";
-			};
-			const normalizeUrl = (value) => {
-				if (!value) return "";
-				try {
-					return new URL(value, pageUrl).href;
-				} catch {
-					return value;
-				}
-			};
-			const ensureAnchor = (id, href, label) => {
-				if (!href || doc.querySelector(`#${id}`)) return;
-				const parent = doc.body || doc.documentElement;
-				if (!parent) return;
-				const anchor = doc.createElement("a");
-				anchor.id = id;
-				anchor.href = normalizeUrl(href);
-				anchor.textContent = label;
-				anchor.style.display = "none";
-				parent.appendChild(anchor);
-			};
-			const bookTitle = extractString("articlename");
-			const chapterTitle = extractString("chaptername");
-			const indexUrl = extractString("index_page");
-			const prevUrl = extractString("preview_page");
-			const nextUrl = extractString("next_page");
-			ensureAnchor("mnr-69shu-book", indexUrl || prevUrl, bookTitle);
-			ensureAnchor("mnr-69shu-index", indexUrl, "目录");
-			ensureAnchor("mnr-69shu-prev", prevUrl, "上一章");
-			ensureAnchor("mnr-69shu-next", nextUrl, "下一章");
-			if (chapterTitle && !doc.querySelector("#mnr-69shu-title")) {
-				const parent = doc.body || doc.documentElement;
-				if (!parent) return;
-				const title = doc.createElement("h1");
-				title.id = "mnr-69shu-title";
-				title.textContent = chapterTitle;
-				title.style.display = "none";
-				parent.appendChild(title);
-			}
-		} catch (e) {
-			console.warn("[YingChuang] 69shu beforeParse error:", e);
-		}
-	};
-	var shu69Rule = {
-		id: "69shu",
-		name: "69书吧",
-		version: 2,
-		match: { pattern: "^https?://(?:www\\.)?69(?:shu|yuedu)[a-z0-9]*?\\.(?:pro|top|com|cx|net|co|me|biz)/(?:txt|c|r)/\\d+/\\d+/?(?:[?#].*)?$" },
-		content: {
-			selector: "#txtcontent, .txtnav",
-			remove: "script, style, iframe, ins, .txtinfo.hide720, #txtright, .bottom-ad, .bottom-ad2, .page1, .readinline, .ad_content",
-			replace: [{
-				pattern: ".*[6六].*[9九].*书.*吧.*",
-				replacement: "",
-				flags: "g"
-			}, {
-				pattern: "请收藏本站.*?最新网址.*?(?:<br\\s*/?>)?",
-				replacement: "",
-				flags: "g"
-			}]
-		},
-		navigation: {
-			prev: "#mnr-69shu-prev, .page1 a:contains(\"上一章\"), .page1 a:nth-child(1)",
-			index: "#mnr-69shu-index, .page1 a:contains(\"目录\"), .page1 a:contains(\"書目\"), .page1 a:nth-child(3)",
-			next: "#mnr-69shu-next, .page1 a:contains(\"下一章\"), .page1 a:nth-child(4)"
-		},
-		title: {
-			selector: "#mnr-69shu-title, h1",
-			bookSelector: "#mnr-69shu-book, .mytitle .bread a[href*=\"/book/\"][href$=\".htm\"], .txtinfo a:first-child, .con_top a:nth-child(3)"
-		},
-		hooks: { beforeParse: shu69BeforeParse },
-		advanced: {
-			noSection: true,
-			useIframe: true
-		},
-		meta: {
-			source: "builtin",
-			exampleUrl: "https://www.69shuba.com/txt/58672/38147713"
-		}
-	};
-	var sto9_exports$1 = __exportAll({ sto9Rule: () => sto9Rule });
-	var sto9BeforeParse = (doc) => {
-		const content = doc.querySelector(".txtnav");
-		if (!content) return;
-		const showText = doc.defaultView?.NodeFilter.SHOW_TEXT ?? 4;
-		const walker = doc.createTreeWalker(content, showText);
-		let node;
-		while (node = walker.nextNode()) if ((node.nodeValue || "").toLowerCase().replace(/[^a-z0-9]/g, "").includes("sto9com")) node.nodeValue = "";
-	};
-	var sto9Rule = {
-		id: "sto9",
-		name: "思兔阅读",
-		version: 2,
-		match: { pattern: "^https?://(?:www\\.)?sto9\\.com/txt/\\d+/\\d+\\.html(?:[?#].*)?$" },
-		content: {
-			selector: ".txtnav",
-			remove: "script, style, iframe, ins, .txtright, .txtad, .txtcenter",
-			replace: [{
-				pattern: "[（(]\\s*還有更新耶\\s*[）)]",
-				replacement: "",
-				flags: "g"
-			}]
-		},
-		navigation: {
-			prev: ".page1 a:contains(\"上一章\")",
-			index: ".page1 a:contains(\"目錄\"), .page1 a:contains(\"目录\")",
-			next: ".page1 a:not([href$=\"/end.html\"]):contains(\"下一章\")"
-		},
-		title: {
-			selector: ".txtnav > h1",
-			bookSelector: ".bread a[href*=\"/book/\"][href$=\"/index.html\"]"
-		},
-		hooks: { beforeParse: sto9BeforeParse },
-		meta: {
-			source: "builtin",
-			exampleUrl: "https://sto9.com/txt/7974/7627078.html"
-		}
-	};
-	var sudugu_exports = __exportAll({ suduguRule: () => suduguRule });
-	var suduguRule = {
-		id: "sudugu",
-		name: "速读谷",
-		version: 1,
-		match: { pattern: "^https?://www\\.shudugu\\.org/\\d+/\\d+(?:-\\d+)?\\.html(?:[?#].*)?$" },
-		content: {
-			selector: ".con",
-			remove: "script, style, iframe, ins"
-		},
-		navigation: {
-			prev: ".prenext span:first-child a",
-			index: ".prenext > a[href*=\"#dir\"]",
-			next: ".prenext span:last-child a"
-		},
-		title: {
-			selector: ".submenu h1",
-			replace: "^.*?>\\s*",
-			bookSelector: ".submenu h1 > a[href^=\"/\"][href$=\"/\"]"
-		},
-		toc: { excludeAncestors: ".new, .item, h1, h2" },
-		advanced: {
-			checkSection: true,
-			sectionDelayMs: 800
-		},
-		meta: {
-			source: "builtin",
-			exampleUrl: "https://www.shudugu.org/109/1226047.html"
-		}
-	};
-	var tiantang_exports = __exportAll({ tiantangRule: () => tiantangRule });
-	var tiantangRule = {
-		id: "tiantang",
-		name: "格格党（tiantang100）",
-		version: 1,
-		match: { pattern: "^https?://www\\.tiantang100\\.org/\\d+/\\d+/\\d+(?:_\\d+)?\\.html(?:[?#].*)?$" },
-		content: { selector: "#content" },
-		navigation: { index: "#mnr-tiantang-index" },
-		hooks: { beforeParse(doc, url) {
-			if (!url || !new RegExp(tiantangRule.match.pattern).test(url)) return;
-			appendHiddenLink(doc, "mnr-tiantang-index", ".", "目录", url);
-		} },
-		meta: {
-			source: "builtin",
-			exampleUrl: "http://www.tiantang100.org/337/337644/1889083.html"
-		}
-	};
-	var ttks_exports = __exportAll({ ttksRule: () => ttksRule });
-	var WATERMARK_TAIL_PATTERN = /\s*(?:[（(【]\s*)?(?:[寫写]到[這这][裡里]我希望[讀读]者[記记]一下我[們们]域名|由[於于][緩缓]存原因[，,]?[請请]用[戶户]直接(?:瀏覽|浏览)器(?:訪問|访问)|本[書书]首[發发]|天天看[小小說说]{2}解[書书]荒|[記记]住本站域名)[\s\S]*$/u;
-	var ttksBeforeParse = (doc) => {
-		const content = doc.querySelector(".frame_body > .title + .content");
-		if (!content) return;
-		const paragraphs = Array.from(content.querySelectorAll(":scope > p"));
-		for (const paragraph of paragraphs) {
-			const text = paragraph.textContent || "";
-			const cleaned = text.replace(WATERMARK_TAIL_PATTERN, "").trimEnd();
-			if (cleaned !== text) {
-				if (cleaned) paragraph.textContent = cleaned;
-				else paragraph.remove();
-			}
-		}
-		const trailingParagraphs = Array.from(content.querySelectorAll(":scope > p"));
-		for (let index = trailingParagraphs.length - 1; index >= 0; index--) {
-			const paragraph = trailingParagraphs[index];
-			const text = (paragraph.textContent || "").replace(/\s+/g, "").trim();
-			if (!text) {
-				paragraph.remove();
-				continue;
-			}
-			if (/^(?:>|福)$/.test(text)) {
-				paragraph.remove();
-				continue;
-			}
-			break;
-		}
-	};
-	var ttksRule = {
-		id: "ttks",
-		name: "天天看小說",
-		version: 1,
-		match: { pattern: "^https?://(?:www\\.)?ttks\\.tw/novel/chapters/[^/?#]+/\\d+\\.html(?:[?#].*)?$" },
-		content: {
-			selector: ".frame_body > .title + .content",
-			remove: ".anchor_bookmark, .txtcenter, .div_feedback, .social_share_frame"
-		},
-		navigation: {
-			prev: "#linkPrev",
-			index: ".breadcrumb_nav a[href$=\"/index.html\"]",
-			next: "#linkNext"
-		},
-		title: {
-			selector: ".frame_body > .title h1, .frame_body > .title",
-			bookSelector: ".breadcrumb_nav a[href$=\"/index.html\"]"
-		},
-		hooks: { beforeParse: ttksBeforeParse },
-		advanced: {
-			noSection: true,
-			useIframe: true
-		},
-		meta: {
-			source: "builtin",
-			exampleUrl: "https://ttks.tw/novel/chapters/kaijuxiangqinnvshenbuhuodugujiujian/83.html"
-		}
-	};
-	var twkan_exports$1 = __exportAll({ twkanRule: () => twkanRule });
-	var twkanRule = {
-		id: "twkan",
-		name: "台灣小說網",
-		version: 1,
-		match: { pattern: "^https?://twkan\\.com/txt/\\d+/\\d+/?(?:[?#].*)?$" },
-		content: {
-			selector: "#txtcontent0, .txtnav",
-			remove: "script, style, iframe, ins, .page1, .readinline, .read-link, .ad_content, .top-ad, .bottom-ad",
-			replace: [
-				{
-					pattern: "^[\\s\\u00a0\\u3000\\u2000-\\u200a]*第[一二三四五六七八九十百千\\d]+(?:章|节|節|回|话|話|篇|集|卷)[^<]{0,120}(?:<br\\s*/?>\\s*)+",
-					replacement: "",
-					flags: "g"
-				},
-				{
-					pattern: "（?請記住臺灣小説網[^<\\n]*?）?",
-					replacement: "",
-					flags: "g"
-				},
-				{
-					pattern: "（?请记住[臺台]湾小[説说]网[^<\\n]{0,160}(?:章节更新|網站|网站)[^<\\n]{0,40}）?",
-					replacement: "",
-					flags: "g"
-				},
-				{
-					pattern: "〖[^〗]*分享[^〗]*運營[^〗]*〗",
-					replacement: "",
-					flags: "g"
-				},
-				{
-					pattern: "【[^】]{0,100}(?:域名|[臺台]湾小[説说]网|[臺台]湾好书)[^】]{0,160}】",
-					replacement: "",
-					flags: "g"
-				},
-				{
-					pattern: "本章完。?",
-					replacement: "",
-					flags: "g"
-				}
-			]
-		},
-		navigation: {
-			prev: "a:contains(\"上一章\")",
-			index: "a:contains(\"目錄\"), a:contains(\"目录\"), a:contains(\"書頁\"), a:contains(\"书页\")",
-			next: "a:contains(\"下一章\")"
-		},
-		title: {
-			selector: ".txtnav > h1, h1",
-			pattern: "^(.+?)-(.+?)-[^-]+-.*?台灣小說網$",
-			patternIndex: 1,
-			bookPatternIndex: 2,
-			bookSelector: "a[href*=\"/book/\"][href$=\"/index.html\"]"
-		},
-		advanced: { useIframe: true },
-		meta: {
-			source: "builtin",
-			exampleUrl: "https://twkan.com/txt/93181/53052605"
-		}
-	};
-	var uuread_exports = __exportAll({ uureadRule: () => uureadRule });
-	var uureadRule = {
-		id: "uuread",
-		name: "UU看书",
-		version: 2,
-		match: { pattern: "^https?://www\\.uuread\\.tw/chapter/\\d+/\\d+(?:_\\d+)?\\.html$" },
-		content: { selector: ".txt_tcontent" },
-		navigation: {
-			next: "a.btn-primary:nth-child(4)",
-			prev: "a.btn-primary:nth-child(1)",
-			index: "a.btn-primary:nth-child(3)"
-		},
-		title: {
-			selector: ".chatit",
-			replace: "\\s*[（(]\\s*\\d+\\s*/\\s*\\d+\\s*[）)]\\s*$",
-			bookSelector: ".bread > li:nth-child(4) > a:nth-child(1)"
-		},
-		advanced: { checkSection: true },
-		meta: {
-			source: "builtin",
-			exampleUrl: "https://www.uuread.tw/chapter/1880014/2545609.html"
-		}
-	};
-	var wxsl_exports = __exportAll({ wxslRule: () => wxslRule });
-	var wxslRule = {
-		id: "wxsl",
-		name: "森林文学",
-		version: 1,
-		match: { pattern: "^https?://www\\.2wxsl\\.com/book/\\d+/\\d+(?:_\\d+)?\\.html(?:[?#].*)?$" },
-		content: { selector: "#content" },
-		toc: { selector: ".row-section .section-box:has(+ .listpage) > .section-list" },
-		meta: {
-			source: "builtin",
-			exampleUrl: "http://www.2wxsl.com/book/132139/50723047.html"
-		}
-	};
-	var xszj_exports = __exportAll({ xszjRule: () => xszjRule });
-	var xszjRule = {
-		id: "xszj",
-		name: "小说之家",
-		version: 1,
-		match: { pattern: "^https?://(?:m\\.)?xszj\\.org/b/\\d+/c/\\d+(?:[?#].*)?$" },
-		content: {
-			selector: "#booktxt",
-			remove: "script, style, iframe, ins"
-		},
-		navigation: {
-			prev: ".bottem1 a:contains(\"上一章\"), .bottem1 a:contains(\"上一页\"), .bottem1 a:contains(\"上一頁\")",
-			index: ".bottem1 a[href*=\"/cs/\"], .bottem1 a:contains(\"目录\"), .bottem1 a:contains(\"目錄\")",
-			next: ".bottem1 a:contains(\"下一章\"), .bottem1 a:contains(\"下一页\"), .bottem1 a:contains(\"下一頁\")"
-		},
-		title: {
-			selector: "h1.bookname",
-			replace: "\\s*[（(]\\d+/\\d+[)）]\\s*$",
-			bookSelector: ".con_top a[href^=\"/b/\"]"
-		},
-		advanced: {
-			checkSection: true,
-			sectionMaxPages: 99,
-			sectionDelayMs: 800,
-			progressiveSectionMerge: true
-		},
-		meta: {
-			source: "builtin",
-			exampleUrl: "https://xszj.org/b/490346/c/1534359"
-		}
-	};
-	var modules$1 = Object.assign({
-		"./ciweimao.ts": ciweimao_exports,
-		"./deqixs.ts": deqixs_exports,
-		"./dingdianzww.ts": dingdianzww_exports,
-		"./goboo.ts": goboo_exports$1,
-		"./hetushu.ts": hetushu_exports,
-		"./kudushu.ts": kudushu_exports,
-		"./novel543.ts": novel543_exports,
-		"./qidian.ts": qidian_exports$1,
-		"./shu69.ts": shu69_exports,
-		"./sto9.ts": sto9_exports$1,
-		"./sudugu.ts": sudugu_exports,
-		"./tiantang.ts": tiantang_exports,
-		"./ttks.ts": ttks_exports,
-		"./twkan.ts": twkan_exports$1,
-		"./uuread.ts": uuread_exports,
-		"./wxsl.ts": wxsl_exports,
-		"./xszj.ts": xszj_exports
-	});
-	function isSiteRule(value) {
-		if (!value || typeof value !== "object") return false;
-		const maybe = value;
-		return typeof maybe.id === "string" && typeof maybe.version === "number" && !!maybe.match && typeof maybe.match.pattern === "string" && !!maybe.content && typeof maybe.content.selector === "string";
-	}
-	var siteRules = Object.keys(modules$1).sort().flatMap((path) => Object.values(modules$1[path]).filter(isSiteRule));
-	var specialRules = [{
-		id: "gongzicp",
-		name: "长佩文学网",
-		version: 1,
-		match: { pattern: "^https?://www\\.gongzicp\\.com/read-\\d+\\.html" },
-		content: {
-			selector: ".content",
-			replace: [{
-				pattern: "来源长佩文学网（https://www\\.gongzicp\\.com）",
-				replacement: ""
-			}]
-		},
-		title: { bookSelector: ".novel" },
-		advanced: {
-			useIframe: true,
-			mutationSelector: ".novel",
-			mutationChildCount: 2
-		},
-		meta: {
-			source: "builtin",
-			exampleUrl: "https://www.gongzicp.com/read-246381.html"
-		}
-	}];
-	var simplifiedRules = [
-		{
-			id: "ldks-2baoe",
-			name: "零点看书（ldks）",
-			version: 1,
-			match: { pattern: "^https?://(?:23\\.225\\.121\\.247|www\\.2baoe\\.com)/ldks/\\d+/\\d+(?:[_-]\\d+)?\\.html$" },
-			content: {
-				selector: "#content",
-				remove: "h1.title, script"
-			},
-			navigation: {
-				prev: ".section-opt a:contains(\"上一章\"), .section-opt a:contains(\"上一页\")",
-				index: ".section-opt a:contains(\"章节列表\"), a:contains(\"章节列表\")",
-				next: ".section-opt a:contains(\"下一章\"), .section-opt a:contains(\"下一页\")"
-			},
-			title: { selector: "h1.title" },
-			advanced: { checkSection: true },
-			meta: {
-				source: "builtin",
-				exampleUrl: "http://23.225.121.247/ldks/111291/42509753_2.html"
-			}
-		},
-		{
-			id: "tadu",
-			name: "塔读文学",
-			version: 1,
-			match: { pattern: "^https?://www\\.tadu\\.com/book/\\d+/\\d+/?" },
-			content: { selector: "#partContent" },
-			title: {
-				selector: "h4",
-				bookSelector: ".chapter_details > span"
-			},
-			advanced: {
-				useIframe: true,
-				mutationSelector: "#partContent",
-				mutationChildCount: 0
-			},
-			meta: { source: "builtin" }
-		},
-		{
-			id: "sfacg",
-			name: "SF 轻小说",
-			version: 1,
-			match: { pattern: "^https?://book.sfacg.com/Novel/\\d+/\\d+/\\d+/" },
-			content: { selector: "#ChapterBody" },
-			title: { pattern: "(.*?)-(.*?)-.*" },
-			meta: {
-				source: "builtin",
-				exampleUrl: "https://book.sfacg.com/Novel/601991/795722/7137683/"
-			}
-		},
-		{
-			id: "piaotia",
-			name: "飘天文学",
-			version: 1,
-			match: { pattern: "^https?://www\\.piaotia\\.com/html/\\d+/\\d+/\\d+\\.html" },
-			content: {
-				selector: "#content",
-				remove: "h1, table, .toplink"
-			},
-			title: { bookSelector: "#content > h1 > a" },
-			advanced: { useIframe: true },
-			meta: {
-				source: "builtin",
-				exampleUrl: "https://www.piaotia.com/html/15/15083/10323993.html"
-			}
-		},
-		{
-			id: "shushan",
-			name: "书山中文网",
-			version: 1,
-			match: { pattern: "https?://shushan\\.zhangyue\\.net/book/\\d+/\\d+/" },
-			content: { selector: ".art_con" },
-			navigation: {
-				next: ".next-cha",
-				prev: ".last-cha",
-				index: "a:contains(书页)"
-			},
-			meta: {
-				source: "builtin",
-				exampleUrl: "https://shushan.zhangyue.net/book/105835/15038074/"
-			}
-		},
-		{
-			id: "esjzone",
-			name: "ESJ",
-			version: 1,
-			match: { pattern: "^https?://www\\.esjzone\\.(?:me|cc)/forum/\\d+/\\d+\\.html" },
-			content: { selector: ".mt-3.forum-content" },
-			navigation: {
-				next: ".btn-next.btn-sm.btn-outline-secondary.btn",
-				prev: ".btn-prev.btn-sm.btn-outline-secondary.btn",
-				index: ".view-all.btn-outline-secondary.btn"
-			},
-			title: { selector: "h2" },
-			meta: {
-				source: "builtin",
-				exampleUrl: "https://www.esjzone.cc/forum/1677032544/162585.html"
-			}
-		},
-		{
-			id: "ixdzs",
-			name: "爱下电子书",
-			version: 1,
-			match: { pattern: "https://ixdzs8.com/read/\\d+/p\\d+.html" },
-			content: { selector: ".page-content section" },
-			navigation: {
-				next: ".chapter-next",
-				prev: ".chapter-pre",
-				index: "a:contains(书籍页)"
-			},
-			meta: {
-				source: "builtin",
-				exampleUrl: "https://ixdzs8.com/read/42730/p1.html"
-			}
-		},
-		{
-			id: "xs321",
-			name: "小说321",
-			version: 1,
-			match: { pattern: "https?://www\\.xs321\\.net/book/\\d+/\\d+/\\d+(_\\d+)?\\.html" },
-			content: { selector: "#content" },
-			advanced: { checkSection: true },
-			meta: {
-				source: "builtin",
-				exampleUrl: "http://www.xs321.net/book/671/671539/1.html"
-			}
-		},
-		{
-			id: "ilwxs",
-			name: "乐文小说",
-			version: 2,
-			match: { pattern: "https://m\\.ilwxs\\.com/shu/\\d+/\\d+\\.html" },
-			content: { selector: ".content" },
-			navigation: {
-				prev: ".pager a:contains(\"上一章\"), .pager a:contains(\"上一页\")",
-				next: ".pager a:contains(\"下一章\"), .pager a:contains(\"下一页\")",
-				index: ".pager a[href^=\"/shu/\"][href$=\"/\"], .pager a[href*=\"/shu/\"][href$=\"/\"], .pager a:contains(\"目 录\"), .pager a:contains(\"目录\")"
-			},
-			title: {
-				selector: ".headline",
-				bookSelector: ".path > a:nth-child(2)"
-			},
-			advanced: { checkSection: true },
-			meta: {
-				source: "builtin",
-				exampleUrl: "https://m.ilwxs.com/shu/36354/171272950.html"
-			}
-		},
-		{
-			id: "faloo",
-			name: "飞卢小说网",
-			version: 1,
-			match: { pattern: "^https?://[a-z]\\.faloo\\.com/\\d+_\\d+\\.html" },
-			content: { selector: ".noveContent" },
-			navigation: {
-				prev: "#pre_page, a:contains(\"上一章\")",
-				next: "#next_page, a:contains(\"下一章\")",
-				index: "#huimulu, a:contains(\"目录\")"
-			},
-			toc: { excludeAncestors: ".c_con_relation" },
-			title: {
-				selector: ".c_l_title > h1, h1",
-				bookSelector: "#novelName",
-				replace: "^\\s*\\S+\\s+"
-			},
-			meta: {
-				source: "builtin",
-				exampleUrl: "https://b.faloo.com/412421_1.html"
-			}
-		},
-		{
-			id: "kanunu8",
-			name: "努努书坊",
-			version: 1,
-			match: { pattern: "^https?://www\\.kanunu8\\.com/.+/\\d+\\.html$" },
-			content: { selector: "td[width=\"820\"] > p, td[width=\"820\"] p" },
-			navigation: {
-				prev: "table[width=\"700\"] td:first-child a",
-				index: "table[width=\"700\"] td:nth-child(2) a",
-				next: "table[width=\"700\"] td:last-child a"
-			},
-			title: { selector: "font[color=\"#dc143c\"][size=\"4\"]" },
-			toc: { excludeAncestors: "#header, .nav, .nav2, td[bgcolor=\"#A5BDC6\"], td[bgcolor=\"#CEDFE5\"]" },
-			advanced: { noSection: true },
-			meta: {
-				source: "builtin",
-				exampleUrl: "https://www.kanunu8.com/book3/7748/170164.html"
-			}
-		}
-	];
-	var builtInRules = [
-		...siteRules,
-		...specialRules,
-		...simplifiedRules
-	];
-	function globToRegex(glob) {
-		const escaped = glob.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".");
-		return new RegExp(`^${escaped}$`, "i");
-	}
-	function toRegExp(pattern, type = "regex") {
-		if (type === "glob") return globToRegex(pattern);
-		return new RegExp(pattern, "i");
-	}
-	var RuleManager = class {
-		constructor() {
-			this.builtInRules = builtInRules;
-			this.initialized = false;
-			this.compiledCache = new WeakMap();
-		}
-		async initialize() {
-			if (this.initialized) return;
-			this.initialized = true;
-		}
-		async matchRule(url) {
-			if (!this.initialized) await this.initialize();
-			for (const rule of this.builtInRules) if (this.matchesUrl(rule, url)) return {
-				rule,
-				source: "builtin",
-				matchedPattern: rule.match.pattern
-			};
-			return null;
-		}
-		getCompiledRule(rule) {
-			const cached = this.compiledCache.get(rule);
-			if (cached) return cached;
-			const compiled = {
-				main: toRegExp(rule.match.pattern, rule.match.type),
-				excludes: (rule.match.exclude ?? []).map((e) => new RegExp(e, "i"))
-			};
-			this.compiledCache.set(rule, compiled);
-			return compiled;
-		}
-		matchesUrl(rule, url) {
-			try {
-				const { main, excludes } = this.getCompiledRule(rule);
-				if (!main.test(url)) return false;
-				for (const exclude of excludes) if (exclude.test(url)) return false;
-				return true;
-			} catch (e) {
-				console.debug("[RuleManager] Rule match error for pattern:", rule.match.pattern, e);
-				return false;
-			}
-		}
-	};
-	var ruleManagerInstance = null;
-	function getRuleManager() {
-		if (!ruleManagerInstance) ruleManagerInstance = new RuleManager();
-		return ruleManagerInstance;
-	}
 	function getGmXhr() {
 		if (typeof GM_xmlhttpRequest === "function") return GM_xmlhttpRequest;
 		return null;
@@ -8204,6 +8228,7 @@
 		if (!parserInstance) parserInstance = new Parser();
 		return parserInstance;
 	}
+	var parseSectionUrl = (url) => getRuleManager().parseSectionUrl(url);
 	var SectionMerger = class {
 		constructor(parser) {
 			this.parser = parser;
@@ -8211,10 +8236,10 @@
 		async merge(doc, url, options = {}) {
 			const confidenceThreshold = options.confidenceThreshold ?? .8;
 			if (options.signal?.aborted) return null;
-			const qidianBookPreviewUrl = resolveQidianMobileBookPreviewChapterUrl(doc, url);
-			if (qidianBookPreviewUrl) {
-				const previewChapter = await this.parser.parse(doc, qidianBookPreviewUrl);
-				if (previewChapter) return previewChapter;
+			const entryUrl = getRuleManager().resolveEntryUrl(doc, url);
+			if (entryUrl) {
+				const entryChapter = await this.parser.parse(doc, entryUrl);
+				if (entryChapter) return entryChapter;
 			}
 			const startPage = await this.resolveStartPage(doc, url, options);
 			if (!startPage) return null;
@@ -8235,7 +8260,7 @@
 			let startUrl = url;
 			let startDoc = doc;
 			const knownDocs = new Map([[normalizeAbsoluteUrl(url, url), doc]]);
-			const baseUrl = getSectionBaseUrl(url);
+			const baseUrl = getSectionBaseUrl(url, parseSectionUrl);
 			if (baseUrl && baseUrl !== url) {
 				const baseDoc = await this.fetchUrl(baseUrl, url, options.fetcher, options.signal);
 				if (options.signal?.aborted) return null;
@@ -8260,7 +8285,7 @@
 			const section = this.parser.detectSection(startPage.doc, startPage.url);
 			const hasNextSectionUrl = !!section?.isSection && !!section.nextSectionUrl;
 			if (!(enableByRule || !!section?.isSection && (section.confidence || 0) >= confidenceThreshold)) {
-				if (!hasNextSectionUrl && first.nextUrl && isSectionLikeUrl(startPage.url, first.nextUrl)) {
+				if (!hasNextSectionUrl && first.nextUrl && isSectionLikeUrl(startPage.url, first.nextUrl, parseSectionUrl)) {
 					const realNextChapterUrl = this.findNextChapterUrl(startPage.doc, startPage.url);
 					if (realNextChapterUrl) return {
 						kind: "done",
@@ -8275,7 +8300,7 @@
 					chapter: first
 				};
 			}
-			const nextSectionUrl = section?.nextSectionUrl || (first.nextUrl && isSectionLikeUrl(startPage.url, first.nextUrl) ? first.nextUrl : null);
+			const nextSectionUrl = section?.nextSectionUrl || (first.nextUrl && isSectionLikeUrl(startPage.url, first.nextUrl, parseSectionUrl) ? first.nextUrl : null);
 			return {
 				kind: "merge",
 				chapterUrl: this.getChapterUrl(startPage.url, nextSectionUrl),
@@ -8285,7 +8310,7 @@
 			};
 		}
 		getChapterUrl(startUrl, nextSectionUrl) {
-			if (!nextSectionUrl || !isSectionLikeUrl(startUrl, nextSectionUrl)) return startUrl;
+			if (!nextSectionUrl || !isSectionLikeUrl(startUrl, nextSectionUrl, parseSectionUrl)) return startUrl;
 			try {
 				const start = new URL(startUrl);
 				const next = new URL(nextSectionUrl, startUrl);
@@ -8365,7 +8390,7 @@
 			if (section?.nextChapterUrl) cursor.nextChapterUrl = section.nextChapterUrl;
 			cursor.nextSectionUrl = section?.nextSectionUrl || null;
 			if (!cursor.nextSectionUrl && parsed.nextUrl) {
-				if (isSectionLikeUrl(pageUrl, parsed.nextUrl)) cursor.nextSectionUrl = parsed.nextUrl;
+				if (isSectionLikeUrl(pageUrl, parsed.nextUrl, parseSectionUrl)) cursor.nextSectionUrl = parsed.nextUrl;
 				else if (!cursor.nextChapterUrl) cursor.nextChapterUrl = parsed.nextUrl;
 			}
 			cursor.lastUrl = pageUrl;
@@ -8433,7 +8458,7 @@
 				const href = anchor.getAttribute("href");
 				if (!href) continue;
 				const absUrl = normalizeAbsoluteUrl(href, currentUrl);
-				if (absUrl === currentUrl || isSectionLikeUrl(currentUrl, absUrl)) continue;
+				if (absUrl === currentUrl || isSectionLikeUrl(currentUrl, absUrl, parseSectionUrl)) continue;
 				const text = anchor.textContent?.trim() || "";
 				if (!text) continue;
 				const normalizedText = text.replace(/\s+/g, "").trim();
@@ -19076,9 +19101,9 @@ ul, ol {
 		};
 	}
 	async function loadFetchDocument(ctx, load, runId, referer) {
-		const ciweimaoDoc = await loadRuleApiDocument(load.targetUrl, load.refChapter);
+		const ruleDoc = await loadRuleApiDocument(load.targetUrl, load.refChapter.chapter);
 		if (ctx.runtime.isViewStale(runId)) return "abort";
-		if (ciweimaoDoc) return ciweimaoDoc;
+		if (ruleDoc) return ruleDoc;
 		const fetchLoader = fetchAndParseUrl(load.targetUrl, referer);
 		const abort = fetchLoader.abort;
 		if (ctx.runtime.isViewStale(runId)) {
@@ -19101,12 +19126,12 @@ ul, ol {
 		return fetchResult.doc;
 	}
 	async function loadRuleApiDocument(url, reference) {
-		const ruleId = reference.rule?.id || reference.chapter.rule?.id || "";
-		if (ruleId !== "ciweimao" && ruleId !== "ciweimao-wap") return null;
-		return fetchCiweimaoApiDocument(url, {
-			bookTitle: reference.chapter.bookTitle,
-			indexUrl: reference.chapter.indexUrl,
-			url: reference.chapter.url
+		const fetchDocument = (await getRuleManager().matchRule(url))?.rule.hooks?.fetchDocument;
+		if (!fetchDocument) return null;
+		return fetchDocument(url, {
+			bookTitle: reference.bookTitle,
+			indexUrl: reference.indexUrl,
+			refererUrl: reference.url
 		});
 	}
 	async function parseCandidateDocument(ctx, load, parser, doc, runId, _referer, source) {
@@ -19345,8 +19370,7 @@ ul, ol {
 						let parsed = null;
 						let blockReason = null;
 						const reference = ctx.chapter.value;
-						const rule = ctx.rule.value ?? reference?.rule;
-						if (rule?.advanced?.useIframe) {
+						if ((ctx.rule.value ?? reference?.rule)?.advanced?.useIframe) {
 							const loader = loadDocumentInIframe(targetUrl);
 							ctx.cacheAbort.value = loader.abort;
 							const loaded = await loader.promise;
@@ -19362,10 +19386,7 @@ ul, ol {
 							if (!isCurrent()) break;
 						}
 						if (!parsed && !blockReason) {
-							const apiDoc = reference ? await loadRuleApiDocument(targetUrl, {
-								chapter: reference,
-								rule
-							}) : null;
+							const apiDoc = reference ? await loadRuleApiDocument(targetUrl, reference) : null;
 							if (!isCurrent()) break;
 							let doc = apiDoc;
 							if (!doc) {

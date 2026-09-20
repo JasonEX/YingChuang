@@ -6,6 +6,7 @@
 import { CHAPTER_TEXT_PATTERNS, SECTION_TEXT_PATTERNS } from '@/core/constants';
 import { generateCssSelector, isSectionLikeUrl } from '@/core/utils';
 import { NAV_PATTERNS, NavigationResult, NavLinkResult, SectionDetectionResult } from './types';
+import { getRuleManager } from '@/core/rules/RuleManager';
 import { parseChapterSectionFromPathname } from '@/core/utils/sectionPath';
 
 /** URLs to ignore as navigation links */
@@ -591,7 +592,7 @@ export class NavigationDetector {
       }
 
       // Fast path: strict section-like detection (includes query-based pagination).
-      if (isSectionLikeUrl(currentUrl, nextUrl)) {
+      if (isSectionLikeUrl(currentUrl, nextUrl, getRuleManager().parseSectionUrl)) {
         const currentInfo = parseChapterSectionFromPathname(currentPath);
         const nextInfo = parseChapterSectionFromPathname(nextPath);
         if (

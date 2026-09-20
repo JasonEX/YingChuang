@@ -4,7 +4,7 @@ const CHAPTER_URL =
   /^https?:\/\/(?:www\.)?novel543\.com(\/\d+\/\d+_\d+)(?:_(\d+))?\.html(?:[?#].*)?$/;
 
 // The first underscore belongs to the chapter ID; only the second is a page suffix.
-export function parseNovel543Url(url: string): { chapterUrl: string; page: number } | null {
+function parseNovel543Url(url: string): { chapterUrl: string; page: number } | null {
   const match = url.match(CHAPTER_URL);
   if (!match) return null;
   const parsed = new URL(url);
@@ -38,6 +38,7 @@ export const novel543Rule: SiteRule = {
     excludeAncestors: '.chaplist > ul:not(.all)',
   },
   hooks: {
+    parseSectionUrl: parseNovel543Url,
     beforeParse: doc => {
       const bookLink = doc.querySelector('.header .nav li:last-child a');
       const bookTitle = doc

@@ -12,7 +12,9 @@ import { getSectionBaseUrl, isSectionLikeUrl, joinHtml, normalizeAbsoluteUrl } f
 import type { ParsedChapter, Parser } from '@/core/parser';
 import type { ChineseScript } from '@/core/converter/scriptProfile';
 import { fetchAndParseUrl } from '@/core/utils/network';
-import { resolveQidianMobileBookPreviewChapterUrl } from '@/core/rules/sites/qidian';
+import { getRuleManager } from '@/core/rules/RuleManager';
+
+const parseSectionUrl = (url: string) => getRuleManager().parseSectionUrl(url);
 
 /** Section detection result */
 interface SectionInfo {
@@ -99,10 +101,12 @@ export class SectionMerger {
 
     if (options.signal?.aborted) return null;
 
-    const qidianBookPreviewUrl = resolveQidianMobileBookPreviewChapterUrl(doc, url);
-    if (qidianBookPreviewUrl) {
-      const previewChapter = await this.parser.parse(doc, qidianBookPreviewUrl);
-      if (previewChapter) return previewChapter;
+    // A landing page (for example a book page that embeds its first chapter) can redirect to
+    // the chapter URL it really represents. Which pages do this is declared by site rules.
+    const entryUrl = getRuleManager().resolveEntryUrl(doc, url);
+    if (entryUrl) {
+      const entryChapter = await this.parser.parse(doc, entryUrl);
+      if (entryChapter) return entryChapter;
     }
 
     const startPage = await this.resolveStartPage(doc, url, options);
@@ -137,7 +141,7 @@ export class SectionMerger {
     let startUrl = url;
     let startDoc = doc;
     const knownDocs = new Map<string, Document>([[normalizeAbsoluteUrl(url, url), doc]]);
-    const baseUrl = getSectionBaseUrl(url);
+    const baseUrl = getSectionBaseUrl(url, parseSectionUrl);
 
     if (baseUrl && baseUrl !== url) {
       const baseDoc = await this.fetchUrl(baseUrl, url, options.fetcher, options.signal);
@@ -168,7 +172,11 @@ export class SectionMerger {
       enableByRule || (!!section?.isSection && (section.confidence || 0) >= confidenceThreshold);
 
     if (!shouldMerge) {
-      if (!hasNextSectionUrl && first.nextUrl && isSectionLikeUrl(startPage.url, first.nextUrl)) {
+      if (
+        !hasNextSectionUrl &&
+        first.nextUrl &&
+        isSectionLikeUrl(startPage.url, first.nextUrl, parseSectionUrl)
+      ) {
         const realNextChapterUrl = this.findNextChapterUrl(startPage.doc, startPage.url);
         if (realNextChapterUrl) {
           return { kind: 'done', chapter: { ...first, nextUrl: realNextChapterUrl } };
@@ -179,7 +187,9 @@ export class SectionMerger {
 
     const nextSectionUrl =
       section?.nextSectionUrl ||
-      (first.nextUrl && isSectionLikeUrl(startPage.url, first.nextUrl) ? first.nextUrl : null);
+      (first.nextUrl && isSectionLikeUrl(startPage.url, first.nextUrl, parseSectionUrl)
+        ? first.nextUrl
+        : null);
 
     return {
       kind: 'merge',
@@ -192,7 +202,8 @@ export class SectionMerger {
 
   /** Keep a canonical chapter identity separate from the URL used to fetch each section. */
   private getChapterUrl(startUrl: string, nextSectionUrl: string | null): string {
-    if (!nextSectionUrl || !isSectionLikeUrl(startUrl, nextSectionUrl)) return startUrl;
+    if (!nextSectionUrl || !isSectionLikeUrl(startUrl, nextSectionUrl, parseSectionUrl))
+      return startUrl;
 
     try {
       const start = new URL(startUrl);
@@ -333,7 +344,7 @@ export class SectionMerger {
 
     cursor.nextSectionUrl = section?.nextSectionUrl || null;
     if (!cursor.nextSectionUrl && parsed.nextUrl) {
-      if (isSectionLikeUrl(pageUrl, parsed.nextUrl)) {
+      if (isSectionLikeUrl(pageUrl, parsed.nextUrl, parseSectionUrl)) {
         cursor.nextSectionUrl = parsed.nextUrl;
       } else if (!cursor.nextChapterUrl) {
         cursor.nextChapterUrl = parsed.nextUrl;
@@ -443,7 +454,7 @@ export class SectionMerger {
       if (!href) continue;
 
       const absUrl = normalizeAbsoluteUrl(href, currentUrl);
-      if (absUrl === currentUrl || isSectionLikeUrl(currentUrl, absUrl)) continue;
+      if (absUrl === currentUrl || isSectionLikeUrl(currentUrl, absUrl, parseSectionUrl)) continue;
 
       const text = anchor.textContent?.trim() || '';
       if (!text) continue;
