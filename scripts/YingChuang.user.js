@@ -8811,12 +8811,24 @@
 					});
 					return "complete";
 				}
-				if (launchedEarly) return "initial";
+				if (launchedEarly) {
+					this.launchCallback?.({
+						stage: "cancel",
+						reason: "aborted"
+					});
+					return "initial";
+				}
 				this.deactivateProtection();
 				return false;
 			} catch (e) {
 				console.error("[AutoEnableManager] Parse error:", e);
-				if (launchedEarly) return "initial";
+				if (launchedEarly) {
+					this.launchCallback?.({
+						stage: "cancel",
+						reason: "failed"
+					});
+					return "initial";
+				}
 				this.deactivateProtection();
 				return false;
 			}
@@ -20733,6 +20745,7 @@ ul, ol {
 			loadToc: tocActions.loadToc,
 			appendChapterSection: nav.appendChapterSection,
 			beginChapterSections: nav.beginChapterSections,
+			cancelChapterSections: nav.cancelChapterSections,
 			completeChapterSections: nav.completeChapterSections,
 			rebuildChaptersAround,
 			reloadCurrentChapter,
@@ -23404,6 +23417,13 @@ ul, ol {
 				loaded: event.progress.loaded,
 				total: event.progress.total
 			});
+			return;
+		}
+		if (event.stage === "cancel") {
+			const mergingEntryId = appState.progressiveEntryId;
+			appState.progressiveEntryId = null;
+			if (!appState.isActive || !mergingEntryId) return;
+			readerStore.cancelChapterSections(mergingEntryId, event.reason);
 			return;
 		}
 		if (event.stage === "complete" && event.progressive) {
