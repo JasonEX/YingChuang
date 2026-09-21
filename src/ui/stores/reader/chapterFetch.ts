@@ -1,13 +1,14 @@
 import { MAX_NAV_FAILURES, VIP_BLOCK_TOAST } from './types';
 import type { ParsedChapter, Parser } from '@/core/parser';
+import { parseWithSectionMerge, startProgressiveSectionMerge } from './section';
 
+import { createSectionMergeSink } from './sectionProgress';
 import { fetchAndParseUrl } from '@/core/utils/network';
 import { getChapterDocumentBlockReason } from '@/core/detection';
 import { getRuleManager } from '@/core/rules/RuleManager';
 import type { LoadSource } from './types';
 import type { NavigationContext } from './navigationContext';
 import { normalizeUrlForBlock } from './utils';
-import { parseWithSectionMerge } from './section';
 import type { PreparedChapterLoad } from './chapterLoadGuards';
 import { recordDebugEvent } from '@/core/debug/events';
 import { recordNavFailure } from './navFailure';
@@ -193,13 +194,30 @@ export async function parseCandidateDocument(
   load.pendingAbortRef.value = abort;
 
   try {
-    const parsed = await parseWithSectionMerge(parser, doc, load.targetUrl, {
-      signal: controller.signal,
+    if (!load.isNext) {
+      // A previous chapter is prepended above what the reader is looking at, so growing it
+      // page by page would shove their text down the screen on every page that lands. It also
+      // has to be whole before `loadChapter` can tell a real chapter from a table of contents:
+      // a first section often names no next chapter at all.
+      const parsed = await parseWithSectionMerge(parser, doc, load.targetUrl, {
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted || ctx.runtime.isViewStale(runId)) return 'abort';
+      return parsed;
+    }
+
+    const { chapter, merge } = await startProgressiveSectionMerge(parser, doc, load.targetUrl, {
+      controller,
+      sink: createSectionMergeSink(ctx),
     });
     if (controller.signal.aborted || ctx.runtime.isViewStale(runId)) {
+      merge?.reject();
       return 'abort';
     }
-    return parsed;
+    // Ownership of the abort moves to the store's merge registry once the entry is committed,
+    // so navigating on to the next chapter no longer cancels the remaining section pages.
+    load.sectionMerge = merge;
+    return chapter;
   } finally {
     clearPendingAbort(load, abort);
   }

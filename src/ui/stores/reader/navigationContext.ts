@@ -1,4 +1,4 @@
-import type { CachedChapter, ChapterEntry } from './types';
+import type { CachedChapter, ChapterEntry, SectionMergeRecord } from './types';
 import type { ConversionMode } from '@/core/converter';
 import type { Ref } from 'vue';
 
@@ -14,6 +14,7 @@ export interface NavigationContext {
   vipBlockedUrls: Ref<Set<string>>;
   blockedNavUrls: Ref<Set<string>>;
   cachedContents: Ref<Map<string, CachedChapter>>;
+  sectionMerges: Ref<Map<string, SectionMergeRecord>>;
   persistedUrls: Ref<Set<string>>;
   originalContents: Ref<Map<string, string>>;
   originalTitles: Ref<Map<string, { title: string; bookTitle?: string }>>;

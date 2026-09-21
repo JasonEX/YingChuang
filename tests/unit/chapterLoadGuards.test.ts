@@ -53,6 +53,35 @@ describe('chapterLoadGuards', () => {
     } as unknown as NavigationContext;
   }
 
+  it('reports a merging chapter instead of claiming the book ended', () => {
+    const entry: ChapterEntry = {
+      ...makeEntry({ nextUrl: '' }),
+      sectionProgress: { loaded: 2, total: 5 },
+    };
+    const ctx = createContext({ chapters: [entry] });
+
+    expect(prepareChapterLoad(ctx, 'next', 'manual')).toBeNull();
+    expect(ctx.showToast).toHaveBeenCalledWith('本章正在加载后续内容，请稍候', 'info');
+  });
+
+  it('reports an incomplete chapter rather than the end of the book', () => {
+    const entry: ChapterEntry = {
+      ...makeEntry({ nextUrl: '' }),
+      sectionsIncomplete: true,
+    };
+    const ctx = createContext({ chapters: [entry] });
+
+    expect(prepareChapterLoad(ctx, 'next', 'manual')).toBeNull();
+    expect(ctx.showToast).toHaveBeenCalledWith('本章内容不完整，无法确认下一章', 'info');
+  });
+
+  it('still reports the end of the book when nothing is merging', () => {
+    const ctx = createContext({ chapter: { nextUrl: '' } });
+
+    expect(prepareChapterLoad(ctx, 'next', 'manual')).toBeNull();
+    expect(ctx.showToast).toHaveBeenCalledWith('已经是最后一章了', 'info');
+  });
+
   it('prepares next and previous loads and normalizes target URLs', () => {
     const entry = makeEntry({
       prevUrl: 'https://example.com/book/0.html#top',

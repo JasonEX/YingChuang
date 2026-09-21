@@ -1,6 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 
+import type { LaunchCallback, LaunchEvent } from '@/core/AutoEnableManager';
+
+/** A non-progressive launch: one chapter, already complete. */
+function completeEvent(chapter: unknown, rule?: unknown): LaunchEvent {
+  return {
+    stage: 'complete',
+    chapter,
+    rule,
+  } as unknown as LaunchEvent;
+}
+
 let configStore: {
   load: () => Promise<void>;
   flushSave: () => Promise<void>;
@@ -16,8 +27,17 @@ let configStore: {
 let readerStore: {
   activate: () => void;
   deactivate: () => void;
-  setChapter: (chapter: { url?: string }, rule?: unknown) => void;
-  updateChapter: (chapter: { url?: string }, rule?: unknown) => boolean;
+  setChapter: (chapter: { url?: string }, rule?: unknown) => string;
+  beginChapterSections: (entryId: string, progress: unknown, abort: () => void) => boolean;
+  cancelChapterSections: (entryId: string, reason: 'aborted' | 'failed') => void;
+  sectionDelivery: (id: string) => import('@/core/auto-enable/SectionMerger').SectionDelivery;
+  appendChapterSection: (entryId: string, delta: unknown) => Promise<boolean>;
+  completeChapterSections: (
+    entryId: string,
+    chapter: unknown,
+    rule?: unknown,
+    info?: { truncated?: boolean }
+  ) => Promise<boolean>;
   showToast: (message: string, type?: 'info' | 'error') => void;
   currentChapterIndex: number;
   chapters: Array<{ chapter: { url?: string } }>;
@@ -172,8 +192,25 @@ describe('bootstrap', () => {
       setChapter: vi.fn((chapter: { url?: string }) => {
         readerStore.chapters = [{ chapter: { url: chapter.url } }];
         readerStore.currentChapterIndex = 0;
+        return 'chapter-1';
       }),
-      updateChapter: vi.fn(() => true),
+      beginChapterSections: vi.fn(() => true),
+      cancelChapterSections: vi.fn(),
+      sectionDelivery: id => async update => {
+        if (update.stage === 'append')
+          await readerStore.appendChapterSection(id, {
+            ...update.delta,
+            loaded: update.progress.loaded,
+            total: update.progress.total,
+          });
+        else if (update.stage === 'complete')
+          await readerStore.completeChapterSections(id, update.chapter, update.rule, {
+            truncated: update.truncated,
+          });
+        else readerStore.cancelChapterSections(id, update.reason);
+      },
+      appendChapterSection: vi.fn(async () => true),
+      completeChapterSections: vi.fn(async () => true),
       showToast: vi.fn(),
       currentChapterIndex: 0,
       chapters: [],
@@ -495,9 +532,9 @@ describe('bootstrap', () => {
       execute: vi.fn(async () => {
         if (promptCb) {
           const res = (await promptCb()) as { accepted?: boolean };
-          if (res?.accepted && launchCb) launchCb(chapter);
+          if (res?.accepted && launchCb) launchCb(completeEvent(chapter));
         } else if (launchCb) {
-          launchCb(chapter);
+          launchCb(completeEvent(chapter));
         }
       }),
       manualEnable: vi.fn(async () => {}),
@@ -554,26 +591,31 @@ describe('bootstrap', () => {
       url: dom.window.location.href,
     };
     const merged = { ...first, content: '<p>第一页</p><p>第二页</p>' };
-    let launchCb:
-      | ((chapter: unknown, rule?: unknown, stage?: 'initial' | 'update' | 'complete') => void)
-      | null = null;
+    let launchCb: LaunchCallback | null = null;
+    const abort = vi.fn();
     const manager = {
       check: vi.fn(() => ({ shouldEnable: true, method: 'builtin-rule' })),
       setPromptCallback: vi.fn(),
-      setLaunchCallback: vi.fn(
-        (
-          callback: (
-            chapter: unknown,
-            rule?: unknown,
-            stage?: 'initial' | 'update' | 'complete'
-          ) => void
-        ) => {
-          launchCb = callback;
-        }
-      ),
+      setLaunchCallback: vi.fn((callback: LaunchCallback) => {
+        launchCb = callback;
+      }),
       execute: vi.fn(async () => {
-        launchCb?.(first, undefined, 'initial');
-        launchCb?.(merged, undefined, 'update');
+        const update = launchCb?.({
+          stage: 'initial',
+          chapter: first,
+          progress: { url: first.url, loaded: 1, total: 2 },
+          abort,
+        } as unknown as LaunchEvent);
+        await update?.({
+          stage: 'append',
+          delta: { content: '<p>第二页</p>', rawContent: '<p>第二页</p>' },
+          progress: { url: first.url, loaded: 2, total: 2 },
+        });
+        await update?.({
+          stage: 'complete',
+          chapter: merged as never,
+          truncated: false,
+        });
       }),
       manualEnable: vi.fn(async () => {}),
     };
@@ -584,8 +626,140 @@ describe('bootstrap', () => {
 
     expect(bootstrap.isActive()).toBe(true);
     expect(readerStore.setChapter).toHaveBeenCalledWith(first, undefined);
-    expect(readerStore.updateChapter).toHaveBeenCalledWith(merged, undefined);
+    expect(readerStore.beginChapterSections).toHaveBeenCalledWith(
+      'chapter-1',
+      { url: first.url, loaded: 1, total: 2 },
+      abort
+    );
+    expect(readerStore.appendChapterSection).toHaveBeenCalledWith('chapter-1', {
+      content: '<p>第二页</p>',
+      rawContent: '<p>第二页</p>',
+      loaded: 2,
+      total: 2,
+    });
+    expect(readerStore.completeChapterSections).toHaveBeenCalledWith(
+      'chapter-1',
+      merged,
+      undefined,
+      { truncated: false }
+    );
     expect(readerStore.activate).toHaveBeenCalledTimes(1);
+    expect(readerStore.cancelChapterSections).not.toHaveBeenCalled();
+    expect(document.querySelectorAll('#mnr-reader-root')).toHaveLength(1);
+  });
+
+  it('binds late launch updates to their original entry after reopening', async () => {
+    dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
+      url: 'https://example.com/chapter/1',
+      pretendToBeVisual: true,
+    });
+    vi.stubGlobal('window', dom.window);
+    vi.stubGlobal('document', dom.window.document);
+    vi.stubGlobal('sessionStorage', dom.window.sessionStorage);
+
+    const first = {
+      title: '第1章',
+      content: '<p>第一页</p>',
+      rawContent: '<p>第一页</p>',
+      url: dom.window.location.href,
+    };
+    const merged = { ...first, content: '<p>第一页</p><p>第二页</p>' };
+    let launchCb: LaunchCallback | null = null;
+    const abort = vi.fn();
+    const delivery: { update?: import('@/core/auto-enable/SectionMerger').SectionDelivery } = {};
+    const manager = {
+      check: vi.fn(() => ({ shouldEnable: true, method: 'builtin-rule' })),
+      setPromptCallback: vi.fn(),
+      setLaunchCallback: vi.fn((callback: LaunchCallback) => {
+        launchCb = callback;
+      }),
+      execute: vi.fn(async () => {
+        delivery.update =
+          launchCb?.({
+            stage: 'initial',
+            chapter: first,
+            progress: { url: first.url, loaded: 1, total: 2 },
+            abort,
+          } as unknown as LaunchEvent) || undefined;
+      }),
+      manualEnable: vi.fn(async () => {}),
+    };
+    mockGetAutoEnableManager.mockReturnValue(manager);
+
+    const bootstrap = await import('@/bootstrap');
+    await bootstrap.initialize();
+
+    bootstrap.closeReader();
+    vi.mocked(readerStore.setChapter).mockReturnValue('chapter-new');
+    const send = launchCb as unknown as LaunchCallback;
+    send({
+      stage: 'initial',
+      chapter: first,
+      progress: { url: first.url, loaded: 1 },
+      abort,
+    } as unknown as LaunchEvent);
+    vi.mocked(readerStore.appendChapterSection).mockClear();
+    await delivery.update?.({
+      stage: 'append',
+      delta: { content: 'OLD', rawContent: 'OLD' },
+      progress: { url: first.url, loaded: 2 },
+    });
+    await delivery.update?.({ stage: 'complete', chapter: merged as never, truncated: false });
+    await delivery.update?.({ stage: 'cancel', reason: 'aborted' });
+    expect(readerStore.appendChapterSection).toHaveBeenCalledWith('chapter-1', expect.anything());
+    expect(readerStore.completeChapterSections).toHaveBeenCalledWith(
+      'chapter-1',
+      merged,
+      undefined,
+      { truncated: false }
+    );
+    expect(readerStore.cancelChapterSections).toHaveBeenCalledWith('chapter-1', 'aborted');
+  });
+
+  it('drops progressive state when background merging fails after launch', async () => {
+    dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
+      url: 'https://example.com/chapter/1',
+      pretendToBeVisual: true,
+    });
+    vi.stubGlobal('window', dom.window);
+    vi.stubGlobal('document', dom.window.document);
+    vi.stubGlobal('sessionStorage', dom.window.sessionStorage);
+
+    const first = {
+      title: '第1章',
+      content: '<p>第一页</p>',
+      rawContent: '<p>第一页</p>',
+      url: dom.window.location.href,
+    };
+    let launchCb: LaunchCallback | null = null;
+    const manager = {
+      check: vi.fn(() => ({ shouldEnable: true, method: 'builtin-rule' })),
+      setPromptCallback: vi.fn(),
+      setLaunchCallback: vi.fn((callback: LaunchCallback) => {
+        launchCb = callback;
+      }),
+      execute: vi.fn(async () => {
+        const update = launchCb?.({
+          stage: 'initial',
+          chapter: first,
+          progress: { url: first.url, loaded: 1 },
+          abort: vi.fn(),
+        } as unknown as LaunchEvent);
+        // A site hook or the parser threw while fetching a later section page.
+        await update?.({ stage: 'cancel', reason: 'failed' });
+      }),
+      manualEnable: vi.fn(async () => {}),
+    };
+    mockGetAutoEnableManager.mockReturnValue(manager);
+
+    const bootstrap = await import('@/bootstrap');
+    await bootstrap.initialize();
+
+    // The reader keeps the first page, but the chapter must stop reporting itself as merging.
+    expect(bootstrap.isActive()).toBe(true);
+    expect(readerStore.setChapter).toHaveBeenCalledWith(first, undefined);
+    expect(readerStore.cancelChapterSections).toHaveBeenCalledWith('chapter-1', 'failed');
+    expect(readerStore.completeChapterSections).not.toHaveBeenCalled();
     expect(document.querySelectorAll('#mnr-reader-root')).toHaveLength(1);
   });
 
@@ -628,7 +802,7 @@ describe('bootstrap', () => {
         launchCb = cb;
       }),
       execute: vi.fn(async () => {
-        launchCb?.(chapter);
+        launchCb?.(completeEvent(chapter));
       }),
       manualEnable: vi.fn(async () => {}),
     };
@@ -687,7 +861,7 @@ describe('bootstrap', () => {
         launchCb = cb;
       }),
       execute: vi.fn(async () => {
-        launchCb?.(chapter);
+        launchCb?.(completeEvent(chapter));
       }),
       manualEnable: vi.fn(async () => {}),
     });
@@ -744,7 +918,7 @@ describe('bootstrap', () => {
         launchCb = cb;
       }),
       execute: vi.fn(async () => {
-        launchCb?.(chapter, rule);
+        launchCb?.(completeEvent(chapter, rule));
       }),
       manualEnable: vi.fn(async () => {}),
     };

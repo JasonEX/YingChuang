@@ -16,13 +16,19 @@ import { createGmStorageMock, stubGmStorage } from '../../../testUtils/gmStorage
 import { createDom } from '../../../testUtils/dom';
 import { setupPinia } from '../../../testUtils/pinia';
 
-const { mockFetchAndParseUrl, mockGetParser, mockLoadTocEntriesPaged, mockParseWithSectionMerge } =
-  vi.hoisted(() => ({
-    mockFetchAndParseUrl: vi.fn(),
-    mockGetParser: vi.fn(),
-    mockLoadTocEntriesPaged: vi.fn(),
-    mockParseWithSectionMerge: vi.fn(),
-  }));
+const {
+  mockFetchAndParseUrl,
+  mockGetParser,
+  mockLoadTocEntriesPaged,
+  mockParseWithSectionMerge,
+  mockStartProgressiveSectionMerge,
+} = vi.hoisted(() => ({
+  mockFetchAndParseUrl: vi.fn(),
+  mockGetParser: vi.fn(),
+  mockLoadTocEntriesPaged: vi.fn(),
+  mockParseWithSectionMerge: vi.fn(),
+  mockStartProgressiveSectionMerge: vi.fn(),
+}));
 
 vi.mock('@/core/parser', () => ({
   getParser: mockGetParser,
@@ -34,6 +40,7 @@ vi.mock('@/core/utils/network', () => ({
 
 vi.mock('@/ui/stores/reader/section', () => ({
   parseWithSectionMerge: mockParseWithSectionMerge,
+  startProgressiveSectionMerge: mockStartProgressiveSectionMerge,
 }));
 
 vi.mock('@/ui/stores/reader/toc', async importOriginal => {
@@ -58,11 +65,107 @@ describe('ReaderStore - workflows', () => {
 
     vi.clearAllMocks();
     mockGetParser.mockReturnValue({} as unknown);
+    // In-reader navigation enters through the progressive function. By default these chapters
+    // have no extra sections, so it resolves like a plain parse with no merge handle.
+    mockStartProgressiveSectionMerge.mockImplementation(
+      async (parser: unknown, doc: unknown, url: unknown) => ({
+        chapter: await mockParseWithSectionMerge(parser, doc, url),
+        merge: null,
+      })
+    );
   });
 
-  it('updates a progressively merged chapter without resetting its reader entry', () => {
+  it('shows the first section at once and keeps merging past further navigation', async () => {
     const store = useReaderStore();
     store.setChapter({
+      title: '第1章',
+      content: '<p>c1</p>',
+      rawContent: '<p>c1</p>',
+      url: 'https://example.com/book/1/1.html',
+      indexUrl: 'https://example.com/book/1/index.html',
+      nextUrl: 'https://example.com/book/1/2.html',
+      confidence: 1,
+      method: 'rule',
+    });
+
+    const doc = new DOMParser().parseFromString('<html><body><p>x</p></body></html>', 'text/html');
+    mockFetchAndParseUrl.mockReturnValue({
+      promise: Promise.resolve({
+        doc,
+        status: 200,
+        finalUrl: 'https://example.com/book/1/2.html',
+        error: null,
+      }),
+      abort: vi.fn(),
+    });
+
+    const abort = vi.fn();
+    const commit = vi.fn();
+    mockStartProgressiveSectionMerge.mockImplementationOnce(async () => ({
+      chapter: {
+        title: '第2章',
+        content: '<p>第一页</p>',
+        rawContent: '<p>第一页</p>',
+        url: 'https://example.com/book/1/2.html',
+        indexUrl: 'https://example.com/book/1/index.html',
+        confidence: 1,
+        method: 'rule',
+      },
+      merge: { progress: { loaded: 1, total: 3 }, abort, commit, reject: vi.fn() },
+    }));
+
+    expect(await store.loadNextChapter('manual')).toBe(true);
+
+    const entry = store.chapters.at(-1);
+    expect(entry?.chapter.content).toBe('<p>第一页</p>');
+    expect(entry?.sectionProgress).toEqual({ loaded: 1, total: 3 });
+    expect(commit).toHaveBeenCalledWith(entry?.id);
+    expect(store.isTailSectionMerging).toBe(true);
+    // The first page is on screen, so the load itself is over while pages keep arriving.
+    expect(store.isLoadingNext).toBe(false);
+
+    // Reading on must not cut the background merge short.
+    entry!.chapter.nextUrl = 'https://example.com/book/1/3.html';
+    mockParseWithSectionMerge.mockResolvedValueOnce({
+      title: '第3章',
+      content: '<p>c3</p>',
+      rawContent: '<p>c3</p>',
+      url: 'https://example.com/book/1/3.html',
+      indexUrl: 'https://example.com/book/1/index.html',
+      confidence: 1,
+      method: 'rule',
+    });
+    expect(await store.loadNextChapter('manual')).toBe(true);
+    expect(abort).not.toHaveBeenCalled();
+    expect(store.chapters.find(item => item.id === entry?.id)?.sectionProgress).toEqual({
+      loaded: 1,
+      total: 3,
+    });
+    // The guard follows the tail: a merge still running further back says nothing about
+    // whether the book has ended, and must not hide the end-of-book marker.
+    expect(store.isTailSectionMerging).toBe(false);
+
+    // A table-of-contents jump rebuilds the list, and does cancel it.
+    store.cachedContents.set('https://example.com/book/1/9.html', {
+      chapter: {
+        title: '第9章',
+        content: '<p>c9</p>',
+        rawContent: '<p>c9</p>',
+        url: 'https://example.com/book/1/9.html',
+        indexUrl: 'https://example.com/book/1/index.html',
+        confidence: 1,
+        method: 'rule',
+      },
+      cachedAt: 1,
+    });
+    expect(await store.rebuildChaptersAround('https://example.com/book/1/9.html')).toBe(true);
+    expect(abort).toHaveBeenCalledTimes(1);
+    expect(store.isTailSectionMerging).toBe(false);
+  });
+
+  it('grows a progressively merged chapter without resetting its reader entry', async () => {
+    const store = useReaderStore();
+    const entryId = store.setChapter({
       title: '第1章',
       content: '<p>第一页</p>',
       rawContent: '<p>第一页</p>',
@@ -70,21 +173,38 @@ describe('ReaderStore - workflows', () => {
       confidence: 1,
       method: 'rule',
     });
-    const entryId = store.chapters[0]?.id;
 
-    const updated = store.updateChapter({
+    store.beginChapterSections(entryId, { loaded: 1, total: 2 }, () => {});
+
+    // A chapter that is still growing must not be reachable as a complete cache entry.
+    expect(store.cachedContents.has('https://example.com/book/1/1.html')).toBe(false);
+    expect(store.isTailSectionMerging).toBe(true);
+
+    await store.appendChapterSection(entryId, {
+      content: '<p>第二页</p>',
+      rawContent: '<p>第二页</p>',
+      loaded: 2,
+      total: 2,
+    });
+
+    expect(store.chapters[0]?.id).toBe(entryId);
+    expect(store.chapters[0]?.chapter.content).toContain('第二页');
+    expect(store.chapters[0]?.sectionProgress).toEqual({ loaded: 2, total: 2 });
+
+    await store.completeChapterSections(entryId, {
       title: '第1章',
-      content: '<p>第一页</p><p>第二页</p>',
-      rawContent: '<p>第一页</p><p>第二页</p>',
+      content: '<p>第一页</p><p></p><p>第二页</p>',
+      rawContent: '<p>第一页</p><p></p><p>第二页</p>',
       url: 'https://example.com/book/1/1.html#section',
       nextUrl: 'https://example.com/book/1/2.html#top',
       confidence: 1,
       method: 'rule',
     });
 
-    expect(updated).toBe(true);
     expect(store.chapters).toHaveLength(1);
     expect(store.chapters[0]?.id).toBe(entryId);
+    expect(store.chapters[0]?.sectionProgress).toBeUndefined();
+    expect(store.isTailSectionMerging).toBe(false);
     expect(store.chapters[0]?.chapter.content).toContain('第二页');
     expect(store.chapters[0]?.chapter.url).toBe('https://example.com/book/1/1.html');
     expect(store.chapters[0]?.chapter.nextUrl).toBe('https://example.com/book/1/2.html');
@@ -819,6 +939,154 @@ describe('ReaderStore - workflows', () => {
     expect(document.title).toBe('第1章(新)');
 
     store.clearError();
+  });
+
+  it('stops a running section merge before a reload replaces the chapter', async () => {
+    const store = useReaderStore();
+    const entryId = store.setChapter({
+      title: '第1章',
+      content: '<p>第一页</p>',
+      rawContent: '<p>第一页</p>',
+      url: 'https://example.com/book/1/1.html',
+      indexUrl: 'https://example.com/book/1/index.html',
+      confidence: 1,
+      method: 'rule',
+    });
+    const abort = vi.fn();
+    store.beginChapterSections(entryId, { loaded: 1, total: 4 }, abort);
+
+    const doc = new DOMParser().parseFromString('<html><body>new</body></html>', 'text/html');
+    mockFetchAndParseUrl.mockReturnValue({
+      promise: Promise.resolve({
+        doc,
+        status: 200,
+        finalUrl: 'https://example.com/book/1/1.html',
+        error: null,
+      }),
+      abort: vi.fn(),
+    });
+    mockParseWithSectionMerge.mockResolvedValueOnce({
+      title: '第1章',
+      content: '<p>重新加载</p>',
+      rawContent: '<p>重新加载</p>',
+      url: 'https://example.com/book/1/1.html',
+      indexUrl: 'https://example.com/book/1/index.html',
+      confidence: 1,
+      method: 'rule',
+    });
+
+    await store.reloadCurrentChapter();
+
+    expect(abort).toHaveBeenCalledTimes(1);
+    expect(store.chapters[0]?.sectionProgress).toBeUndefined();
+    expect(store.chapters[0]?.sectionsIncomplete).toBeUndefined();
+    expect(store.chapters[0]?.chapter.content).toBe('<p>重新加载</p>');
+
+    // The abandoned merge must not append its remaining pages onto the replacement.
+    await expect(
+      store.appendChapterSection(entryId, {
+        content: '<p>陈旧分页</p>',
+        rawContent: '<p>陈旧分页</p>',
+        loaded: 2,
+        total: 4,
+      })
+    ).resolves.toBe(false);
+    expect(store.chapters[0]?.chapter.content).not.toContain('陈旧分页');
+
+    store.clearError();
+  });
+
+  it('keeps a half-merged chapter marked incomplete when a reload never lands', async () => {
+    const store = useReaderStore();
+    const entryId = store.setChapter({
+      title: '第1章',
+      content: '<p>第一页</p>',
+      rawContent: '<p>第一页</p>',
+      url: 'https://example.com/book/1/1.html',
+      indexUrl: 'https://example.com/book/1/index.html',
+      confidence: 1,
+      method: 'rule',
+    });
+    store.beginChapterSections(entryId, { loaded: 1, total: 4 }, vi.fn());
+
+    mockFetchAndParseUrl.mockReturnValue({
+      promise: Promise.resolve({ doc: null, status: 500, finalUrl: null, error: 'http' }),
+      abort: vi.fn(),
+    });
+
+    await store.reloadCurrentChapter();
+
+    // Partial content is still on screen, so the book must not look finished.
+    expect(store.chapters[0]?.chapter.content).toBe('<p>第一页</p>');
+    expect(store.chapters[0]?.sectionProgress).toBeUndefined();
+    expect(store.chapters[0]?.sectionsIncomplete).toBe(true);
+    expect(store.hasNext).toBe(false);
+    expect(store.isTailChapterIncomplete).toBe(true);
+
+    store.clearError();
+  });
+
+  it('waits for a whole previous chapter instead of streaming it above the reader', async () => {
+    const store = useReaderStore();
+    store.setChapter({
+      title: '第2章',
+      content: '<p>c2</p>',
+      rawContent: '<p>c2</p>',
+      url: 'https://example.com/book/1/2.html',
+      indexUrl: 'https://example.com/book/1/index.html',
+      prevUrl: 'https://example.com/book/1/1.html',
+      confidence: 1,
+      method: 'rule',
+    });
+
+    const doc = new DOMParser().parseFromString('<html><body><p>x</p></body></html>', 'text/html');
+    mockFetchAndParseUrl.mockReturnValue({
+      promise: Promise.resolve({
+        doc,
+        status: 200,
+        finalUrl: 'https://example.com/book/1/1.html',
+        error: null,
+      }),
+      abort: vi.fn(),
+    });
+    // Had the prev load streamed, it would have received this first section, which names no
+    // next chapter and is rejected as a table of contents.
+    mockStartProgressiveSectionMerge.mockResolvedValue({
+      chapter: {
+        title: '第1章',
+        content: '<p>第一页</p>',
+        rawContent: '<p>第一页</p>',
+        url: 'https://example.com/book/1/1.html',
+        indexUrl: 'https://example.com/book/1/index.html',
+        prevUrl: 'https://example.com/book/1/0.html',
+        confidence: 1,
+        method: 'rule',
+      },
+      merge: {
+        progress: { loaded: 1, total: 2 },
+        abort: vi.fn(),
+        commit: vi.fn(),
+        reject: vi.fn(),
+      },
+    });
+    // Only the merged chapter names a next URL.
+    mockParseWithSectionMerge.mockResolvedValueOnce({
+      title: '第1章',
+      content: '<p>第一页</p><p>第二页</p>',
+      rawContent: '<p>第一页</p><p>第二页</p>',
+      url: 'https://example.com/book/1/1.html',
+      indexUrl: 'https://example.com/book/1/index.html',
+      prevUrl: 'https://example.com/book/1/0.html',
+      nextUrl: 'https://example.com/book/1/2.html',
+      confidence: 1,
+      method: 'rule',
+    });
+
+    expect(await store.loadPrevChapter('manual')).toBe(true);
+
+    expect(mockStartProgressiveSectionMerge).not.toHaveBeenCalled();
+    expect(store.chapters[0]?.chapter.content).toContain('第二页');
+    expect(store.chapters[0]?.sectionProgress).toBeUndefined();
   });
 
   it('loadNextChapter falls back to fetch when iframe parsing returns empty', async () => {

@@ -91,7 +91,9 @@ describe('Goboo section merge', () => {
     const result = await merger.merge(makeDoc(pages.get(page1Url)!, page1Url), page1Url, {
       fetcher: async url => makeDoc(pages.get(url)!, url),
       maxPages: 10,
-      onFirstPage: chapter => firstPages.push(chapter),
+      onFirstPage: chapter => {
+        firstPages.push(chapter);
+      },
     });
 
     expect(firstPages).toHaveLength(1);

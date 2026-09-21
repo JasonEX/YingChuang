@@ -1,3 +1,4 @@
+import type { SectionDelivery } from '@/core/auto-enable/SectionMerger';
 /**
  * Bootstrap - Application entry point
  *
@@ -8,7 +9,11 @@
  * 4. Mount UI when needed
  */
 
-import { type AutoEnableDecision, getAutoEnableManager } from '@/core/AutoEnableManager';
+import {
+  type AutoEnableDecision,
+  getAutoEnableManager,
+  type LaunchEvent,
+} from '@/core/AutoEnableManager';
 import { type BootstrapDebugSnapshot, copyDiagnosticInfo } from '@/ui/debug/diagnostics';
 import { BUILD_DATE, VERSION } from '@/version';
 import {
@@ -28,9 +33,7 @@ import { getRuleManager } from '@/core/rules/RuleManager';
 import { getRuleStorage } from '@/core/rules/RuleStorage';
 import { getSiteProtection } from '@/core/protection';
 import { normalizeUrlForFetch } from '@/core/utils/network';
-import type { ParsedChapter } from '@/core/parser';
 import { ReaderView } from '@/ui/components/reader';
-import type { SiteRule } from '@/core/rules/types';
 import { useReaderStore } from '@/ui/stores/reader';
 
 const EXIT_NAVIGATION_KEY = 'mnr_exit_navigation';
@@ -260,26 +263,19 @@ async function showPrompt(): Promise<{
 }
 
 /**
- * Launch the reader with parsed content
+ * Launch the reader, then keep feeding it the chapter's remaining section pages.
  */
-function launchReader(
-  chapter: ParsedChapter,
-  rule?: SiteRule,
-  stage: 'initial' | 'update' | 'complete' = 'complete'
-): void {
+function launchReader(event: LaunchEvent): SectionDelivery | void {
   if (!pinia) {
     console.error('[MNR] Pinia not initialized');
     return;
   }
 
   const readerStore = useReaderStore(pinia);
-  if (stage === 'update') {
-    if (appState.isActive) {
-      readerStore.updateChapter(chapter, rule);
-    }
-    return;
-  }
+
   if (appState.isActive) return;
+
+  const { chapter, rule } = event;
 
   hideReaderEntry();
 
@@ -295,15 +291,21 @@ function launchReader(
 
   // Update reader store
   readerStore.activate();
-  readerStore.setChapter(chapter, rule);
-  if (stage === 'initial') {
-    readerStore.showToast('正在加载本章剩余内容…', 'info');
+  const entryId = readerStore.setChapter(chapter, rule);
+  if (event.stage === 'initial') {
+    // Register after setChapter, which tears down the previous session's merges.
+    readerStore.beginChapterSections(entryId, event.progress, event.abort);
   }
 
   appState.isActive = true;
 
   // Mount reader UI
   mountReaderUI();
+
+  if (event.stage === 'initial') {
+    // The store owns cancellation and display updates. Late writes can only address this entry.
+    return readerStore.sectionDelivery(entryId);
+  }
 }
 
 /**

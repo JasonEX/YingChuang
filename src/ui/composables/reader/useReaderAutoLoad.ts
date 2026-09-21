@@ -91,6 +91,13 @@ export function useReaderAutoLoad(options: UseReaderAutoLoadOptions) {
     entry: ChapterEntry,
     mainEl: HTMLElement
   ): 'pending' | 'short' | 'sufficient' {
+    // A chapter still merging sections has no final height yet. Measuring it would cache a
+    // "short" verdict that nothing later invalidates, and that verdict keeps preloading.
+    if (entry.sectionProgress) {
+      chapterScreenCache.delete(entry.id);
+      return 'pending';
+    }
+
     const viewportHeight = mainEl.clientHeight;
     const chapterEl = chapterRefs.get(entry.chapter.url);
     if (!chapterEl || viewportHeight <= 0) return 'pending';
@@ -264,6 +271,7 @@ export function useReaderAutoLoad(options: UseReaderAutoLoadOptions) {
     recordBufferState(unreadBufferState);
     const decision = decideAutoLoadNext(reason, {
       autoLoadInFlight,
+      currentChapterMerging: !!readerStore.chapters[getCurrentIndex()]?.sectionProgress,
       enabled: configStore.behavior.preloadNext,
       failureCooldownUntil,
       graceUntil,
@@ -313,6 +321,15 @@ export function useReaderAutoLoad(options: UseReaderAutoLoadOptions) {
     () => readerStore.chapters.map(entry => entry.id),
     activeIds => {
       pruneChapterScreenCache(activeIds);
+      scheduleAutoLoadNext('state');
+    },
+    { flush: 'post' }
+  );
+
+  // Growth itself cannot change eligibility, so one number covering start and finish is enough.
+  watch(
+    () => readerStore.chapters.filter(entry => entry.sectionProgress).length,
+    () => {
       scheduleAutoLoadNext('state');
     },
     { flush: 'post' }

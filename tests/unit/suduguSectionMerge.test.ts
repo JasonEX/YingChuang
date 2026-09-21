@@ -98,8 +98,12 @@ describe('sudugu section merge', () => {
 
     let launched: import('@/core/parser').ParsedChapter | null = null;
     const manager = new AutoEnableManager({ enableProtection: false });
-    manager.setLaunchCallback(chapter => {
-      launched = chapter;
+    manager.setLaunchCallback(event => {
+      // Progressive merging also emits the partial first page; only the merged chapter counts.
+      if (event.stage === 'complete') launched = event.chapter;
+      return update => {
+        if (update.stage === 'complete') launched = update.chapter;
+      };
     });
 
     await manager.manualEnable(dom.window.document);

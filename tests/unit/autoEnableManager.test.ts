@@ -64,7 +64,8 @@ vi.mock('@/core/protection', () => ({
   isCloudflareChallenge: vi.fn(() => false),
 }));
 
-vi.mock('@/core/auto-enable/SectionMerger', () => ({
+vi.mock('@/core/auto-enable/SectionMerger', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/core/auto-enable/SectionMerger')>()),
   createSectionMerger: () => mockedSectionMerger,
 }));
 
@@ -359,7 +360,7 @@ describe('AutoEnableManager', () => {
       version: 1,
       match: { pattern: 'example' },
       content: { selector: '#content' },
-      advanced: { checkSection: true, progressiveSectionMerge: true },
+      advanced: { checkSection: true },
       meta: { source: 'builtin' as const },
     };
     const firstPage = {
@@ -381,22 +382,48 @@ describe('AutoEnableManager', () => {
       async (
         _doc: Document,
         _url: string,
-        options: { onFirstPage?: (chapter: typeof firstPage) => void }
+        options: {
+          onFirstPage?: (chapter: typeof firstPage, progress: unknown) => void;
+          onMergeEnd?: (end: unknown) => void;
+          onSectionPage?: (delta: unknown, progress: unknown) => void;
+        }
       ) => {
-        options.onFirstPage?.(firstPage);
+        await options.onFirstPage?.(firstPage, { url: firstPage.url, loaded: 1 });
+        await options.onSectionPage?.(
+          { content: '<p>second</p>', rawContent: '<p>second</p>' },
+          { url: firstPage.url, loaded: 2 }
+        );
+        options.onMergeEnd?.({ loaded: 2, truncated: false });
         return merged;
       }
     );
 
     const { AutoEnableManager } = await import('@/core/AutoEnableManager');
     const manager = new AutoEnableManager({ enableProtection: false });
-    const launchCallback = vi.fn();
+    const update = vi.fn();
+    const launchCallback = vi.fn(() => update);
     manager.setLaunchCallback(launchCallback);
 
     await manager.execute(createDoc('https://example.com/chapter/1'));
 
-    expect(launchCallback).toHaveBeenNthCalledWith(1, firstPage, rule, 'initial');
-    expect(launchCallback).toHaveBeenNthCalledWith(2, merged, rule, 'update');
+    expect(launchCallback).toHaveBeenNthCalledWith(1, {
+      stage: 'initial',
+      chapter: firstPage,
+      rule,
+      progress: { url: firstPage.url, loaded: 1 },
+      abort: expect.any(Function),
+    });
+    expect(update).toHaveBeenNthCalledWith(1, {
+      stage: 'append',
+      delta: { content: '<p>second</p>', rawContent: '<p>second</p>' },
+      progress: { url: firstPage.url, loaded: 2 },
+    });
+    expect(update).toHaveBeenNthCalledWith(2, {
+      stage: 'complete',
+      chapter: merged,
+      rule,
+      truncated: false,
+    });
   });
 
   it('execute prompts, remembers site preference, then launches for medium-confidence detection', async () => {
@@ -591,11 +618,11 @@ describe('AutoEnableManager', () => {
     const doc = createDoc('https://example.com/chapter/1');
     await manager.manualEnable(doc);
 
-    expect(launchCallback).toHaveBeenCalledWith(
-      expect.objectContaining({ rule }),
+    expect(launchCallback).toHaveBeenCalledWith({
+      stage: 'complete',
+      chapter: expect.objectContaining({ rule }),
       rule,
-      'complete'
-    );
+    });
   });
 
   it('shares an automatic parse with repeated manual entries', async () => {
@@ -641,14 +668,24 @@ describe('AutoEnableManager', () => {
       method: 'rule' as const,
     };
     mockedSectionMerger.merge.mockImplementationOnce(async (_doc, _url, options) => {
-      options.onFirstPage(firstPage);
+      options.onFirstPage(firstPage, { url: firstPage.url, loaded: 1 });
       throw new Error('second page failed');
     });
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    const launch = vi.fn();
+    const update = vi.fn();
+    const launch = vi.fn(() => update);
     manager.setLaunchCallback(launch);
     await manager.manualEnable(doc);
-    expect(launch).toHaveBeenCalledExactlyOnceWith(firstPage, undefined, 'initial');
+    expect(launch).toHaveBeenNthCalledWith(1, {
+      stage: 'initial',
+      chapter: firstPage,
+      rule: undefined,
+      progress: { url: firstPage.url, loaded: 1 },
+      abort: expect.any(Function),
+    });
+    // Without this the chapter would stay marked as merging for the rest of the session.
+    expect(update).toHaveBeenCalledWith({ stage: 'cancel', reason: 'failed' });
+    expect(launch).toHaveBeenCalledTimes(1);
     expect(mockedProtection.deactivate).not.toHaveBeenCalled();
     expect(mockedRuleStorage.setSitePreference).not.toHaveBeenCalled();
   });

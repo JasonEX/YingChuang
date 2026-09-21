@@ -1,13 +1,13 @@
 /** Reader scroll handling: chapter tracking, local progress and control visibility. */
 
 import { type ComputedRef, onScopeDispose, type Ref } from 'vue';
-import { saveReadingPosition } from '@/ui/stores/reader/readingPosition';
+import { getChapterPercent } from './useReaderPosition';
+import { isChapterComplete } from '@/ui/stores/reader/types';
 import type { ScheduleAutoLoadNext } from './useReaderAutoLoad';
 import type { useReaderStore } from '@/ui/stores/reader';
 
 const SCROLL_THROTTLE_MS = 16;
 const SCROLL_SETTLE_CHECK_MS = 180;
-const POSITION_SAVE_INTERVAL_MS = 500;
 
 export interface UseReaderScrollOptions {
   mainRef: Ref<HTMLElement | null>;
@@ -17,6 +17,7 @@ export interface UseReaderScrollOptions {
   showControls: Ref<boolean>;
   isNavigating: Ref<boolean>;
   scheduleAutoLoadNext: ScheduleAutoLoadNext;
+  savePosition: (url: string, percent: number) => void;
 }
 
 export function useReaderScroll(options: UseReaderScrollOptions) {
@@ -28,12 +29,12 @@ export function useReaderScroll(options: UseReaderScrollOptions) {
     showControls,
     isNavigating,
     scheduleAutoLoadNext,
+    savePosition,
   } = options;
 
   let lastScrollCall = 0;
   let pendingScrollTimer: ReturnType<typeof setTimeout> | null = null;
   let lastScrollTop = 0;
-  let lastPositionSaveAt = 0;
   let pendingScrollSettleTimer: ReturnType<typeof setTimeout> | null = null;
 
   onScopeDispose(() => {
@@ -71,23 +72,6 @@ export function useReaderScroll(options: UseReaderScrollOptions) {
     return nearest ? { index: nearest.index, element: nearest.element } : null;
   }
 
-  function getChapterPercent(mainEl: HTMLElement, chapterEl: HTMLElement): number {
-    const mainRect = mainEl.getBoundingClientRect();
-    const chapterRect = chapterEl.getBoundingClientRect();
-    const chapterTop = mainEl.scrollTop + chapterRect.top - mainRect.top;
-    const relativeTop = Math.max(0, mainEl.scrollTop - chapterTop);
-    if (chapterEl.offsetHeight <= mainEl.clientHeight) return 100;
-    const scrollableHeight = Math.max(1, chapterEl.offsetHeight - mainEl.clientHeight * 0.5);
-    return Math.max(0, Math.min(100, (relativeTop / scrollableHeight) * 100));
-  }
-
-  function saveCurrentPosition(url: string, percent: number): void {
-    const now = Date.now();
-    if (now - lastPositionSaveAt < POSITION_SAVE_INTERVAL_MS) return;
-    lastPositionSaveAt = now;
-    saveReadingPosition(url, percent);
-  }
-
   function handleScrollCore() {
     const mainEl = mainRef.value;
     if (!mainEl) return;
@@ -99,7 +83,11 @@ export function useReaderScroll(options: UseReaderScrollOptions) {
       const currentElement = currentUrl ? chapterRefs.get(currentUrl) : undefined;
       const fallbackHeight = mainEl.scrollHeight - mainEl.clientHeight;
       const percent = currentElement
-        ? getChapterPercent(mainEl, currentElement)
+        ? getChapterPercent(
+            mainEl,
+            currentElement,
+            isChapterComplete(readerStore.chapters[currentIndex])
+          )
         : fallbackHeight > 0
           ? (currentScrollTop / fallbackHeight) * 100
           : 100;
@@ -118,11 +106,13 @@ export function useReaderScroll(options: UseReaderScrollOptions) {
 
     const current = findCurrentChapter(mainEl);
     if (current) {
-      const percent = getChapterPercent(mainEl, current.element);
+      const complete = isChapterComplete(readerStore.chapters[current.index]);
+      const percent = getChapterPercent(mainEl, current.element, complete);
       readerStore.setCurrentChapter(current.index);
       readerStore.updateScroll(percent);
       const url = readerStore.chapters[current.index]?.chapter.url;
-      if (url) saveCurrentPosition(url, percent);
+      // A merging chapter's percent is measured against a height that is still growing.
+      if (url && complete) savePosition(url, percent);
     } else {
       const scrollableHeight = mainEl.scrollHeight - mainEl.clientHeight;
       readerStore.updateScroll(

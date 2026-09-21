@@ -60,6 +60,7 @@ describe('useReaderScroll', () => {
       showControls: ref(overrides.showControls ?? true),
       isNavigating: ref(overrides.isNavigating ?? false),
       scheduleAutoLoadNext: vi.fn(),
+      savePosition: saveReadingPosition,
     };
   }
 
@@ -115,6 +116,28 @@ describe('useReaderScroll', () => {
 
     useReaderScroll(options).handleScroll();
     expect(options.readerStore.updateScroll).toHaveBeenCalledWith(100);
+  });
+
+  it('does not treat a still-merging chapter as fully read, and saves no position', () => {
+    const main = createMain(0, 700, 700);
+    const entry: ChapterEntry = {
+      ...makeEntry('https://example.com/chapter/1'),
+      sectionProgress: { loaded: 2, total: 6 },
+    };
+    const article = document.createElement('article');
+    Object.defineProperty(article, 'offsetHeight', { value: 500 });
+    article.getBoundingClientRect = vi.fn().mockReturnValue({ top: 0, bottom: 500 });
+    const options = createOptions({
+      mainRef: main,
+      chapters: [entry],
+      chapterRefs: new Map([[entry.chapter.url, article]]),
+    });
+
+    useReaderScroll(options).handleScroll();
+
+    // The height is still growing, so 100% would persist a position the reader never reached.
+    expect(options.readerStore.updateScroll).toHaveBeenCalledWith(0);
+    expect(saveReadingPosition).not.toHaveBeenCalled();
   });
 
   it('does not change chapters or schedule loading during programmatic navigation', () => {

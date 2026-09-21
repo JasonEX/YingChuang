@@ -159,7 +159,6 @@ describe('xszj rule', () => {
     expect(xszjRule.version).toBe(1);
     expect(xszjRule.advanced?.checkSection).toBe(true);
     expect(xszjRule.advanced?.sectionMaxPages).toBe(99);
-    expect(xszjRule.advanced?.progressiveSectionMerge).toBe(true);
 
     const pattern = new RegExp(xszjRule.match.pattern, 'i');
     expect(pattern.test(page1Url)).toBe(true);
@@ -222,7 +221,9 @@ describe('xszj rule', () => {
     const merger = createSectionMerger(parser);
     const result = await merger.merge(makeDoc(page1Html, page1Url), page1Url, {
       fetcher,
-      onFirstPage: chapter => firstPages.push(chapter),
+      onFirstPage: chapter => {
+        firstPages.push(chapter);
+      },
     });
 
     expect(firstPages).toHaveLength(1);
@@ -344,8 +345,12 @@ describe('xszj section merge from a middle page', () => {
 
     let launched: import('@/core/parser').ParsedChapter | null = null;
     const manager = new AutoEnableManager({ enableProtection: false });
-    manager.setLaunchCallback(chapter => {
-      launched = chapter;
+    manager.setLaunchCallback(event => {
+      // Progressive merging also emits the partial first page; only the merged chapter counts.
+      if (event.stage === 'complete') launched = event.chapter;
+      return update => {
+        if (update.stage === 'complete') launched = update.chapter;
+      };
     });
 
     try {

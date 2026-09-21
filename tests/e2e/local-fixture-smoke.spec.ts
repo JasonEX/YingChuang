@@ -1289,18 +1289,47 @@ test('shows the first Goboo section before rate-limited background merging compl
   await addYingChuangUserscript(context);
   const logs = createConsoleCollector(page);
 
+  /** One atomic read of the merging chapter, so timing cannot split the assertions. */
+  const readMergeState = () =>
+    page.locator('#mnr-reader-root').evaluate(host => {
+      const root = host.shadowRoot;
+      return {
+        text: root?.querySelector('.mnr-reader-content')?.textContent?.replace(/\s+/g, '') ?? '',
+        progress: root?.querySelectorAll('.mnr-section-progress').length ?? 0,
+        end: root?.querySelectorAll('.mnr-chapter-end').length ?? 0,
+      };
+    });
+
   await page.goto(firstUrl, { waitUntil: 'domcontentloaded' });
   await expect(page.locator('#mnr-reader-root')).toHaveCount(1, { timeout: 1_000 });
-  const initialText = await page
-    .locator('#mnr-reader-root')
-    .evaluate(host =>
-      host.shadowRoot?.querySelector('.mnr-reader-content')?.textContent?.replace(/\s+/g, '')
-    );
+  const initial = await readMergeState();
 
-  expect(initialText).toContain('第1页可见正文');
-  expect(initialText).toContain('第1页编码后续正文');
-  expect(initialText).not.toContain('第2页可见正文');
+  expect(initial.text).toContain('第1页可见正文');
+  expect(initial.text).toContain('第1页编码后续正文');
+  expect(initial.text).not.toContain('第2页可见正文');
   expect(requestTimes.has(secondUrl)).toBe(false);
+  // While pages are still arriving the reader says so, and never claims the book ended.
+  expect(initial.progress).toBe(1);
+  expect(initial.end).toBe(0);
+
+  // Pages land one at a time: page 2 is readable a full rate-limit window before page 3.
+  const midMerge: Array<Awaited<ReturnType<typeof readMergeState>>> = [];
+  await expect
+    .poll(
+      async () => {
+        const state = await readMergeState();
+        if (midMerge.length === 0 && state.text.includes('第2页编码后续正文')) {
+          midMerge.push(state);
+        }
+        return state.text;
+      },
+      { timeout: 6_000 }
+    )
+    .toContain('第2页编码后续正文');
+
+  expect(midMerge[0]?.text).not.toContain('第3页编码后续正文');
+  expect(midMerge[0]?.progress).toBe(1);
+  expect(midMerge[0]?.end).toBe(0);
 
   await expect
     .poll(
@@ -1315,6 +1344,10 @@ test('shows the first Goboo section before rate-limited background merging compl
     .toContain('第3页编码后续正文');
 
   expect(requestTimes.get(thirdUrl)! - requestTimes.get(secondUrl)!).toBeGreaterThanOrEqual(1_000);
+
+  // The indicator disappears once the chapter has every page.
+  await expect.poll(async () => (await readMergeState()).progress, { timeout: 4_000 }).toBe(0);
+
   await expect
     .poll(
       () =>
@@ -2196,4 +2229,299 @@ test('uses the Tiantang full catalog and shared pagination to navigate', async (
     tiantangDirectory,
     ...[2, 3, 4, 5, 6].map(number => `${tiantangDirectory}${number}/`),
   ]);
+});
+
+test('does not persist a temporary section percentage on pagehide', async ({ context, page }) => {
+  const url = 'https://m.goboo.cc/gb_1/94443/1';
+  await context.route(url, route =>
+    route.fulfill({ body: makeGobooPage(1, '/gb_1/94443/1/2'), contentType: 'text/html' })
+  );
+  let release!: () => void;
+  const gate = new Promise<void>(r => {
+    release = r;
+  });
+  await context.route(url + '/2', async route => {
+    await gate;
+    await route.fulfill({
+      body: makeGobooPage(2, '/gb_1/94443/2', '下一章'),
+      contentType: 'text/html',
+    });
+  });
+  const script = fs.readFileSync(getMnrE2eConfig().userScriptPath, 'utf8');
+  await context.addInitScript({ content: createGmMockScript() + '\n' + script });
+  await page.goto(url);
+  const root = page.locator('#mnr-reader-root');
+  await expect(root.locator('.mnr-section-progress')).toBeVisible();
+  await root.locator('.mnr-reader-main').evaluate(el => {
+    el.scrollTop = 200;
+    el.dispatchEvent(new Event('scroll'));
+  });
+  await page.waitForTimeout(250);
+  await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
+  await page.waitForTimeout(100);
+  const stored = await page.evaluate(() =>
+    (window as any).GM_getValue('mnr-reading-positions', null)
+  );
+  console.log('position during merge:', stored);
+  release();
+  expect(stored).toBeNull();
+});
+
+for (const moveWhileLoading of [false, true]) {
+  test(
+    moveWhileLoading
+      ? 'does not restore over user scrolling during section merging'
+      : 'restores a saved percentage only after the chapter finishes merging',
+    async ({ context, page }) => {
+      const url = 'https://m.goboo.cc/gb_1/94443/1';
+      await page.setViewportSize({ width: 390, height: 844 });
+      await context.route(url, route =>
+        route.fulfill({ body: makeGobooPage(1, '/gb_1/94443/1/2'), contentType: 'text/html' })
+      );
+      let release!: () => void;
+      const gate = new Promise<void>(r => {
+        release = r;
+      });
+      await context.route(url + '/2', async route => {
+        await gate;
+        await route.fulfill({
+          body: makeGobooPage(2, '/gb_1/94443/1/3'),
+          contentType: 'text/html',
+        });
+      });
+      await context.route(url + '/3', route =>
+        route.fulfill({
+          body: makeGobooPage(3, 'javascript:void(0);', '下一章'),
+          contentType: 'text/html',
+        })
+      );
+      const script = fs.readFileSync(getMnrE2eConfig().userScriptPath, 'utf8');
+      const seed = `window.GM_setValue('mnr-reading-positions', JSON.stringify({[${JSON.stringify(url)}]:{percent:70,updatedAt:Date.now()}}));`;
+      await context.addInitScript({ content: createGmMockScript() + '\n' + seed + '\n' + script });
+      await page.goto(url);
+      const root = page.locator('#mnr-reader-root');
+      await expect(root.locator('.mnr-section-progress')).toBeVisible();
+      await expect(root).not.toContainText('已回到上次阅读位置');
+      const measure = () =>
+        root.evaluate(host => {
+          const main = host.shadowRoot!.querySelector('.mnr-reader-main') as HTMLElement;
+          const article = host.shadowRoot!.querySelector('article') as HTMLElement;
+          const top =
+            main.scrollTop + article.getBoundingClientRect().top - main.getBoundingClientRect().top;
+          return {
+            scrollTop: main.scrollTop,
+            height: article.offsetHeight,
+            percent:
+              (100 * (main.scrollTop - top)) / (article.offsetHeight - main.clientHeight * 0.5),
+          };
+        });
+      if (moveWhileLoading) {
+        await root.locator('.mnr-reader-main').hover();
+        await page.mouse.wheel(0, 300);
+        await expect.poll(async () => (await measure()).scrollTop).toBeGreaterThan(100);
+        await page.waitForTimeout(200);
+      }
+      const before = await measure();
+      release();
+      await expect(root.locator('.mnr-section-progress')).toHaveCount(0);
+      const after = await measure();
+      console.log('restored position:', JSON.stringify({ before, after }));
+      if (moveWhileLoading) {
+        expect(after.scrollTop).toBe(before.scrollTop);
+        await expect(root).not.toContainText('已回到上次阅读位置');
+      } else {
+        expect(after.percent).toBeCloseTo(70, 0);
+      }
+    }
+  );
+}
+
+test('keeps the first-page DOM and selection while merging an 80-page Xszj chapter', async ({
+  context,
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const url = 'https://xszj.org/b/490346/c/1534359';
+  const pages: number[] = [];
+  const times: number[] = [];
+  await context.route('https://xszj.org/**', async route => {
+    const requestUrl = new URL(route.request().url());
+    const n = Number(requestUrl.searchParams.get('page') || 1);
+    if (requestUrl.pathname !== '/b/490346/c/1534359') {
+      await route.fulfill({ status: 404, body: '' });
+      return;
+    }
+    pages.push(n);
+    times.push(Date.now());
+    const next = n < 80 ? `<a href="?page=${n + 1}">下一页</a>` : '';
+    await route.fulfill({
+      contentType: 'text/html; charset=utf-8',
+      body: `<!doctype html><html lang="zh-Hans"><head><title>第一章 长分页(${n}/80)</title></head><body>
+      <h1 class="bookname">第一章 长分页(${n}/80)</h1>
+      <div class="con_top"><a href="/b/490346">测试书</a></div>
+      <div class="bottem1"><a href="/b/490346/cs/1">目录</a>${next}</div>
+      <div id="booktxt"><p>第${n}页正文。${'山间的风吹过树林，他沿着熟悉的小路慢慢向前走去。'.repeat(60)}</p></div>
+    </body></html>`,
+    });
+  });
+  const script = fs.readFileSync(getMnrE2eConfig().userScriptPath, 'utf8');
+  await context.addInitScript({
+    content:
+      createGmMockScript() +
+      `
+    window.GM_setValue('mnr-config',{behavior:{preloadNext:false}});
+  ` +
+      script,
+  });
+  await page.goto(url);
+  const root = page.locator('#mnr-reader-root');
+  await expect(root.locator('.mnr-section-progress')).toContainText('1/80');
+  await root.evaluate(host => {
+    const root = host.shadowRoot!;
+    const paragraph = root.querySelector('article p')!;
+    const text = paragraph.firstChild!;
+    const range = document.createRange();
+    range.setStart(text, 0);
+    range.setEnd(text, 6);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const main = root.querySelector('.mnr-reader-main') as HTMLElement;
+    main.scrollTop = 150;
+    (window as any).__sectionProof = {
+      paragraph,
+      text,
+      selected: selection.toString(),
+      scrollTop: main.scrollTop,
+    };
+  });
+  const retained = () =>
+    root.evaluate(host => {
+      const proof = (window as any).__sectionProof;
+      const main = host.shadowRoot!.querySelector('.mnr-reader-main') as HTMLElement;
+      return {
+        sameNode: host.shadowRoot!.querySelector('article p') === proof.paragraph,
+        selection: window.getSelection()?.toString(),
+        expected: proof.selected,
+        scrollTop: main.scrollTop,
+        initialTop: proof.scrollTop,
+      };
+    });
+  await expect(root.locator('article')).toContainText('第2页正文');
+  expect((await retained()).sameNode).toBe(true);
+  await expect(root.locator('.mnr-section-progress')).toHaveCount(0, { timeout: 100_000 });
+  const final = await retained();
+  expect(final.sameNode).toBe(true);
+  expect(final.selection).toBe(final.expected);
+  expect(final.expected.length).toBeGreaterThan(0);
+  expect(final.scrollTop).toBe(final.initialTop);
+  expect(pages).toEqual(Array.from({ length: 80 }, (_, i) => i + 1));
+  expect(times[79] - times[0]).toBeGreaterThanOrEqual(79 * 750);
+  console.log('80-page merge elapsed ms:', times[79] - times[0]);
+});
+
+test('cancelled position restoration preserves storage until the reader actually scrolls', async ({
+  page,
+  context,
+}) => {
+  const url = 'https://m.goboo.cc/gb_1/94443/2';
+  await context.route('https://m.goboo.cc/**', route =>
+    route.fulfill({
+      contentType: 'text/html; charset=utf-8',
+      body: makeGobooNextChapter(),
+    })
+  );
+  const seed = `
+    GM_setValue('mnr-reading-positions', JSON.stringify({[${JSON.stringify(url)}]: {percent: 70, updatedAt: Date.now() - 10000}}));
+    const originalGet = GM_getValue;
+    window.__readPosition = () => originalGet('mnr-reading-positions');
+    const gate = new Promise(resolve => { window.__releasePosition = resolve; });
+    GM_getValue = (key, ...args) => key === 'mnr-reading-positions'
+      ? gate.then(() => originalGet(key, ...args)) : originalGet(key, ...args);
+  `;
+  await context.addInitScript({
+    content:
+      createGmMockScript() +
+      '\n' +
+      seed +
+      '\n' +
+      fs.readFileSync(getMnrE2eConfig().userScriptPath, 'utf8'),
+  });
+  await page.goto(url);
+  const main = page.locator('#mnr-reader-root .mnr-reader-main');
+  await expect(main).toBeVisible();
+  await main.focus();
+  await page.keyboard.press('Shift');
+  await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
+  await page.evaluate(() =>
+    (window as Window & { __releasePosition?: () => void }).__releasePosition!()
+  );
+  const readPercent = async () => {
+    const stored = await page.evaluate(() =>
+      (window as Window & { __readPosition?: () => string }).__readPosition!()
+    );
+    return (JSON.parse(stored) as Record<string, { percent: number }>)[url].percent;
+  };
+  // Allow the deferred storage read and any wrongly queued persistence to settle.
+  await page.waitForTimeout(300);
+  expect(await readPercent()).toBe(70);
+  await expect(main).toHaveJSProperty('scrollTop', 0);
+  await main.evaluate(el => {
+    el.scrollTop = 300;
+  });
+  await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
+  await expect.poll(readPercent).not.toBe(70);
+  expect(await readPercent()).toBeGreaterThan(0);
+});
+
+test('a contradictory section marker stops loading and never enters the chapter cache', async ({
+  page,
+  context,
+}) => {
+  const pages: number[] = [];
+  await context.route('https://xszj.org/**', async route => {
+    const url = new URL(route.request().url());
+    if (url.pathname !== '/b/490346/c/1534359') {
+      await route.fulfill({ status: 404, body: '' });
+      return;
+    }
+    const n = Number(url.searchParams.get('page') || 1);
+    pages.push(n);
+    // URLs are sequential, but the second response contains page 3: page 2 is missing.
+    const marker = n === 1 ? 1 : n + 1;
+    await route.fulfill({
+      contentType: 'text/html; charset=utf-8',
+      body: `<!doctype html><html lang="zh-Hans"><head><meta charset="utf-8"><title>第一章 跳页测试(${marker}/5)</title></head><body>
+       <h1 class="bookname">第一章 跳页测试(${marker}/5)</h1>
+       <div class="con_top"><a href="/b/490346">测试书</a></div>
+       <div class="bottem1"><a href="/b/490346/cs/1">目录</a>${n < 4 ? `<a href="?page=${n + 1}">下一页</a>` : ''}</div>
+       <div id="booktxt"><p>第${marker}页正文。${'山间的风吹过树林，他沿着熟悉的小路慢慢向前走去。'.repeat(60)}</p></div>
+       </body></html>`,
+    });
+  });
+  await context.addInitScript({
+    content:
+      createGmMockScript() +
+      "\nGM_setValue('mnr-config', {behavior:{preloadNext:false}});\n" +
+      fs.readFileSync(getMnrE2eConfig().userScriptPath, 'utf8'),
+  });
+  await page.goto('https://xszj.org/b/490346/c/1534359');
+  const root = page.locator('#mnr-reader-root');
+  await expect(root.locator('.mnr-section-progress')).toContainText('1/5');
+  await expect(root).toContainText('本章后续内容加载不完整');
+  await expect(root.locator('.mnr-section-progress')).toContainText('本章内容不完整');
+  await expect(root.locator('article')).toContainText('第1页正文');
+  await expect(root.locator('article')).not.toContainText('第3页正文');
+  await expect(root.locator('.mnr-chapter-end')).toHaveCount(0);
+  const diagnostic = await copyReaderDiagnostic(page);
+  expect(diagnostic.reader.cache.memory.count).toBe(0);
+  expect(diagnostic.recentEvents).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        type: 'reader.sectionMerge.complete',
+        detail: expect.objectContaining({ truncated: true }),
+      }),
+    ])
+  );
+  expect(pages).toEqual([1, 2]);
 });

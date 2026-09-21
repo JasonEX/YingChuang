@@ -1,6 +1,10 @@
 <template>
   <div
     class="mnr-reader"
+    @wheel.capture="cancelRestore"
+    @touchstart.capture="cancelRestore"
+    @pointerdown.capture="cancelRestore"
+    @keydown.capture="cancelRestore"
     @click="shieldEvent"
     @mousedown="shieldEvent"
     @mouseup="shieldEvent"
@@ -69,7 +73,23 @@
         @click="handleContentClick"
       >
         <h1 class="mnr-chapter-title">{{ entry.chapter.title }}</h1>
-        <div v-html="entry.displayContent"></div>
+        <div v-chapter-content="entry.displayContent"></div>
+
+        <!-- Remaining section pages of this chapter, still merging in the background -->
+        <div
+          v-if="entry.sectionProgress"
+          class="mnr-section-progress"
+          role="status"
+          aria-live="polite"
+        >
+          <MnrSpinner size="small" />
+          <span>{{ sectionProgressLabel(entry.sectionProgress) }}</span>
+        </div>
+
+        <!-- The merge stopped short, so say so rather than let the text just end -->
+        <div v-else-if="entry.sectionsIncomplete" class="mnr-section-progress" role="status">
+          <span>— 本章内容不完整 —</span>
+        </div>
       </article>
 
       <!-- Bottom sentinel for IntersectionObserver -->
@@ -83,7 +103,12 @@
 
       <!-- End of content (no more chapters) -->
       <div
-        v-if="readerStore.chapters.length > 0 && !readerStore.hasNext && !readerStore.isLoadingNext"
+        v-if="
+          readerStore.chapters.length > 0 &&
+          !readerStore.hasNext &&
+          !readerStore.isLoadingNext &&
+          !readerStore.isTailChapterIncomplete
+        "
         class="mnr-chapter-end"
       >
         <p class="mnr-chapter-end-text">— 已是最后一章 —</p>
@@ -124,20 +149,22 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { useReaderStore, type TocEntryWithStatus } from '@/ui/stores/reader';
+import {
+  type SectionProgressState,
+  type TocEntryWithStatus,
+  useReaderStore,
+} from '@/ui/stores/reader';
 import { useConfigStore } from '@/ui/stores/config';
 import { useKeyboardShortcuts } from '@/ui/composables/useKeyboardShortcuts';
+import { useReaderPosition } from '@/ui/composables/reader/useReaderPosition';
 import { useReaderScroll } from '@/ui/composables/reader/useReaderScroll';
 import { useReaderAutoLoad } from '@/ui/composables/reader/useReaderAutoLoad';
 import { useTouchGestures } from '@/ui/composables/reader/useTouchGestures';
 import { useChapterNavigation } from '@/ui/composables/reader/useChapterNavigation';
 import { useReaderUIControls } from '@/ui/composables/reader/useReaderUIControls';
-import {
-  flushReadingPositions,
-  getReadingPosition,
-  saveReadingPosition,
-} from '@/ui/stores/reader/readingPosition';
+import { flushReadingPositions } from '@/ui/stores/reader/readingPosition';
 import ProgressIndicator from './ProgressIndicator.vue';
+import { vChapterContent } from './chapterContent';
 import FloatingToolbar from './FloatingToolbar.vue';
 import ChapterDrawer from './ChapterDrawer.vue';
 import SettingsPanel from '@/ui/components/settings/SettingsPanel.vue';
@@ -216,6 +243,13 @@ const { scheduleAutoLoadNext, observeBottomSentinel } = useReaderAutoLoad({
   isNavigating,
 });
 
+const { restorePosition, cancelRestore, savePosition, flushPosition } = useReaderPosition({
+  mainRef,
+  chapterRefs,
+  readerStore,
+  isNavigating,
+});
+
 // Scroll composable
 const { handleScroll } = useReaderScroll({
   mainRef,
@@ -225,6 +259,7 @@ const { handleScroll } = useReaderScroll({
   showControls,
   isNavigating,
   scheduleAutoLoadNext,
+  savePosition,
 });
 
 // Chapter navigation composable
@@ -357,6 +392,13 @@ function handleSiteAutoEnableChange(enabled: boolean) {
   readerStore.showToast(enabled ? '已开启本站自动阅读' : '已关闭本站自动阅读', 'info');
 }
 
+/** Label the background section merge, falling back to a bare count when no total is known. */
+function sectionProgressLabel(progress: SectionProgressState): string {
+  return progress.total
+    ? `正在加载本章后续内容 ${progress.loaded}/${progress.total}`
+    : `正在加载本章后续内容 ${progress.loaded}`;
+}
+
 function setChapterRef(url: string) {
   return (el: HTMLElement | null) => {
     if (!el) {
@@ -441,28 +483,6 @@ useKeyboardShortcuts(
 
 // === Lifecycle ===
 
-async function restoreReadingPosition(): Promise<void> {
-  const mainEl = mainRef.value;
-  const currentUrl = readerStore.chapter?.url;
-  if (!mainEl || !currentUrl) return;
-
-  const percent = await getReadingPosition(currentUrl);
-  if (percent === null || percent < 3 || percent > 98) return;
-
-  await nextTick();
-  await new Promise<void>(resolve => globalThis.requestAnimationFrame(() => resolve()));
-  const chapterEl = chapterRefs.get(currentUrl);
-  if (!chapterEl) return;
-
-  const mainRect = mainEl.getBoundingClientRect();
-  const chapterRect = chapterEl.getBoundingClientRect();
-  const chapterTop = mainEl.scrollTop + chapterRect.top - mainRect.top;
-  const scrollableHeight = Math.max(0, chapterEl.offsetHeight - mainEl.clientHeight * 0.5);
-  mainEl.scrollTop = chapterTop + (percent / 100) * scrollableHeight;
-  readerStore.updateScroll(percent);
-  readerStore.showToast('已回到上次阅读位置', 'info', 1800);
-}
-
 watch(
   () => readerStore.currentChapterIndex,
   () => {
@@ -471,10 +491,7 @@ watch(
 );
 
 function flushPersistentState(): void {
-  if (readerStore.chapter?.url) {
-    saveReadingPosition(readerStore.chapter.url, readerStore.scrollPercent);
-  }
-  void flushReadingPositions();
+  flushPosition();
   void configStore.flushSave();
 }
 
@@ -504,7 +521,7 @@ onMounted(async () => {
   observeBottomSentinel(bottomSentinel.value);
 
   await nextTick();
-  await restoreReadingPosition();
+  await restorePosition();
   mainRef.value?.focus();
 
   scheduleAutoLoadNext('state');
@@ -669,7 +686,8 @@ onUnmounted(() => {
 
 /* Loading indicators */
 .mnr-loading-prev,
-.mnr-loading-next {
+.mnr-loading-next,
+.mnr-section-progress {
   display: flex;
   align-items: center;
   justify-content: center;

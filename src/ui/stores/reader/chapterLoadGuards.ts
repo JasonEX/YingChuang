@@ -1,5 +1,6 @@
 import type { ChapterEntry, LoadSource } from './types';
 import { normalizeUrl, normalizeUrlForBlock, normalizeUrlForFetch } from './utils';
+import { SECTION_INCOMPLETE_TOAST, SECTION_MERGING_TOAST, VIP_BLOCK_TOAST } from './types';
 import {
   shouldPersistNavigationBlock,
   shouldUseNavigationFailureCooldown,
@@ -7,8 +8,8 @@ import {
 
 import { isInvalidChapterUrl } from './detection';
 import type { NavigationContext } from './navigationContext';
+import type { PendingSectionMerge } from './section';
 import type { Ref } from 'vue';
-import { VIP_BLOCK_TOAST } from './types';
 
 export interface PreparedChapterLoad {
   direction: 'next' | 'prev';
@@ -19,7 +20,16 @@ export interface PreparedChapterLoad {
   navKey: string;
   pendingAbortRef: Ref<(() => void) | null>;
   refChapter: ChapterEntry;
+  /** Set once a progressive merge hands back its handle; not reactive state. */
+  sectionMerge: PendingSectionMerge | null;
   targetUrl: string;
+}
+
+/** An end-of-book claim is only honest once the boundary chapter has all of its pages. */
+function boundaryMessage(refChapter: ChapterEntry | undefined, endMessage: string): string {
+  if (refChapter?.sectionProgress) return SECTION_MERGING_TOAST;
+  if (refChapter?.sectionsIncomplete) return SECTION_INCOMPLETE_TOAST;
+  return endMessage;
 }
 
 export function prepareChapterLoad(
@@ -43,7 +53,8 @@ export function prepareChapterLoad(
   const rawTargetUrl = isNext ? refChapter?.chapter.nextUrl : refChapter?.chapter.prevUrl;
   if (!rawTargetUrl || !refChapter) {
     if (source === 'manual') {
-      ctx.showToast(endMessage, 'info');
+      // A merging chapter withholds its next URL, so an end-of-book claim would be wrong.
+      ctx.showToast(boundaryMessage(refChapter, endMessage), 'info');
     }
     return null;
   }
@@ -101,6 +112,7 @@ export function prepareChapterLoad(
     navKey,
     pendingAbortRef,
     refChapter,
+    sectionMerge: null,
     targetUrl,
   };
 }

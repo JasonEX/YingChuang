@@ -3,7 +3,16 @@
  * Coordinates chapter loading, cache rebuilds, and reload actions.
  */
 
-import type { CachedChapter, LoadSource } from './types';
+import {
+  appendChapterSection,
+  beginChapterSections,
+  cancelAllSectionMerges,
+  cancelChapterSections,
+  completeChapterSections,
+  createSectionMergeSink,
+  type SectionAppendDelta,
+} from './sectionProgress';
+import type { CachedChapter, LoadSource, SectionProgressState } from './types';
 import { clearNavFailure, recordNavFailure } from './navFailure';
 import {
   clearPendingAbort,
@@ -27,6 +36,7 @@ import type { NavigationContext } from './navigationContext';
 import { parseWithSectionMerge } from './section';
 import { recordDebugEvent } from '@/core/debug/events';
 import { shouldPersistNavigationBlock } from './navigationPolicy';
+import type { SiteRule } from '@/core/rules/types';
 import { trimCachedContents } from './trim';
 
 // ============ Factory ============
@@ -35,6 +45,7 @@ export function createNavigation(ctx: NavigationContext) {
   /** Unified chapter loading function */
   async function loadChapter(direction: 'next' | 'prev', source: LoadSource): Promise<boolean> {
     const runId = ctx.runtime.viewId();
+    let sectionMergeCommitted = false;
     const load = prepareChapterLoad(ctx, direction, source);
     if (!load) return false;
 
@@ -198,7 +209,17 @@ export function createNavigation(ctx: NavigationContext) {
       }
 
       clearNavFailure(ctx.navFailures, load.navKey);
-      return await insertParsedChapter(ctx, load, parsed);
+      const entryId = await insertParsedChapter(ctx, load, parsed);
+      if (!entryId) return false;
+
+      const merge = load.sectionMerge;
+      if (merge) {
+        beginChapterSections(ctx, entryId, merge.progress, merge.abort);
+        // Releasing the gate lets the merge fetch page 2 now that page 1 is on screen.
+        merge.commit(entryId);
+        sectionMergeCommitted = true;
+      }
+      return true;
     } catch (e) {
       outcome = 'exception';
       if (!ctx.runtime.isViewStale(runId)) {
@@ -207,6 +228,8 @@ export function createNavigation(ctx: NavigationContext) {
       }
       return false;
     } finally {
+      // Covers every path that rejected the parsed chapter: TOC, invalid prev, staleness, throw.
+      if (!sectionMergeCommitted) load.sectionMerge?.reject();
       recordDebugEvent('chapter.load', {
         url: load.targetUrl,
         direction,
@@ -241,6 +264,7 @@ export function createNavigation(ctx: NavigationContext) {
     ctx.pendingPrevAbort.value = null;
     ctx.reloadAbort.value?.();
     ctx.reloadAbort.value = null;
+    cancelAllSectionMerges(ctx);
     ctx.isLoadingPrev.value = false;
     ctx.isLoadingNext.value = false;
 
@@ -268,6 +292,16 @@ export function createNavigation(ctx: NavigationContext) {
     if (!current) return;
 
     const url = current.chapter.url;
+
+    // The reload rewrites this entry wholesale. Left running, the old merge would append its
+    // remaining pages onto the replacement, and an unchanged source script means completion
+    // never rewrites the content that would have hidden the duplication.
+    const abandonedMerge = ctx.sectionMerges.value.has(current.id);
+    cancelChapterSections(ctx, current.id, 'aborted');
+    // Unlike a teardown, the half-merged chapter stays on screen. It has to keep saying it is
+    // short until a replacement lands, or a reload that never gets one would leave partial
+    // content looking whole -- and the book looking finished.
+    if (abandonedMerge) current.sectionsIncomplete = true;
 
     ctx.showToast('正在重新加载...', 'info');
 
@@ -332,6 +366,7 @@ export function createNavigation(ctx: NavigationContext) {
 
       current.chapter = parsed;
       current.rule = parsed.rule || current.rule;
+      delete current.sectionsIncomplete;
       ctx.originalContents.value.set(current.id, parsed.content);
       ctx.originalTitles.value.set(current.id, {
         title: parsed.title,
@@ -362,6 +397,23 @@ export function createNavigation(ctx: NavigationContext) {
   }
 
   return {
+    sectionDelivery: createSectionMergeSink(ctx),
+    appendChapterSection: (entryId: string, delta: SectionAppendDelta) =>
+      appendChapterSection(ctx, entryId, delta),
+    beginChapterSections: (
+      entryId: string,
+      progress: SectionProgressState,
+      abort: () => void
+    ): boolean => beginChapterSections(ctx, entryId, progress, abort),
+    cancelAllSectionMerges: () => cancelAllSectionMerges(ctx),
+    cancelChapterSections: (entryId: string, reason: 'aborted' | 'failed') =>
+      cancelChapterSections(ctx, entryId, reason),
+    completeChapterSections: (
+      entryId: string,
+      chapter: ParsedChapter,
+      rule?: SiteRule,
+      info?: { truncated?: boolean }
+    ) => completeChapterSections(ctx, entryId, chapter, rule, info),
     insertCachedChapter: insertCachedChapterForContext,
     loadChapter,
     loadNextChapter,

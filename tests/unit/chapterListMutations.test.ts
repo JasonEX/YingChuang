@@ -58,6 +58,7 @@ describe('chapterListMutations', () => {
       pendingPrevAbort: ref(null),
       reloadAbort: ref(null),
       loadedUrls: computed(() => new Set(chapters.value.map(entry => entry.chapter.url))),
+      sectionMerges: ref(new Map()),
       vipBlockedUrls: ref(new Set()),
       blockedNavUrls: ref(new Set()),
       cachedContents: ref(new Map()),
@@ -86,6 +87,7 @@ describe('chapterListMutations', () => {
       isLoadingRef: ref(false),
       isNext,
       navKey: refChapter.chapter.url,
+      sectionMerge: null,
       pendingAbortRef: ref(null),
       refChapter,
       targetUrl: refChapter.chapter.url,
@@ -110,6 +112,31 @@ describe('chapterListMutations', () => {
     expect(ctx.applyConversionToChapterEntry).toHaveBeenCalledWith(inserted.id, 'sc');
   });
 
+  it('marks the first section incomplete before conversion yields and never exposes it as cache', async () => {
+    const ctx = makeContext();
+    ctx.currentConversionMode.value = 'tc';
+    const load = makeLoad(true, ctx.chapters.value[0]);
+    load.sectionMerge = {
+      progress: { loaded: 1 },
+      abort: vi.fn(),
+      commit: vi.fn(),
+      reject: vi.fn(),
+    };
+    let finish!: () => void;
+    vi.mocked(ctx.applyConversionToChapterEntry).mockReturnValueOnce(
+      new Promise<void>(resolve => {
+        finish = resolve;
+      })
+    );
+    const parsed = makeChapter(2);
+    const pending = insertParsedChapter(ctx, load, parsed);
+    expect(ctx.chapters.value.at(-1)?.sectionProgress).toEqual({ loaded: 1 });
+    expect(ctx.cachedContents.value.has(parsed.url)).toBe(false);
+    finish();
+    await pending;
+    expect(ctx.cachedContents.value.has(parsed.url)).toBe(false);
+  });
+
   it('inserts previous parsed chapters and trims the display tail', async () => {
     const entries = Array.from({ length: MAX_CACHED_CHAPTERS }, (_, index) => makeEntry(index + 2));
     const ctx = makeContext(entries);
@@ -117,7 +144,7 @@ describe('chapterListMutations', () => {
     const parsed = makeChapter(1);
     const load = makeLoad(false, entries[0]);
 
-    await expect(insertParsedChapter(ctx, load, parsed)).resolves.toBe(true);
+    await expect(insertParsedChapter(ctx, load, parsed)).resolves.toEqual(expect.any(String));
 
     expect(ctx.chapters.value).toHaveLength(MAX_CACHED_CHAPTERS);
     expect(ctx.chapters.value[0].chapter.url).toBe('https://example.com/1.html');
@@ -139,7 +166,7 @@ describe('chapterListMutations', () => {
     const parsed = makeChapter(7);
     const load = makeLoad(true, entries.at(-1)!);
 
-    await expect(insertParsedChapter(ctx, load, parsed)).resolves.toBe(true);
+    await expect(insertParsedChapter(ctx, load, parsed)).resolves.toEqual(expect.any(String));
 
     expect(ctx.chapters.value).toHaveLength(MAX_CACHED_CHAPTERS);
     expect(ctx.chapters.value[0].chapter.url).toBe('https://example.com/2.html');
@@ -217,7 +244,8 @@ describe('chapterListMutations', () => {
       ctx.chapters.value = replacement;
       vi.mocked(ctx.runtime.isViewStale).mockReturnValue(true);
       resolve();
-      expect(await run).toBe(false);
+      // A cached insertion reports failure as false; a parsed one withholds the entry id.
+      expect(await run).toBe(kind === 'cached' ? false : null);
       expect(ctx.chapters.value).toHaveLength(MAX_CACHED_CHAPTERS + 1);
     }
   );

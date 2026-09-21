@@ -112,11 +112,6 @@ interface AdvancedConfig {
    */
   sectionDelayMs?: number;
   /**
-   * Show the first section immediately while remaining section pages are merged in the background.
-   * The initial chapter omits its section URL until the complete chapter replaces it.
-   */
-  progressiveSectionMerge?: boolean;
-  /**
    * Disable section merging
    * When true, treats each page as independent chapter even if URL looks like section
    */
