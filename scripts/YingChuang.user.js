@@ -5018,6 +5018,10 @@
 				return total;
 			}
 		}
+		isTruncatedMerge(cursor, signal) {
+			if (cursor.nextSectionUrl || signal?.aborted) return true;
+			return cursor.totalPages !== void 0 && cursor.loadedPages < cursor.totalPages;
+		}
 		reconcileSectionTotal(cursor, doc, maxPages) {
 			if (cursor.totalPages === void 0) return void 0;
 			return this.readSectionTotal(doc, cursor.loadedPages, maxPages) === cursor.totalPages ? cursor.totalPages : void 0;
@@ -5069,7 +5073,7 @@
 			if (progressive) options.onMergeEnd?.({
 				loaded: cursor.loadedPages,
 				total: cursor.totalPages,
-				truncated: !!cursor.nextSectionUrl || !!signal?.aborted
+				truncated: this.isTruncatedMerge(cursor, signal)
 			});
 			return this.buildMergedChapter(first, cursor);
 		}
