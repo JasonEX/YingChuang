@@ -71,12 +71,23 @@ export function useReaderScroll(options: UseReaderScrollOptions) {
     return nearest ? { index: nearest.index, element: nearest.element } : null;
   }
 
-  function getChapterPercent(mainEl: HTMLElement, chapterEl: HTMLElement): number {
+  /** True while this chapter is still appending section pages, so its height is not final. */
+  function isChapterMerging(index: number): boolean {
+    return !!readerStore.chapters[index]?.sectionProgress;
+  }
+
+  function getChapterPercent(
+    mainEl: HTMLElement,
+    chapterEl: HTMLElement,
+    complete: boolean
+  ): number {
     const mainRect = mainEl.getBoundingClientRect();
     const chapterRect = chapterEl.getBoundingClientRect();
     const chapterTop = mainEl.scrollTop + chapterRect.top - mainRect.top;
     const relativeTop = Math.max(0, mainEl.scrollTop - chapterTop);
-    if (chapterEl.offsetHeight <= mainEl.clientHeight) return 100;
+    // Pinning a short chapter to 100% is only honest once it has stopped growing; while it
+    // merges, a growing denominator would otherwise persist a bogus end-of-chapter position.
+    if (complete && chapterEl.offsetHeight <= mainEl.clientHeight) return 100;
     const scrollableHeight = Math.max(1, chapterEl.offsetHeight - mainEl.clientHeight * 0.5);
     return Math.max(0, Math.min(100, (relativeTop / scrollableHeight) * 100));
   }
@@ -99,7 +110,7 @@ export function useReaderScroll(options: UseReaderScrollOptions) {
       const currentElement = currentUrl ? chapterRefs.get(currentUrl) : undefined;
       const fallbackHeight = mainEl.scrollHeight - mainEl.clientHeight;
       const percent = currentElement
-        ? getChapterPercent(mainEl, currentElement)
+        ? getChapterPercent(mainEl, currentElement, !isChapterMerging(currentIndex))
         : fallbackHeight > 0
           ? (currentScrollTop / fallbackHeight) * 100
           : 100;
@@ -118,11 +129,13 @@ export function useReaderScroll(options: UseReaderScrollOptions) {
 
     const current = findCurrentChapter(mainEl);
     if (current) {
-      const percent = getChapterPercent(mainEl, current.element);
+      const merging = isChapterMerging(current.index);
+      const percent = getChapterPercent(mainEl, current.element, !merging);
       readerStore.setCurrentChapter(current.index);
       readerStore.updateScroll(percent);
       const url = readerStore.chapters[current.index]?.chapter.url;
-      if (url) saveCurrentPosition(url, percent);
+      // A merging chapter's percent is measured against a height that is still growing.
+      if (url && !merging) saveCurrentPosition(url, percent);
     } else {
       const scrollableHeight = mainEl.scrollHeight - mainEl.clientHeight;
       readerStore.updateScroll(

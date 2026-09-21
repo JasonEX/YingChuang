@@ -3,7 +3,15 @@
  * Coordinates chapter loading, cache rebuilds, and reload actions.
  */
 
-import type { CachedChapter, LoadSource } from './types';
+import {
+  appendChapterSection,
+  beginChapterSections,
+  cancelAllSectionMerges,
+  cancelChapterSections,
+  completeChapterSections,
+  type SectionAppendDelta,
+} from './sectionProgress';
+import type { CachedChapter, LoadSource, SectionProgressState } from './types';
 import { clearNavFailure, recordNavFailure } from './navFailure';
 import {
   clearPendingAbort,
@@ -27,6 +35,7 @@ import type { NavigationContext } from './navigationContext';
 import { parseWithSectionMerge } from './section';
 import { recordDebugEvent } from '@/core/debug/events';
 import { shouldPersistNavigationBlock } from './navigationPolicy';
+import type { SiteRule } from '@/core/rules/types';
 import { trimCachedContents } from './trim';
 
 // ============ Factory ============
@@ -35,6 +44,7 @@ export function createNavigation(ctx: NavigationContext) {
   /** Unified chapter loading function */
   async function loadChapter(direction: 'next' | 'prev', source: LoadSource): Promise<boolean> {
     const runId = ctx.runtime.viewId();
+    let sectionMergeCommitted = false;
     const load = prepareChapterLoad(ctx, direction, source);
     if (!load) return false;
 
@@ -198,7 +208,17 @@ export function createNavigation(ctx: NavigationContext) {
       }
 
       clearNavFailure(ctx.navFailures, load.navKey);
-      return await insertParsedChapter(ctx, load, parsed);
+      const entryId = await insertParsedChapter(ctx, load, parsed);
+      if (!entryId) return false;
+
+      const merge = load.sectionMerge;
+      if (merge) {
+        beginChapterSections(ctx, entryId, merge.progress, merge.abort);
+        // Releasing the gate lets the merge fetch page 2 now that page 1 is on screen.
+        merge.commit(entryId);
+        sectionMergeCommitted = true;
+      }
+      return true;
     } catch (e) {
       outcome = 'exception';
       if (!ctx.runtime.isViewStale(runId)) {
@@ -207,6 +227,8 @@ export function createNavigation(ctx: NavigationContext) {
       }
       return false;
     } finally {
+      // Covers every path that rejected the parsed chapter: TOC, invalid prev, staleness, throw.
+      if (!sectionMergeCommitted) load.sectionMerge?.reject();
       recordDebugEvent('chapter.load', {
         url: load.targetUrl,
         direction,
@@ -241,6 +263,7 @@ export function createNavigation(ctx: NavigationContext) {
     ctx.pendingPrevAbort.value = null;
     ctx.reloadAbort.value?.();
     ctx.reloadAbort.value = null;
+    cancelAllSectionMerges(ctx);
     ctx.isLoadingPrev.value = false;
     ctx.isLoadingNext.value = false;
 
@@ -362,6 +385,22 @@ export function createNavigation(ctx: NavigationContext) {
   }
 
   return {
+    appendChapterSection: (entryId: string, delta: SectionAppendDelta) =>
+      appendChapterSection(ctx, entryId, delta),
+    beginChapterSections: (
+      entryId: string,
+      progress: SectionProgressState,
+      abort: () => void
+    ): boolean => beginChapterSections(ctx, entryId, progress, abort),
+    cancelAllSectionMerges: () => cancelAllSectionMerges(ctx),
+    cancelChapterSections: (entryId: string, reason: 'aborted' | 'failed') =>
+      cancelChapterSections(ctx, entryId, reason),
+    completeChapterSections: (
+      entryId: string,
+      chapter: ParsedChapter,
+      rule?: SiteRule,
+      info?: { truncated?: boolean }
+    ) => completeChapterSections(ctx, entryId, chapter, rule, info),
     insertCachedChapter: insertCachedChapterForContext,
     loadChapter,
     loadNextChapter,

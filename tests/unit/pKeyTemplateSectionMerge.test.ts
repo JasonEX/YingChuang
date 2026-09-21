@@ -148,6 +148,14 @@ describe('p_key template + extensionless section merge', () => {
     const ok = await store.loadNextChapter();
     expect(ok).toBe(true);
 
+    // Remaining section pages merge in the background once the first page is on screen.
+    await vi.waitFor(
+      () => {
+        expect(store.isSectionMerging).toBe(false);
+      },
+      { timeout: 8000 }
+    );
+
     const loaded = store.chapters[store.chapters.length - 1]?.chapter;
     expect(loaded.url).toBe(page1Url);
     expect(loaded.title).toBe('第一章 测试');

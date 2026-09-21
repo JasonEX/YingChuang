@@ -1245,18 +1245,47 @@ test('shows the first Goboo section before rate-limited background merging compl
   await addYingChuangUserscript(context);
   const logs = createConsoleCollector(page);
 
+  /** One atomic read of the merging chapter, so timing cannot split the assertions. */
+  const readMergeState = () =>
+    page.locator('#mnr-reader-root').evaluate(host => {
+      const root = host.shadowRoot;
+      return {
+        text: root?.querySelector('.mnr-reader-content')?.textContent?.replace(/\s+/g, '') ?? '',
+        progress: root?.querySelectorAll('.mnr-section-progress').length ?? 0,
+        end: root?.querySelectorAll('.mnr-chapter-end').length ?? 0,
+      };
+    });
+
   await page.goto(firstUrl, { waitUntil: 'domcontentloaded' });
   await expect(page.locator('#mnr-reader-root')).toHaveCount(1, { timeout: 1_000 });
-  const initialText = await page
-    .locator('#mnr-reader-root')
-    .evaluate(host =>
-      host.shadowRoot?.querySelector('.mnr-reader-content')?.textContent?.replace(/\s+/g, '')
-    );
+  const initial = await readMergeState();
 
-  expect(initialText).toContain('第1页可见正文');
-  expect(initialText).toContain('第1页编码后续正文');
-  expect(initialText).not.toContain('第2页可见正文');
+  expect(initial.text).toContain('第1页可见正文');
+  expect(initial.text).toContain('第1页编码后续正文');
+  expect(initial.text).not.toContain('第2页可见正文');
   expect(requestTimes.has(secondUrl)).toBe(false);
+  // While pages are still arriving the reader says so, and never claims the book ended.
+  expect(initial.progress).toBe(1);
+  expect(initial.end).toBe(0);
+
+  // Pages land one at a time: page 2 is readable a full rate-limit window before page 3.
+  const midMerge: Array<Awaited<ReturnType<typeof readMergeState>>> = [];
+  await expect
+    .poll(
+      async () => {
+        const state = await readMergeState();
+        if (midMerge.length === 0 && state.text.includes('第2页编码后续正文')) {
+          midMerge.push(state);
+        }
+        return state.text;
+      },
+      { timeout: 6_000 }
+    )
+    .toContain('第2页编码后续正文');
+
+  expect(midMerge[0]?.text).not.toContain('第3页编码后续正文');
+  expect(midMerge[0]?.progress).toBe(1);
+  expect(midMerge[0]?.end).toBe(0);
 
   await expect
     .poll(
@@ -1271,6 +1300,10 @@ test('shows the first Goboo section before rate-limited background merging compl
     .toContain('第3页编码后续正文');
 
   expect(requestTimes.get(thirdUrl)! - requestTimes.get(secondUrl)!).toBeGreaterThanOrEqual(1_000);
+
+  // The indicator disappears once the chapter has every page.
+  await expect.poll(async () => (await readMergeState()).progress, { timeout: 4_000 }).toBe(0);
+
   await expect
     .poll(
       () =>

@@ -47,7 +47,7 @@ export async function insertParsedChapter(
   ctx: NavigationContext,
   load: PreparedChapterLoad,
   parsed: ParsedChapter
-): Promise<boolean> {
+): Promise<string | null> {
   const runId = ctx.runtime.viewId();
   const suffix = load.isNext ? '' : 'prev-';
   const id = `chapter-${Date.now()}-${suffix}${ctx.chapters.value.length}`;
@@ -78,7 +78,7 @@ export async function insertParsedChapter(
   if (ctx.currentConversionMode.value !== 'none') {
     await ctx.applyConversionToChapterEntry(id, ctx.currentConversionMode.value);
   }
-  if (ctx.runtime.isViewStale(runId)) return false;
+  if (ctx.runtime.isViewStale(runId)) return null;
 
   if (!ctx.history.value.includes(parsed.url)) {
     if (load.isNext) {
@@ -90,7 +90,7 @@ export async function insertParsedChapter(
 
   trimDisplayChapters(ctx, load.isNext);
 
-  return true;
+  return id;
 }
 
 export async function rebuildChaptersFromCache(

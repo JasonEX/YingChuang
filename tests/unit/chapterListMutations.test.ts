@@ -58,6 +58,7 @@ describe('chapterListMutations', () => {
       pendingPrevAbort: ref(null),
       reloadAbort: ref(null),
       loadedUrls: computed(() => new Set(chapters.value.map(entry => entry.chapter.url))),
+      sectionMerges: ref(new Map()),
       vipBlockedUrls: ref(new Set()),
       blockedNavUrls: ref(new Set()),
       cachedContents: ref(new Map()),
@@ -87,6 +88,7 @@ describe('chapterListMutations', () => {
       isLoadingRef: ref(false),
       isNext,
       navKey: refChapter.chapter.url,
+      sectionMerge: null,
       pendingAbortRef: ref(null),
       refChapter,
       targetUrl: refChapter.chapter.url,
@@ -118,7 +120,7 @@ describe('chapterListMutations', () => {
     const parsed = makeChapter(1);
     const load = makeLoad(false, entries[0]);
 
-    await expect(insertParsedChapter(ctx, load, parsed)).resolves.toBe(true);
+    await expect(insertParsedChapter(ctx, load, parsed)).resolves.toEqual(expect.any(String));
 
     expect(ctx.chapters.value).toHaveLength(MAX_CACHED_CHAPTERS);
     expect(ctx.chapters.value[0].chapter.url).toBe('https://example.com/1.html');
@@ -141,7 +143,7 @@ describe('chapterListMutations', () => {
     const parsed = makeChapter(7);
     const load = makeLoad(true, entries.at(-1)!);
 
-    await expect(insertParsedChapter(ctx, load, parsed)).resolves.toBe(true);
+    await expect(insertParsedChapter(ctx, load, parsed)).resolves.toEqual(expect.any(String));
 
     expect(ctx.chapters.value).toHaveLength(MAX_CACHED_CHAPTERS);
     expect(ctx.chapters.value[0].chapter.url).toBe('https://example.com/2.html');
@@ -221,7 +223,8 @@ describe('chapterListMutations', () => {
       ctx.history.value = ['new-view'];
       vi.mocked(ctx.runtime.isViewStale).mockReturnValue(true);
       resolve();
-      expect(await run).toBe(false);
+      // A cached insertion reports failure as false; a parsed one withholds the entry id.
+      expect(await run).toBe(kind === 'cached' ? false : null);
       expect(ctx.chapters.value).toHaveLength(MAX_CACHED_CHAPTERS + 1);
       expect(ctx.history.value).toEqual(['new-view']);
     }

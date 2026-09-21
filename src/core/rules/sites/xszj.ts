@@ -33,7 +33,6 @@ export const xszjRule: SiteRule = {
     checkSection: true,
     sectionMaxPages: 99,
     sectionDelayMs: 800,
-    progressiveSectionMerge: true,
   },
   meta: {
     source: 'builtin',

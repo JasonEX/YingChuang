@@ -8,6 +8,11 @@
  */
 
 import {
+  createSectionMerger,
+  type SectionMergeProgress,
+  type SectionPageDelta,
+} from '@/core/auto-enable/SectionMerger';
+import {
   DetectionEngine,
   type DetectionEngineResult,
   getChapterDocumentBlockReason,
@@ -15,7 +20,6 @@ import {
 import { getPageKind, getPageKindFromUrl } from '@/core/auto-enable/PageKind';
 import { getSiteProtection, type ProtectionOptions } from '@/core/protection';
 import { type ParsedChapter, Parser } from '@/core/parser';
-import { createSectionMerger } from '@/core/auto-enable/SectionMerger';
 import { getRuleManager } from '@/core/rules/RuleManager';
 import { getRuleStorage } from '@/core/rules/RuleStorage';
 import type { SiteRule } from '@/core/rules/types';
@@ -49,12 +53,28 @@ export interface UserPromptResponse {
 /** Callback for showing prompt to user */
 export type PromptCallback = () => Promise<UserPromptResponse>;
 
+/** What the reader should do with a chapter as it is parsed and merged. */
+export type LaunchEvent =
+  | {
+      stage: 'initial';
+      chapter: ParsedChapter;
+      rule?: SiteRule;
+      progress: SectionMergeProgress;
+      /** Stops the background merge, so the reader can cancel it when it closes. */
+      abort: () => void;
+    }
+  | { stage: 'append'; delta: SectionPageDelta; progress: SectionMergeProgress }
+  | {
+      stage: 'complete';
+      chapter: ParsedChapter;
+      rule?: SiteRule;
+      /** True when an `initial` event was already delivered for this chapter. */
+      progressive: boolean;
+      truncated: boolean;
+    };
+
 /** Callback when reader should launch */
-export type LaunchCallback = (
-  chapter: ParsedChapter,
-  rule?: SiteRule,
-  stage?: 'initial' | 'update' | 'complete'
-) => void;
+export type LaunchCallback = (event: LaunchEvent) => void;
 
 /** Auto-enable options */
 export interface AutoEnableOptions {
@@ -391,19 +411,43 @@ export class AutoEnableManager {
   ): Promise<'complete' | 'initial' | false> {
     this.activateProtection();
 
+    // The merge outlives this await once the first page is delivered, so it needs a handle
+    // the reader can pull when it closes.
+    const controller = new AbortController();
     let launchedEarly = false;
+    let truncated = false;
+
     try {
       const currentUrl = doc.location?.href || window.location.href;
       const chapter = await this.sectionMerger.merge(doc, currentUrl, {
-        onFirstPage: firstPage => {
+        signal: controller.signal,
+        onFirstPage: (firstPage, progress) => {
           if (!this.launchCallback) return;
-          this.launchCallback(firstPage, rule || firstPage.rule, 'initial');
+          this.launchCallback({
+            stage: 'initial',
+            chapter: firstPage,
+            rule: rule || firstPage.rule,
+            progress,
+            abort: () => controller.abort(),
+          });
           launchedEarly = true;
+        },
+        onSectionPage: (delta, progress) => {
+          this.launchCallback?.({ stage: 'append', delta, progress });
+        },
+        onMergeEnd: end => {
+          truncated = end.truncated;
         },
       });
 
       if (chapter && this.launchCallback) {
-        this.launchCallback(chapter, rule || chapter.rule, launchedEarly ? 'update' : 'complete');
+        this.launchCallback({
+          stage: 'complete',
+          chapter,
+          rule: rule || chapter.rule,
+          progressive: launchedEarly,
+          truncated,
+        });
         return 'complete';
       }
       if (launchedEarly) return 'initial';

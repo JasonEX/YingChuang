@@ -122,6 +122,14 @@ describe('ldks section merge', () => {
     const ok = await store.loadNextChapter();
     expect(ok).toBe(true);
 
+    // Remaining section pages merge in the background once the first page is on screen.
+    await vi.waitFor(
+      () => {
+        expect(store.isSectionMerging).toBe(false);
+      },
+      { timeout: 8000 }
+    );
+
     const last = store.chapters[store.chapters.length - 1]?.chapter;
     // URL should be normalized to first page
     expect(last.url).toBe(page1Url);
@@ -226,6 +234,14 @@ describe('ldks section merge', () => {
 
     const ok = await store.loadNextChapter();
     expect(ok).toBe(true);
+
+    // Remaining section pages merge in the background once the first page is on screen.
+    await vi.waitFor(
+      () => {
+        expect(store.isSectionMerging).toBe(false);
+      },
+      { timeout: 8000 }
+    );
 
     const last = store.chapters[store.chapters.length - 1]?.chapter;
     expect(last.url).toBe(page2Url.replace(/_2\.html$/i, '.html'));

@@ -8,7 +8,11 @@
  * 4. Mount UI when needed
  */
 
-import { type AutoEnableDecision, getAutoEnableManager } from '@/core/AutoEnableManager';
+import {
+  type AutoEnableDecision,
+  getAutoEnableManager,
+  type LaunchEvent,
+} from '@/core/AutoEnableManager';
 import { type BootstrapDebugSnapshot, copyDiagnosticInfo } from '@/ui/debug/diagnostics';
 import { BUILD_DATE, VERSION } from '@/version';
 import {
@@ -28,9 +32,7 @@ import { getRuleManager } from '@/core/rules/RuleManager';
 import { getRuleStorage } from '@/core/rules/RuleStorage';
 import { getSiteProtection } from '@/core/protection';
 import { normalizeUrlForFetch } from '@/core/utils/network';
-import type { ParsedChapter } from '@/core/parser';
 import { ReaderView } from '@/ui/components/reader';
-import type { SiteRule } from '@/core/rules/types';
 import { useReaderStore } from '@/ui/stores/reader';
 
 const EXIT_NAVIGATION_KEY = 'mnr_exit_navigation';
@@ -55,6 +57,7 @@ interface AppState {
   originalHostPage: HostPageSnapshot | null; // Host page state when reader was opened
   entryPageKind: PageKind | null; // page kind when reader was opened
   pendingHostOverlayCleanup: boolean; // deferred until the hidden host page is restored
+  progressiveEntryId: string | null; // chapter entry still receiving background section pages
 }
 
 // Global app state
@@ -66,6 +69,7 @@ const appState: AppState = {
   originalHostPage: null,
   entryPageKind: null,
   pendingHostOverlayCleanup: false,
+  progressiveEntryId: null,
 };
 
 // Vue app instance
@@ -260,26 +264,39 @@ async function showPrompt(): Promise<{
 }
 
 /**
- * Launch the reader with parsed content
+ * Launch the reader, then keep feeding it the chapter's remaining section pages.
  */
-function launchReader(
-  chapter: ParsedChapter,
-  rule?: SiteRule,
-  stage: 'initial' | 'update' | 'complete' = 'complete'
-): void {
+function launchReader(event: LaunchEvent): void {
   if (!pinia) {
     console.error('[MNR] Pinia not initialized');
     return;
   }
 
   const readerStore = useReaderStore(pinia);
-  if (stage === 'update') {
-    if (appState.isActive) {
-      readerStore.updateChapter(chapter, rule);
-    }
+
+  if (event.stage === 'append') {
+    if (!appState.isActive || !appState.progressiveEntryId) return;
+    void readerStore.appendChapterSection(appState.progressiveEntryId, {
+      ...event.delta,
+      loaded: event.progress.loaded,
+      total: event.progress.total,
+    });
     return;
   }
+
+  if (event.stage === 'complete' && event.progressive) {
+    const mergingEntryId = appState.progressiveEntryId;
+    appState.progressiveEntryId = null;
+    if (!appState.isActive || !mergingEntryId) return;
+    void readerStore.completeChapterSections(mergingEntryId, event.chapter, event.rule, {
+      truncated: event.truncated,
+    });
+    return;
+  }
+
   if (appState.isActive) return;
+
+  const { chapter, rule } = event;
 
   hideReaderEntry();
 
@@ -295,9 +312,11 @@ function launchReader(
 
   // Update reader store
   readerStore.activate();
-  readerStore.setChapter(chapter, rule);
-  if (stage === 'initial') {
-    readerStore.showToast('正在加载本章剩余内容…', 'info');
+  const entryId = readerStore.setChapter(chapter, rule);
+  if (event.stage === 'initial') {
+    // Register after setChapter: that call cancels in-flight merges, including this one.
+    appState.progressiveEntryId = entryId;
+    readerStore.beginChapterSections(entryId, event.progress, event.abort);
   }
 
   appState.isActive = true;
@@ -496,6 +515,7 @@ export function closeReader(): void {
   appState.isActive = false;
   appState.originalHostPage = null; // Clear saved host page state
   appState.entryPageKind = null;
+  appState.progressiveEntryId = null;
 
   // If current chapter URL is different from the original page URL,
   // navigate to the target URL so page content matches what user was reading

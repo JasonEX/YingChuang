@@ -15,6 +15,8 @@ import type {
   CachedChapter,
   CacheProgressState,
   ChapterEntry,
+  SectionMergeRecord,
+  SectionProgressState,
   TocEntry,
   TocEntryWithStatus,
 } from './reader/types';
@@ -42,7 +44,14 @@ import { createReaderRuntime } from './reader/runtime';
 import { syncHostPageToChapter } from './reader/hostPage';
 
 // Re-export reader types used by UI modules.
-export type { CachedChapter, CacheProgressState, ChapterEntry, TocEntry, TocEntryWithStatus };
+export type {
+  CachedChapter,
+  CacheProgressState,
+  ChapterEntry,
+  SectionProgressState,
+  TocEntry,
+  TocEntryWithStatus,
+};
 
 export const useReaderStore = defineStore('reader', () => {
   // State
@@ -75,6 +84,7 @@ export const useReaderStore = defineStore('reader', () => {
   const tocLoading = ref(false);
   const tocAbort = ref<(() => void) | null>(null);
   const cachedContents = ref<Map<string, CachedChapter>>(new Map());
+  const sectionMerges = ref<Map<string, SectionMergeRecord>>(new Map());
   const persistedUrls = ref<Set<string>>(new Set());
   const runtime = createReaderRuntime();
 
@@ -94,6 +104,14 @@ export const useReaderStore = defineStore('reader', () => {
     if (!navUrl) return null;
     return isVipBlockedUrl(navUrl) ? VIP_BLOCK_TOAST : null;
   }
+
+  /**
+   * True while any displayed chapter is still appending section pages.
+   *
+   * A merging chapter withholds its next-chapter URL, so `hasNext` reads false long before
+   * the book actually ends. Anything that claims "no more chapters" must consult this too.
+   */
+  const isSectionMerging = computed(() => chapters.value.some(entry => !!entry.sectionProgress));
 
   const hasNext = computed(() => {
     const lastChapter = chapters.value[chapters.value.length - 1];
@@ -270,6 +288,7 @@ export const useReaderStore = defineStore('reader', () => {
     vipBlockedUrls,
     blockedNavUrls,
     cachedContents,
+    sectionMerges,
     persistedUrls,
     originalContents,
     originalTitles,
@@ -329,6 +348,7 @@ export const useReaderStore = defineStore('reader', () => {
     reloadAbort.value = null;
     tocAbort.value?.();
     tocAbort.value = null;
+    nav.cancelAllSectionMerges();
 
     isLoadingPrev.value = false;
     isLoadingNext.value = false;
@@ -340,6 +360,7 @@ export const useReaderStore = defineStore('reader', () => {
 
   /** Clear all navigation/cache/toc data */
   function clearAllData() {
+    sectionMerges.value.clear();
     chapters.value = [];
     currentChapterIndex.value = 0;
     clearError();
@@ -368,7 +389,8 @@ export const useReaderStore = defineStore('reader', () => {
     clearAllData();
   }
 
-  function setChapter(newChapter: ParsedChapter, newRule?: SiteRule) {
+  /** Start a reader session on a chapter and return the display entry holding it. */
+  function setChapter(newChapter: ParsedChapter, newRule?: SiteRule): string {
     recordDebugEvent('reader.setChapter', {
       url: newChapter.url,
       title: newChapter.title,
@@ -417,48 +439,8 @@ export const useReaderStore = defineStore('reader', () => {
 
     // Restore the persisted chapter index for this book.
     restoreCache();
-  }
 
-  /** Replace a progressively loaded chapter without resetting the reader session. */
-  function updateChapter(newChapter: ParsedChapter, newRule?: SiteRule): boolean {
-    const url = normalizeUrlForFetch(newChapter.url);
-    const entry = chapters.value.find(item => normalizeUrlForFetch(item.chapter.url) === url);
-    if (!entry) return false;
-
-    recordDebugEvent('reader.updateChapter', {
-      url,
-      title: newChapter.title,
-      ruleId: newRule?.id || newChapter.rule?.id,
-    });
-
-    newChapter.url = url;
-    if (newChapter.prevUrl) newChapter.prevUrl = normalizeUrlForFetch(newChapter.prevUrl);
-    if (newChapter.nextUrl) newChapter.nextUrl = normalizeUrlForFetch(newChapter.nextUrl);
-    if (newChapter.indexUrl) newChapter.indexUrl = normalizeUrlForFetch(newChapter.indexUrl);
-
-    const effectiveRule = newRule || newChapter.rule || entry.rule;
-    entry.chapter = newChapter;
-    entry.rule = effectiveRule;
-    originalContents.value.set(entry.id, newChapter.content);
-    originalTitles.value.set(entry.id, {
-      title: newChapter.title,
-      bookTitle: newChapter.bookTitle,
-    });
-    cachedContents.value.set(url, {
-      chapter: newChapter,
-      rule: effectiveRule,
-      cachedAt: Date.now(),
-    });
-
-    if (currentConversionMode.value !== 'none') {
-      void applyConversionToChapterEntry(entry.id, currentConversionMode.value).then(() => {
-        if (chapters.value[currentChapterIndex.value]?.id === entry.id) syncCurrentHostPage();
-      });
-    } else if (chapters.value[currentChapterIndex.value]?.id === entry.id) {
-      syncCurrentHostPage();
-    }
-
-    return true;
+    return id;
   }
 
   function updateScroll(percent: number) {
@@ -682,11 +664,11 @@ export const useReaderStore = defineStore('reader', () => {
     bookTitle,
     hasNext,
     hasPrev,
+    isSectionMerging,
     tocWithStatus,
     activate,
     deactivate,
     setChapter,
-    updateChapter,
     setCurrentChapter,
     loadNextChapter,
     loadPrevChapter,
@@ -701,6 +683,9 @@ export const useReaderStore = defineStore('reader', () => {
     cancelCacheAll,
     retryFailedCache,
     loadToc: tocActions.loadToc,
+    appendChapterSection: nav.appendChapterSection,
+    beginChapterSections: nav.beginChapterSections,
+    completeChapterSections: nav.completeChapterSections,
     rebuildChaptersAround,
     reloadCurrentChapter,
     persistCache,

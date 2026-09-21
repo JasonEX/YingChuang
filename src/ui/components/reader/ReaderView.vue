@@ -70,6 +70,17 @@
       >
         <h1 class="mnr-chapter-title">{{ entry.chapter.title }}</h1>
         <div v-html="entry.displayContent"></div>
+
+        <!-- Remaining section pages of this chapter, still merging in the background -->
+        <div
+          v-if="entry.sectionProgress"
+          class="mnr-section-progress"
+          role="status"
+          aria-live="polite"
+        >
+          <MnrSpinner size="small" />
+          <span>{{ sectionProgressLabel(entry.sectionProgress) }}</span>
+        </div>
       </article>
 
       <!-- Bottom sentinel for IntersectionObserver -->
@@ -83,7 +94,12 @@
 
       <!-- End of content (no more chapters) -->
       <div
-        v-if="readerStore.chapters.length > 0 && !readerStore.hasNext && !readerStore.isLoadingNext"
+        v-if="
+          readerStore.chapters.length > 0 &&
+          !readerStore.hasNext &&
+          !readerStore.isLoadingNext &&
+          !readerStore.isSectionMerging
+        "
         class="mnr-chapter-end"
       >
         <p class="mnr-chapter-end-text">— 已是最后一章 —</p>
@@ -124,7 +140,11 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { useReaderStore, type TocEntryWithStatus } from '@/ui/stores/reader';
+import {
+  type SectionProgressState,
+  type TocEntryWithStatus,
+  useReaderStore,
+} from '@/ui/stores/reader';
 import { useConfigStore } from '@/ui/stores/config';
 import { useKeyboardShortcuts } from '@/ui/composables/useKeyboardShortcuts';
 import { useReaderScroll } from '@/ui/composables/reader/useReaderScroll';
@@ -355,6 +375,13 @@ function handleSiteAutoEnableChange(enabled: boolean) {
   siteAutoEnableValue.value = enabled;
   emit('siteAutoEnableChange', enabled);
   readerStore.showToast(enabled ? '已开启本站自动阅读' : '已关闭本站自动阅读', 'info');
+}
+
+/** Label the background section merge, falling back to a bare count when no total is known. */
+function sectionProgressLabel(progress: SectionProgressState): string {
+  return progress.total
+    ? `正在加载本章后续内容 ${progress.loaded}/${progress.total}`
+    : `正在加载本章后续内容 ${progress.loaded}`;
 }
 
 function setChapterRef(url: string) {
@@ -669,7 +696,8 @@ onUnmounted(() => {
 
 /* Loading indicators */
 .mnr-loading-prev,
-.mnr-loading-next {
+.mnr-loading-next,
+.mnr-section-progress {
   display: flex;
   align-items: center;
   justify-content: center;
