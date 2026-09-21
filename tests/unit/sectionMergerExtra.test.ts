@@ -15,6 +15,7 @@ import {
   type SectionMergeEnd,
   SectionMerger,
   type SectionPageDelta,
+  streamSectionMerge,
 } from '@/core/auto-enable/SectionMerger';
 import { joinHtml } from '@/core/utils';
 
@@ -656,14 +657,50 @@ describe('SectionMerger (progressive section streaming)', () => {
     expect(result?.content).toContain('<p>page3</p>');
   });
 
-  it('stays silent when the rule opts out, and still merges everything', async () => {
-    const s = setup({ advanced: { disableProgressiveSectionMerge: true } });
-    const result = await s.merger.merge(s.startDoc, s.startUrl, s.handlers);
+  it('reports truncation to whole-chapter consumers even at the one-page cap', async () => {
+    const s = setup();
+    await s.merger.merge(s.startDoc, s.startUrl, {
+      fetcher: s.fetcher,
+      maxPages: 1,
+      onMergeEnd: s.handlers.onMergeEnd,
+    });
+    expect(s.ends).toEqual([{ loaded: 1, total: undefined, truncated: true }]);
+  });
 
-    expect(s.firstPages).toHaveLength(0);
-    expect(s.deltas).toHaveLength(0);
-    expect(s.ends).toHaveLength(0);
-    expect(result?.content).toContain('<p>page3</p>');
+  it('the producer waits for display writes before fetching or completing', async () => {
+    const s = setup();
+    let release!: () => void;
+    const update = vi.fn(
+      async (event: import('@/core/auto-enable/SectionMerger').SectionMergeUpdate) => {
+        if (event.stage === 'append' && event.progress.loaded === 2)
+          await new Promise<void>(resolve => {
+            release = resolve;
+          });
+      }
+    );
+    // Keep the real merge loop, using fixture documents for its requests.
+    const original = s.merger.merge.bind(s.merger);
+    vi.spyOn(s.merger, 'merge').mockImplementation((doc, url, options) =>
+      original(doc, url, { ...options, fetcher: s.fetcher })
+    );
+    const pending = streamSectionMerge(
+      s.merger,
+      s.startDoc,
+      s.startUrl,
+      new AbortController().signal,
+      () => update
+    );
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+    expect(s.fetcher).toHaveBeenCalledTimes(1);
+    expect(update).toHaveBeenCalledTimes(1);
+    release();
+    await pending;
+    expect(s.fetcher).toHaveBeenCalledTimes(2);
+    expect(update.mock.calls.map(([event]) => event.stage)).toEqual([
+      'append',
+      'append',
+      'complete',
+    ]);
   });
 
   it('stays silent when only one page may be merged', async () => {

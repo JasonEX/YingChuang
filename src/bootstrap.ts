@@ -1,3 +1,4 @@
+import type { SectionDelivery } from '@/core/auto-enable/SectionMerger';
 /**
  * Bootstrap - Application entry point
  *
@@ -11,7 +12,6 @@
 import {
   type AutoEnableDecision,
   getAutoEnableManager,
-  type LaunchContinuation,
   type LaunchEvent,
 } from '@/core/AutoEnableManager';
 import { type BootstrapDebugSnapshot, copyDiagnosticInfo } from '@/ui/debug/diagnostics';
@@ -265,7 +265,7 @@ async function showPrompt(): Promise<{
 /**
  * Launch the reader, then keep feeding it the chapter's remaining section pages.
  */
-function launchReader(event: LaunchEvent): LaunchContinuation | void {
+function launchReader(event: LaunchEvent): SectionDelivery | void {
   if (!pinia) {
     console.error('[MNR] Pinia not initialized');
     return;
@@ -303,22 +303,8 @@ function launchReader(event: LaunchEvent): LaunchContinuation | void {
   mountReaderUI();
 
   if (event.stage === 'initial') {
-    // The store owns cancellation and serialization. Late writes can only address this entry.
-    return async update => {
-      if (update.stage === 'append') {
-        await readerStore.appendChapterSection(entryId, {
-          ...update.delta,
-          loaded: update.progress.loaded,
-          total: update.progress.total,
-        });
-      } else if (update.stage === 'complete') {
-        await readerStore.completeChapterSections(entryId, update.chapter, update.rule, {
-          truncated: update.truncated,
-        });
-      } else {
-        readerStore.cancelChapterSections(entryId, update.reason);
-      }
-    };
+    // The store owns cancellation and display updates. Late writes can only address this entry.
+    return readerStore.sectionDelivery(entryId);
   }
 }
 

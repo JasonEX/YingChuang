@@ -2419,3 +2419,57 @@ test('keeps the first-page DOM and selection while merging an 80-page Xszj chapt
   expect(times[79] - times[0]).toBeGreaterThanOrEqual(79 * 750);
   console.log('80-page merge elapsed ms:', times[79] - times[0]);
 });
+
+test('cancelled position restoration preserves storage until the reader actually scrolls', async ({
+  page,
+  context,
+}) => {
+  const url = 'https://m.goboo.cc/gb_1/94443/2';
+  await context.route('https://m.goboo.cc/**', route =>
+    route.fulfill({
+      contentType: 'text/html; charset=utf-8',
+      body: makeGobooNextChapter(),
+    })
+  );
+  const seed = `
+    GM_setValue('mnr-reading-positions', JSON.stringify({[${JSON.stringify(url)}]: {percent: 70, updatedAt: Date.now() - 10000}}));
+    const originalGet = GM_getValue;
+    window.__readPosition = () => originalGet('mnr-reading-positions');
+    const gate = new Promise(resolve => { window.__releasePosition = resolve; });
+    GM_getValue = (key, ...args) => key === 'mnr-reading-positions'
+      ? gate.then(() => originalGet(key, ...args)) : originalGet(key, ...args);
+  `;
+  await context.addInitScript({
+    content:
+      createGmMockScript() +
+      '\n' +
+      seed +
+      '\n' +
+      fs.readFileSync(getMnrE2eConfig().userScriptPath, 'utf8'),
+  });
+  await page.goto(url);
+  const main = page.locator('#mnr-reader-root .mnr-reader-main');
+  await expect(main).toBeVisible();
+  await main.focus();
+  await page.keyboard.press('Shift');
+  await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
+  await page.evaluate(() =>
+    (window as Window & { __releasePosition?: () => void }).__releasePosition!()
+  );
+  const readPercent = async () => {
+    const stored = await page.evaluate(() =>
+      (window as Window & { __readPosition?: () => string }).__readPosition!()
+    );
+    return (JSON.parse(stored) as Record<string, { percent: number }>)[url].percent;
+  };
+  // Allow the deferred storage read and any wrongly queued persistence to settle.
+  await page.waitForTimeout(300);
+  expect(await readPercent()).toBe(70);
+  await expect(main).toHaveJSProperty('scrollTop', 0);
+  await main.evaluate(el => {
+    el.scrollTop = 300;
+  });
+  await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
+  await expect.poll(readPercent).not.toBe(70);
+  expect(await readPercent()).toBeGreaterThan(0);
+});

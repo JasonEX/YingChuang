@@ -9,8 +9,9 @@
 
 import {
   createSectionMerger,
+  type SectionDelivery,
   type SectionMergeProgress,
-  type SectionPageDelta,
+  streamSectionMerge,
 } from '@/core/auto-enable/SectionMerger';
 import {
   DetectionEngine,
@@ -64,14 +65,7 @@ export type LaunchEvent =
     }
   | { stage: 'complete'; chapter: ParsedChapter; rule?: SiteRule };
 
-export type LaunchUpdate =
-  | { stage: 'append'; delta: SectionPageDelta; progress: SectionMergeProgress }
-  | { stage: 'cancel'; reason: 'aborted' | 'failed' }
-  | { stage: 'complete'; chapter: ParsedChapter; rule?: SiteRule; truncated: boolean };
-
-/** Bound to the entry created by one launch, never looked up through current UI state. */
-export type LaunchContinuation = (event: LaunchUpdate) => void | Promise<void>;
-export type LaunchCallback = (event: LaunchEvent) => LaunchContinuation | void;
+export type LaunchCallback = (event: LaunchEvent) => SectionDelivery | void;
 
 /** Auto-enable options */
 export interface AutoEnableOptions {
@@ -412,46 +406,27 @@ export class AutoEnableManager {
     // the reader can pull when it closes.
     const controller = new AbortController();
     let launchedEarly = false;
-    const delivery: { update?: LaunchContinuation } = {};
-    let truncated = false;
 
     try {
       const currentUrl = doc.location?.href || window.location.href;
-      const chapter = await this.sectionMerger.merge(doc, currentUrl, {
-        signal: controller.signal,
-        onFirstPage: (firstPage, progress) => {
+      const chapter = await streamSectionMerge(
+        this.sectionMerger,
+        doc,
+        currentUrl,
+        controller.signal,
+        (firstPage, progress) => {
           if (!this.launchCallback) return;
-          delivery.update =
-            this.launchCallback({
-              stage: 'initial',
-              chapter: firstPage,
-              rule: rule || firstPage.rule,
-              progress,
-              abort: () => controller.abort(),
-            }) || undefined;
           launchedEarly = true;
-        },
-        onSectionPage: async (delta, progress) => {
-          await delivery.update?.({ stage: 'append', delta, progress });
-        },
-        onMergeEnd: end => {
-          truncated = end.truncated;
-        },
-      });
-
-      if (launchedEarly) {
-        if (chapter && !controller.signal.aborted) {
-          await delivery.update?.({
-            stage: 'complete',
-            chapter,
-            rule: rule || chapter.rule,
-            truncated,
+          return this.launchCallback({
+            stage: 'initial',
+            chapter: firstPage,
+            rule: rule || firstPage.rule,
+            progress,
+            abort: () => controller.abort(),
           });
-          return 'complete';
         }
-        await delivery.update?.({ stage: 'cancel', reason: 'aborted' });
-        return 'initial';
-      }
+      );
+      if (launchedEarly) return chapter ? 'complete' : 'initial';
       if (chapter && this.launchCallback) {
         this.launchCallback({ stage: 'complete', chapter, rule: rule || chapter.rule });
         return 'complete';
@@ -460,12 +435,7 @@ export class AutoEnableManager {
       return false;
     } catch (e) {
       console.error('[AutoEnableManager] Parse error:', e);
-      if (launchedEarly) {
-        // The reader is already showing the first page; without this the chapter would stay
-        // marked as merging forever.
-        await delivery.update?.({ stage: 'cancel', reason: 'failed' });
-        return 'initial';
-      }
+      if (launchedEarly) return 'initial';
       this.deactivateProtection();
       return false;
     }

@@ -30,6 +30,7 @@ let readerStore: {
   setChapter: (chapter: { url?: string }, rule?: unknown) => string;
   beginChapterSections: (entryId: string, progress: unknown, abort: () => void) => boolean;
   cancelChapterSections: (entryId: string, reason: 'aborted' | 'failed') => void;
+  sectionDelivery: (id: string) => import('@/core/auto-enable/SectionMerger').SectionDelivery;
   appendChapterSection: (entryId: string, delta: unknown) => Promise<boolean>;
   completeChapterSections: (
     entryId: string,
@@ -195,6 +196,19 @@ describe('bootstrap', () => {
       }),
       beginChapterSections: vi.fn(() => true),
       cancelChapterSections: vi.fn(),
+      sectionDelivery: id => async update => {
+        if (update.stage === 'append')
+          await readerStore.appendChapterSection(id, {
+            ...update.delta,
+            loaded: update.progress.loaded,
+            total: update.progress.total,
+          });
+        else if (update.stage === 'complete')
+          await readerStore.completeChapterSections(id, update.chapter, update.rule, {
+            truncated: update.truncated,
+          });
+        else readerStore.cancelChapterSections(id, update.reason);
+      },
       appendChapterSection: vi.fn(async () => true),
       completeChapterSections: vi.fn(async () => true),
       showToast: vi.fn(),
@@ -652,7 +666,7 @@ describe('bootstrap', () => {
     const merged = { ...first, content: '<p>第一页</p><p>第二页</p>' };
     let launchCb: LaunchCallback | null = null;
     const abort = vi.fn();
-    const delivery: { update?: import('@/core/AutoEnableManager').LaunchContinuation } = {};
+    const delivery: { update?: import('@/core/auto-enable/SectionMerger').SectionDelivery } = {};
     const manager = {
       check: vi.fn(() => ({ shouldEnable: true, method: 'builtin-rule' })),
       setPromptCallback: vi.fn(),

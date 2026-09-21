@@ -64,7 +64,8 @@ vi.mock('@/core/protection', () => ({
   isCloudflareChallenge: vi.fn(() => false),
 }));
 
-vi.mock('@/core/auto-enable/SectionMerger', () => ({
+vi.mock('@/core/auto-enable/SectionMerger', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/core/auto-enable/SectionMerger')>()),
   createSectionMerger: () => mockedSectionMerger,
 }));
 
@@ -387,8 +388,8 @@ describe('AutoEnableManager', () => {
           onSectionPage?: (delta: unknown, progress: unknown) => void;
         }
       ) => {
-        options.onFirstPage?.(firstPage, { url: firstPage.url, loaded: 1 });
-        options.onSectionPage?.(
+        await options.onFirstPage?.(firstPage, { url: firstPage.url, loaded: 1 });
+        await options.onSectionPage?.(
           { content: '<p>second</p>', rawContent: '<p>second</p>' },
           { url: firstPage.url, loaded: 2 }
         );

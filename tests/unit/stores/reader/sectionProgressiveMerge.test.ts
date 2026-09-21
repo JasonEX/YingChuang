@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { parseWithSectionMerge, startProgressiveSectionMerge } from '@/ui/stores/reader/section';
 import { getCacheV2ChapterKey } from '@/ui/stores/reader/persistence';
 import { joinHtml } from '@/core/utils';
 import type { ParsedChapter } from '@/core/parser';
 import type { SectionMergeSink } from '@/ui/stores/reader/sectionProgress';
-import { startProgressiveSectionMerge } from '@/ui/stores/reader/section';
 import { useReaderStore } from '@/ui/stores/reader';
 
 import { createGmStorageMock, stubGmStorage } from '../../../testUtils/gmStorage';
@@ -338,38 +338,42 @@ describe('reader store - section progress', () => {
     expect(mocks.html).toHaveBeenCalledTimes(1);
   });
 
-  it('lands a page still converting when completion arrives right behind it', async () => {
+  it('publishes completeness only after the final conversion and respects cancellation while finishing', async () => {
     const store = useReaderStore();
-    await store.applyTextConversion('tc');
     const { entryId } = startMerge(store);
-
-    // Converting yields. That gap is where a completion used to slip in, disown the append
-    // and drop its page; an unchanged source script then skips the repair pass.
-    let releaseConversion!: (html: string) => void;
-    mocks.html.mockReturnValueOnce(
-      new Promise<string>(resolve => {
-        releaseConversion = resolve;
-      })
+    await store.applyTextConversion('tc');
+    let release!: (html: string) => void;
+    mocks.html.mockImplementationOnce(
+      () =>
+        new Promise<string>(resolve => {
+          release = resolve;
+        })
     );
+    const pending = store.completeChapterSections(entryId, makeChapter({ sourceScript: 'hans' }));
+    expect(store.chapters[0].sectionProgress).toBeDefined();
+    store.cancelChapterSections(entryId, 'failed');
+    release('<p>完成转换</p>');
+    await expect(pending).resolves.toBe(false);
+    expect(store.chapters[0].sectionsIncomplete).toBe(true);
+  });
 
-    const append = store.appendChapterSection(entryId, {
-      content: '<p>最后一页</p>',
-      rawContent: '<p>raw2</p>',
-      sourceScript: 'hant',
-      loaded: 2,
-      total: 2,
-    });
-    const complete = store.completeChapterSections(
-      entryId,
-      makeChapter({ content: fold('<p>第一页</p>', '<p>最后一页</p>'), sourceScript: 'hant' })
+  it('releases a completed merge when its entry is trimmed during final conversion', async () => {
+    const store = useReaderStore();
+    const { entryId, abort } = startMerge(store);
+    await store.applyTextConversion('tc');
+    let release!: (html: string) => void;
+    mocks.html.mockImplementationOnce(
+      () =>
+        new Promise<string>(resolve => {
+          release = resolve;
+        })
     );
-
-    releaseConversion('<p>最后一页</p>');
-    await expect(append).resolves.toBe(true);
-    await complete;
-
-    expect(store.chapters[0]?.chapter.content).toContain('最后一页');
-    expect(store.isTailSectionMerging).toBe(false);
+    const pending = store.completeChapterSections(entryId, makeChapter({ sourceScript: 'hans' }));
+    store.chapters.splice(0);
+    release('<p>完成转换</p>');
+    await expect(pending).resolves.toBe(true);
+    store.deactivate();
+    expect(abort).not.toHaveBeenCalled();
   });
 
   it('leaves the incrementally converted text alone when the script never changed', async () => {
@@ -403,20 +407,13 @@ describe('startProgressiveSectionMerge', () => {
 
   function makeSink() {
     const calls: string[] = [];
-    const sink: SectionMergeSink = {
-      append: vi.fn(async (_entryId, delta) => {
-        calls.push(`append:${delta.loaded}`);
-        return true;
-      }),
-      complete: vi.fn(async () => {
-        calls.push('complete');
-        return true;
-      }),
-      cancel: vi.fn((_entryId, reason) => {
-        calls.push(`cancel:${reason}`);
-      }),
-    };
-    return { calls, sink };
+    const update = vi.fn(
+      async (event: import('@/core/auto-enable/SectionMerger').SectionMergeUpdate) => {
+        calls.push(event.stage === 'append' ? `append:${event.progress.loaded}` : event.stage);
+      }
+    );
+    const sink = vi.fn<SectionMergeSink>(() => update);
+    return { calls, sink, update };
   }
 
   /** Drive the merge callbacks by hand so ordering is deterministic. */
@@ -435,8 +432,21 @@ describe('startProgressiveSectionMerge', () => {
   const parser = {} as never;
   const doc = {} as Document;
 
+  it.each([true, false])(
+    'whole-chapter parsing admits only complete results (truncated=%s)',
+    async truncated => {
+      stubMerger(async options => {
+        options.onMergeEnd({ loaded: 1, truncated });
+        return makeChapter();
+      });
+      const chapter = await parseWithSectionMerge(parser, doc, CHAPTER_URL);
+      if (truncated) expect(chapter).toBeNull();
+      else expect(chapter?.content).toBe('<p>第一页</p>');
+    }
+  );
+
   it('holds the merge until the caller commits the first page', async () => {
-    const { sink } = makeSink();
+    const { sink, update } = makeSink();
     let released = false;
     stubMerger(async options => {
       await options.onFirstPage(makeChapter(), { url: CHAPTER_URL, loaded: 1, total: 2 });
@@ -457,30 +467,32 @@ describe('startProgressiveSectionMerge', () => {
     expect(chapter?.content).toBe('<p>第一页</p>');
     expect(merge?.progress).toEqual({ loaded: 1, total: 2 });
     expect(released).toBe(false);
-    expect(sink.append).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
 
     merge?.commit('chapter-1');
     await vi.waitFor(() => {
-      expect(sink.complete).toHaveBeenCalled();
+      expect(update).toHaveBeenCalledWith(expect.objectContaining({ stage: 'complete' }));
     });
-    expect(sink.append).toHaveBeenCalledWith('chapter-1', {
-      content: '<p>第二页</p>',
-      rawContent: '<p>raw2</p>',
-      loaded: 2,
-      total: 2,
+    expect(sink).toHaveBeenCalledWith('chapter-1');
+    expect(update).toHaveBeenCalledWith({
+      stage: 'append',
+      delta: {
+        content: '<p>第二页</p>',
+        rawContent: '<p>raw2</p>',
+      },
+      progress: { url: CHAPTER_URL, loaded: 2, total: 2 },
     });
   });
 
   it('serialises appends and finishes after the last one', async () => {
-    const { calls, sink } = makeSink();
+    const { calls, sink, update } = makeSink();
     let releaseFirstAppend!: () => void;
     const firstAppendGate = new Promise<void>(resolve => {
       releaseFirstAppend = resolve;
     });
-    vi.mocked(sink.append).mockImplementationOnce(async (_entryId, delta) => {
+    update.mockImplementationOnce(async event => {
       await firstAppendGate;
-      calls.push(`append:${delta.loaded}`);
-      return true;
+      if (event.stage === 'append') calls.push(`append:${event.progress.loaded}`);
     });
 
     stubMerger(async options => {
@@ -514,7 +526,7 @@ describe('startProgressiveSectionMerge', () => {
   });
 
   it('cancels instead of completing once the caller rejects the first page', async () => {
-    const { sink } = makeSink();
+    const { sink, update } = makeSink();
     const controller = new AbortController();
     stubMerger(async options => {
       await options.onFirstPage(makeChapter(), { url: CHAPTER_URL, loaded: 1 });
@@ -531,12 +543,12 @@ describe('startProgressiveSectionMerge', () => {
     await vi.waitFor(() => {
       expect(controller.signal.aborted).toBe(true);
     });
-    expect(sink.complete).not.toHaveBeenCalled();
-    expect(sink.append).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
   });
 
   it('resolves like a plain parse when the chapter has nothing to merge', async () => {
-    const { sink } = makeSink();
+    const { sink, update } = makeSink();
     stubMerger(async () => makeChapter({ content: '<p>whole</p>' }));
 
     const result = await startProgressiveSectionMerge(parser, doc, CHAPTER_URL, {
@@ -546,7 +558,7 @@ describe('startProgressiveSectionMerge', () => {
 
     expect(result.merge).toBeNull();
     expect(result.chapter?.content).toBe('<p>whole</p>');
-    expect(sink.append).not.toHaveBeenCalled();
-    expect(sink.complete).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
   });
 });

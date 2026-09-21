@@ -13,6 +13,7 @@ import type { ParsedChapter, Parser } from '@/core/parser';
 import type { ChineseScript } from '@/core/converter/scriptProfile';
 import { fetchAndParseUrl } from '@/core/utils/network';
 import { getRuleManager } from '@/core/rules/RuleManager';
+import type { SiteRule } from '@/core/rules/types';
 
 const parseSectionUrl = (url: string) => getRuleManager().parseSectionUrl(url);
 
@@ -78,7 +79,7 @@ export interface SectionMergeOptions {
   onFirstPage?: (chapter: ParsedChapter, progress: SectionMergeProgress) => void | Promise<void>;
   /** Called once per additional section page with that page's content only. */
   onSectionPage?: (delta: SectionPageDelta, progress: SectionMergeProgress) => void | Promise<void>;
-  /** Called once when a progressive merge stops, whether or not it completed. */
+  /** Reports completeness for every section merge, including whole-chapter consumers. */
   onMergeEnd?: (end: SectionMergeEnd) => void;
 }
 
@@ -166,10 +167,7 @@ export class SectionMerger {
 
     const maxPages = Math.max(1, options.maxPages ?? first.rule?.advanced?.sectionMaxPages ?? 10);
 
-    const progressive =
-      !!state.nextSectionUrl &&
-      maxPages > 1 &&
-      !first.rule?.advanced?.disableProgressiveSectionMerge;
+    const progressive = !!state.nextSectionUrl && maxPages > 1;
 
     if (progressive) {
       // Merging waits here, so page 2 is never requested before the first page is committed.
@@ -386,13 +384,11 @@ export class SectionMerger {
       }
     }
 
-    if (progressive) {
-      options.onMergeEnd?.({
-        loaded: cursor.loadedPages,
-        total: cursor.totalPages,
-        truncated: this.isTruncatedMerge(cursor, signal),
-      });
-    }
+    options.onMergeEnd?.({
+      loaded: cursor.loadedPages,
+      total: cursor.totalPages,
+      truncated: this.isTruncatedMerge(cursor, signal),
+    });
 
     return this.buildMergedChapter(first, cursor);
   }
@@ -639,4 +635,50 @@ export class SectionMerger {
  */
 export function createSectionMerger(parser: Parser): SectionMerger {
   return new SectionMerger(parser);
+}
+
+/** One display entry receives sequential updates from one merge. */
+export type SectionMergeUpdate =
+  | { stage: 'append'; delta: SectionPageDelta; progress: SectionMergeProgress }
+  | { stage: 'complete'; chapter: ParsedChapter; rule?: SiteRule; truncated: boolean }
+  | { stage: 'cancel'; reason: 'aborted' | 'failed' };
+
+export type SectionDelivery = (update: SectionMergeUpdate) => void | Promise<void>;
+
+/** Shared delivery lifecycle for initial launch and subsequent chapter navigation. */
+export async function streamSectionMerge(
+  merger: SectionMerger,
+  doc: Document,
+  url: string,
+  signal: AbortSignal,
+  first: (
+    chapter: ParsedChapter,
+    progress: SectionMergeProgress
+  ) => SectionDelivery | void | Promise<SectionDelivery | void>
+): Promise<ParsedChapter | null> {
+  const target: { delivery?: SectionDelivery } = {};
+  let truncated = false;
+  try {
+    const chapter = await merger.merge(doc, url, {
+      signal,
+      onFirstPage: async (chapter, progress) => {
+        target.delivery = (await first(chapter, progress)) || undefined;
+      },
+      onSectionPage: async (delta, progress) => {
+        await target.delivery?.({ stage: 'append', delta, progress });
+      },
+      onMergeEnd: end => {
+        truncated = end.truncated;
+      },
+    });
+    if (!chapter || signal.aborted) {
+      await target.delivery?.({ stage: 'cancel', reason: signal.aborted ? 'aborted' : 'failed' });
+      return null;
+    }
+    await target.delivery?.({ stage: 'complete', chapter, rule: chapter.rule, truncated });
+    return truncated && !target.delivery ? null : chapter;
+  } catch (error) {
+    await target.delivery?.({ stage: 'cancel', reason: 'failed' });
+    throw error;
+  }
 }

@@ -112,15 +112,6 @@ interface AdvancedConfig {
    */
   sectionDelayMs?: number;
   /**
-   * Opt out of progressive section merging.
-   *
-   * Multi-page chapters normally show their first section immediately and append the remaining
-   * pages in the background. Set this when a site only becomes readable once every page is
-   * merged, for example when page boundaries split a sentence, or when the first page alone is
-   * indistinguishable from a teaser.
-   */
-  disableProgressiveSectionMerge?: boolean;
-  /**
    * Disable section merging
    * When true, treats each page as independent chapter even if URL looks like section
    */

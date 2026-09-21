@@ -9,6 +9,7 @@ import {
   cancelAllSectionMerges,
   cancelChapterSections,
   completeChapterSections,
+  createSectionMergeSink,
   type SectionAppendDelta,
 } from './sectionProgress';
 import type { CachedChapter, LoadSource, SectionProgressState } from './types';
@@ -396,6 +397,7 @@ export function createNavigation(ctx: NavigationContext) {
   }
 
   return {
+    sectionDelivery: createSectionMergeSink(ctx),
     appendChapterSection: (entryId: string, delta: SectionAppendDelta) =>
       appendChapterSection(ctx, entryId, delta),
     beginChapterSections: (

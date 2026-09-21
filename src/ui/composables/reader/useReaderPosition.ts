@@ -29,25 +29,40 @@ export function useReaderPosition(options: {
   const { mainRef, chapterRefs, readerStore, isNavigating } = options;
   const currentEntry = () => readerStore.chapters[readerStore.currentChapterIndex];
   // One initial restoration belongs to this display entry, including while storage is read.
-  let pendingEntryId: string | null = currentEntry()?.id ?? null;
+  const initialEntryId = currentEntry()?.id;
+  let state: 'pending' | 'cancelled' | 'ready' = initialEntryId ? 'pending' : 'ready';
+  let cancelledScrollTop = 0;
   let savedPercent: number | null = null;
   let disposed = false;
   let lastSaveAt = 0;
 
   function cancelRestore(): void {
-    pendingEntryId = null;
+    if (state !== 'pending') return;
+    state = 'cancelled';
+    cancelledScrollTop = mainRef.value?.scrollTop ?? 0;
+  }
+
+  function allowSaving(): void {
+    state = 'ready';
+  }
+
+  function canSave(): boolean {
+    if (state === 'cancelled' && mainRef.value && mainRef.value.scrollTop !== cancelledScrollTop) {
+      allowSaving();
+    }
+    return state === 'ready';
   }
 
   async function applySavedPosition(): Promise<void> {
     const entry = currentEntry();
-    if (!pendingEntryId || entry?.id !== pendingEntryId || savedPercent === null) return;
+    if (state !== 'pending' || entry?.id !== initialEntryId || savedPercent === null) return;
     if (!isChapterComplete(entry)) return;
-    const id = pendingEntryId;
+    const id = initialEntryId;
     await nextTick();
     await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
     if (
       disposed ||
-      pendingEntryId !== id ||
+      state !== 'pending' ||
       currentEntry()?.id !== id ||
       !isChapterComplete(currentEntry())
     )
@@ -60,17 +75,17 @@ export function useReaderPosition(options: {
     const height = Math.max(0, chapterEl.offsetHeight - mainEl.clientHeight * 0.5);
     mainEl.scrollTop = top + (savedPercent / 100) * height;
     readerStore.updateScroll(savedPercent);
-    cancelRestore();
+    allowSaving();
     readerStore.showToast('已回到上次阅读位置', 'info', 1800);
   }
 
   async function restorePosition(): Promise<void> {
     const entry = currentEntry();
-    if (!entry || entry.id !== pendingEntryId) return;
+    if (!entry || entry.id !== initialEntryId || state !== 'pending') return;
     const percent = await getReadingPosition(entry.chapter.url);
-    if (entry.id !== pendingEntryId) return;
+    if (entry.id !== initialEntryId || state !== 'pending') return;
     if (percent === null || percent < 3 || percent > 98) {
-      cancelRestore();
+      allowSaving();
       return;
     }
     savedPercent = percent;
@@ -84,12 +99,10 @@ export function useReaderPosition(options: {
       currentEntry()?.sectionsIncomplete,
       isNavigating.value,
     ],
-    () => {
-      if (
-        currentEntry()?.id !== pendingEntryId ||
-        isNavigating.value ||
-        currentEntry()?.sectionsIncomplete
-      ) {
+    (value, previous) => {
+      if (value[0] !== previous[0]) {
+        allowSaving();
+      } else if (isNavigating.value || currentEntry()?.sectionsIncomplete) {
         cancelRestore();
       } else {
         void applySavedPosition();
@@ -103,7 +116,7 @@ export function useReaderPosition(options: {
 
   function savePosition(url: string, percent: number): void {
     const entry = currentEntry();
-    if (pendingEntryId || !isChapterComplete(entry) || entry.chapter.url !== url) return;
+    if (!canSave() || !isChapterComplete(entry) || entry.chapter.url !== url) return;
     const now = Date.now();
     if (now - lastSaveAt < 500) return;
     lastSaveAt = now;
@@ -114,7 +127,7 @@ export function useReaderPosition(options: {
     const entry = currentEntry();
     const mainEl = mainRef.value;
     const chapterEl = entry && chapterRefs.get(entry.chapter.url);
-    if (!pendingEntryId && isChapterComplete(entry) && mainEl && chapterEl) {
+    if (canSave() && isChapterComplete(entry) && mainEl && chapterEl) {
       // Growth or conversion may have changed the height since the last scroll event.
       saveReadingPosition(entry.chapter.url, getChapterPercent(mainEl, chapterEl, true));
     }

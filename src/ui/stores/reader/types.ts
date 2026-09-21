@@ -54,8 +54,6 @@ export interface SectionMergeRecord {
   convertedMode: ConversionMode;
   /** Source script the appended deltas were converted with */
   convertedScript?: ChineseScript;
-  /** Serialises this merge's writes; see `queueMergeWrite` */
-  queue: Promise<unknown>;
 }
 
 /** Chapter entry for infinite scroll */

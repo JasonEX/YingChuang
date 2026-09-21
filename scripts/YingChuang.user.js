@@ -4939,7 +4939,7 @@
 			const state = this.decideSectionMerge(startPage, first, confidenceThreshold, !!options.fetcher);
 			if (state.kind === "done") return state.chapter;
 			const maxPages = Math.max(1, options.maxPages ?? first.rule?.advanced?.sectionMaxPages ?? 10);
-			const progressive = !!state.nextSectionUrl && maxPages > 1 && !first.rule?.advanced?.disableProgressiveSectionMerge;
+			const progressive = !!state.nextSectionUrl && maxPages > 1;
 			if (progressive) {
 				await options.onFirstPage?.({
 					...first,
@@ -5070,7 +5070,7 @@
 					total: cursor.totalPages
 				});
 			}
-			if (progressive) options.onMergeEnd?.({
+			options.onMergeEnd?.({
 				loaded: cursor.loadedPages,
 				total: cursor.totalPages,
 				truncated: this.isTruncatedMerge(cursor, signal)
@@ -5225,6 +5225,48 @@
 	};
 	function createSectionMerger(parser) {
 		return new SectionMerger(parser);
+	}
+	async function streamSectionMerge(merger, doc, url, signal, first) {
+		const target = {};
+		let truncated = false;
+		try {
+			const chapter = await merger.merge(doc, url, {
+				signal,
+				onFirstPage: async (chapter, progress) => {
+					target.delivery = await first(chapter, progress) || void 0;
+				},
+				onSectionPage: async (delta, progress) => {
+					await target.delivery?.({
+						stage: "append",
+						delta,
+						progress
+					});
+				},
+				onMergeEnd: (end) => {
+					truncated = end.truncated;
+				}
+			});
+			if (!chapter || signal.aborted) {
+				await target.delivery?.({
+					stage: "cancel",
+					reason: signal.aborted ? "aborted" : "failed"
+				});
+				return null;
+			}
+			await target.delivery?.({
+				stage: "complete",
+				chapter,
+				rule: chapter.rule,
+				truncated
+			});
+			return truncated && !target.delivery ? null : chapter;
+		} catch (error) {
+			await target.delivery?.({
+				stage: "cancel",
+				reason: "failed"
+			});
+			throw error;
+		}
 	}
 	var DEFAULT_THRESHOLD = .6;
 	var DEFAULT_WEIGHTS = {
@@ -8778,50 +8820,20 @@
 			this.activateProtection();
 			const controller = new AbortController();
 			let launchedEarly = false;
-			const delivery = {};
-			let truncated = false;
 			try {
 				const currentUrl = doc.location?.href || window.location.href;
-				const chapter = await this.sectionMerger.merge(doc, currentUrl, {
-					signal: controller.signal,
-					onFirstPage: (firstPage, progress) => {
-						if (!this.launchCallback) return;
-						delivery.update = this.launchCallback({
-							stage: "initial",
-							chapter: firstPage,
-							rule: rule || firstPage.rule,
-							progress,
-							abort: () => controller.abort()
-						}) || void 0;
-						launchedEarly = true;
-					},
-					onSectionPage: async (delta, progress) => {
-						await delivery.update?.({
-							stage: "append",
-							delta,
-							progress
-						});
-					},
-					onMergeEnd: (end) => {
-						truncated = end.truncated;
-					}
-				});
-				if (launchedEarly) {
-					if (chapter && !controller.signal.aborted) {
-						await delivery.update?.({
-							stage: "complete",
-							chapter,
-							rule: rule || chapter.rule,
-							truncated
-						});
-						return "complete";
-					}
-					await delivery.update?.({
-						stage: "cancel",
-						reason: "aborted"
+				const chapter = await streamSectionMerge(this.sectionMerger, doc, currentUrl, controller.signal, (firstPage, progress) => {
+					if (!this.launchCallback) return;
+					launchedEarly = true;
+					return this.launchCallback({
+						stage: "initial",
+						chapter: firstPage,
+						rule: rule || firstPage.rule,
+						progress,
+						abort: () => controller.abort()
 					});
-					return "initial";
-				}
+				});
+				if (launchedEarly) return chapter ? "complete" : "initial";
 				if (chapter && this.launchCallback) {
 					this.launchCallback({
 						stage: "complete",
@@ -8834,13 +8846,7 @@
 				return false;
 			} catch (e) {
 				console.error("[AutoEnableManager] Parse error:", e);
-				if (launchedEarly) {
-					await delivery.update?.({
-						stage: "cancel",
-						reason: "failed"
-					});
-					return "initial";
-				}
+				if (launchedEarly) return "initial";
 				this.deactivateProtection();
 				return false;
 			}
@@ -19173,7 +19179,15 @@ ul, ol {
 		};
 	}
 	async function parseWithSectionMerge(parser, initialDoc, url, options = {}) {
-		return createSectionMerger(parser).merge(initialDoc, url, options);
+		const merger = createSectionMerger(parser);
+		let truncated = false;
+		const chapter = await merger.merge(initialDoc, url, {
+			...options,
+			onMergeEnd: (end) => {
+				truncated = end.truncated;
+			}
+		});
+		return truncated || options.signal?.aborted ? null : chapter;
 	}
 	async function startProgressiveSectionMerge(parser, initialDoc, url, options) {
 		const { controller, sink } = options;
@@ -19185,50 +19199,20 @@ ul, ol {
 		const gate = new Promise((resolve) => {
 			releaseGate = resolve;
 		});
-		let entryId = null;
-		let progressive = false;
-		let progress = { loaded: 1 };
-		let truncated = false;
-		createSectionMerger(parser).merge(initialDoc, url, {
-			signal: controller.signal,
-			onFirstPage: (chapter, info) => {
-				progressive = true;
-				progress = {
-					loaded: info.loaded,
-					total: info.total
-				};
-				resolveFirst(chapter);
-				return gate;
-			},
-			onSectionPage: async (delta, info) => {
-				const target = entryId;
-				if (!target) return;
-				await sink.append(target, {
-					...delta,
-					loaded: info.loaded,
-					total: info.total
-				});
-			},
-			onMergeEnd: (end) => {
-				truncated = end.truncated;
-			}
-		}).then(async (chapter) => {
+		let progress = null;
+		streamSectionMerge(createSectionMerger(parser), initialDoc, url, controller.signal, (chapter, info) => {
+			progress = {
+				loaded: info.loaded,
+				total: info.total
+			};
 			resolveFirst(chapter);
-			const target = entryId;
-			if (!target) return;
-			if (!chapter || controller.signal.aborted) {
-				sink.cancel(target, controller.signal.aborted ? "aborted" : "failed");
-				return;
-			}
-			await sink.complete(target, chapter, chapter.rule, { truncated });
-		}).catch((error) => {
+			return gate;
+		}).then(resolveFirst).catch((error) => {
 			console.error("[MNR] Background section merge failed:", error);
-			const target = entryId;
-			if (target) sink.cancel(target, "failed");
 			resolveFirst(null);
 		});
 		const chapter = await firstReady;
-		if (!progressive) return {
+		if (!progress) return {
 			chapter,
 			merge: null
 		};
@@ -19238,8 +19222,7 @@ ul, ol {
 				progress,
 				abort: () => controller.abort(),
 				commit: (id) => {
-					entryId = id;
-					releaseGate();
+					releaseGate(sink(id));
 				},
 				reject: () => {
 					controller.abort();
@@ -19262,16 +19245,14 @@ ul, ol {
 		for (let i = 0; i < toDeleteCount; i++) navFailures.delete(entries[i][0]);
 	}
 	function createSectionMergeSink(ctx) {
-		return {
-			append: (entryId, delta) => appendChapterSection(ctx, entryId, delta),
-			complete: (entryId, chapter, rule, info) => completeChapterSections(ctx, entryId, chapter, rule, info),
-			cancel: (entryId, reason) => cancelChapterSections(ctx, entryId, reason)
+		return (entryId) => async (update) => {
+			if (update.stage === "append") await appendChapterSection(ctx, entryId, {
+				...update.delta,
+				...update.progress
+			});
+			else if (update.stage === "complete") await completeChapterSections(ctx, entryId, update.chapter, update.rule, update);
+			else cancelChapterSections(ctx, entryId, update.reason);
 		};
-	}
-	function queueMergeWrite(merge, task) {
-		const run = merge.queue.then(task, task);
-		merge.queue = run.then(() => void 0, () => void 0);
-		return run;
 	}
 	function findMergingEntry(ctx, entryId, merge) {
 		if (ctx.sectionMerges.value.get(entryId) !== merge) return null;
@@ -19285,8 +19266,7 @@ ul, ol {
 		ctx.sectionMerges.value.set(entryId, {
 			abort,
 			convertedMode: ctx.currentConversionMode.value,
-			convertedScript: entry.chapter.sourceScript,
-			queue: Promise.resolve()
+			convertedScript: entry.chapter.sourceScript
 		});
 		ctx.cachedContents.value.delete(entry.chapter.url);
 		ctx.cachedContents.value.delete(normalizeUrlForFetch(entry.chapter.url));
@@ -19297,12 +19277,9 @@ ul, ol {
 		});
 		return true;
 	}
-	function appendChapterSection(ctx, entryId, delta) {
+	async function appendChapterSection(ctx, entryId, delta) {
 		const merge = ctx.sectionMerges.value.get(entryId);
-		if (!merge) return Promise.resolve(false);
-		return queueMergeWrite(merge, () => appendSectionPage(ctx, entryId, merge, delta));
-	}
-	async function appendSectionPage(ctx, entryId, merge, delta) {
+		if (!merge) return false;
 		const entry = findMergingEntry(ctx, entryId, merge);
 		if (!entry) return false;
 		const folded = joinHtml(ctx.originalContents.value.get(entryId) ?? entry.chapter.content, delta.content);
@@ -19336,14 +19313,9 @@ ul, ol {
 		};
 		return true;
 	}
-	function completeChapterSections(ctx, entryId, chapter, rule, info = {}) {
+	async function completeChapterSections(ctx, entryId, chapter, rule, info = {}) {
 		const merge = ctx.sectionMerges.value.get(entryId);
-		if (!merge) return Promise.resolve(false);
-		return queueMergeWrite(merge, () => finishChapterSections(ctx, entryId, merge, chapter, rule, info));
-	}
-	async function finishChapterSections(ctx, entryId, merge, chapter, rule, info) {
-		if (ctx.sectionMerges.value.get(entryId) !== merge) return false;
-		ctx.sectionMerges.value.delete(entryId);
+		if (!merge) return false;
 		const url = normalizeUrlForFetch(chapter.url);
 		const merged = {
 			...chapter,
@@ -19368,7 +19340,10 @@ ul, ol {
 			url
 		});
 		if (info.truncated) ctx.showToast("本章后续内容加载不完整", "info", 2500);
-		if (!entry) return !info.truncated;
+		if (!entry) {
+			ctx.sectionMerges.value.delete(entryId);
+			return !info.truncated;
+		}
 		ctx.originalContents.value.set(entryId, merged.content);
 		entry.rule = effectiveRule;
 		entry.chapter = {
@@ -19379,10 +19354,12 @@ ul, ol {
 			indexUrl: merged.indexUrl,
 			sourceScript: merged.sourceScript
 		};
+		await reconcileMergedConversion(ctx, entryId, entry, merged, merge.convertedScript, merge.convertedMode);
+		if (ctx.sectionMerges.value.get(entryId) !== merge) return false;
+		ctx.sectionMerges.value.delete(entryId);
 		delete entry.sectionProgress;
 		if (info.truncated) entry.sectionsIncomplete = true;
 		else delete entry.sectionsIncomplete;
-		await reconcileMergedConversion(ctx, entryId, entry, merged, merge.convertedScript, merge.convertedMode);
 		return true;
 	}
 	async function reconcileMergedConversion(ctx, entryId, entry, merged, convertedScript, convertedMode) {
@@ -20338,6 +20315,7 @@ ul, ol {
 			return insertCachedChapter(ctx, cached, position);
 		}
 		return {
+			sectionDelivery: createSectionMergeSink(ctx),
 			appendChapterSection: (entryId, delta) => appendChapterSection(ctx, entryId, delta),
 			beginChapterSections: (entryId, progress, abort) => beginChapterSections(ctx, entryId, progress, abort),
 			cancelAllSectionMerges: () => cancelAllSectionMerges(ctx),
@@ -20896,6 +20874,7 @@ ul, ol {
 			cancelCacheAll,
 			retryFailedCache,
 			loadToc: tocActions.loadToc,
+			sectionDelivery: nav.sectionDelivery,
 			appendChapterSection: nav.appendChapterSection,
 			beginChapterSections: nav.beginChapterSections,
 			cancelChapterSections: nav.cancelChapterSections,
@@ -21078,21 +21057,32 @@ ul, ol {
 	function useReaderPosition(options) {
 		const { mainRef, chapterRefs, readerStore, isNavigating } = options;
 		const currentEntry = () => readerStore.chapters[readerStore.currentChapterIndex];
-		let pendingEntryId = currentEntry()?.id ?? null;
+		const initialEntryId = currentEntry()?.id;
+		let state = initialEntryId ? "pending" : "ready";
+		let cancelledScrollTop = 0;
 		let savedPercent = null;
 		let disposed = false;
 		let lastSaveAt = 0;
 		function cancelRestore() {
-			pendingEntryId = null;
+			if (state !== "pending") return;
+			state = "cancelled";
+			cancelledScrollTop = mainRef.value?.scrollTop ?? 0;
+		}
+		function allowSaving() {
+			state = "ready";
+		}
+		function canSave() {
+			if (state === "cancelled" && mainRef.value && mainRef.value.scrollTop !== cancelledScrollTop) allowSaving();
+			return state === "ready";
 		}
 		async function applySavedPosition() {
 			const entry = currentEntry();
-			if (!pendingEntryId || entry?.id !== pendingEntryId || savedPercent === null) return;
+			if (state !== "pending" || entry?.id !== initialEntryId || savedPercent === null) return;
 			if (!isChapterComplete(entry)) return;
-			const id = pendingEntryId;
+			const id = initialEntryId;
 			await nextTick();
 			await new Promise((resolve) => requestAnimationFrame(() => resolve()));
-			if (disposed || pendingEntryId !== id || currentEntry()?.id !== id || !isChapterComplete(currentEntry())) return;
+			if (disposed || state !== "pending" || currentEntry()?.id !== id || !isChapterComplete(currentEntry())) return;
 			const mainEl = mainRef.value;
 			const chapterEl = chapterRefs.get(entry.chapter.url);
 			if (!mainEl || !chapterEl) return;
@@ -21100,16 +21090,16 @@ ul, ol {
 			const height = Math.max(0, chapterEl.offsetHeight - mainEl.clientHeight * .5);
 			mainEl.scrollTop = top + savedPercent / 100 * height;
 			readerStore.updateScroll(savedPercent);
-			cancelRestore();
+			allowSaving();
 			readerStore.showToast("已回到上次阅读位置", "info", 1800);
 		}
 		async function restorePosition() {
 			const entry = currentEntry();
-			if (!entry || entry.id !== pendingEntryId) return;
+			if (!entry || entry.id !== initialEntryId || state !== "pending") return;
 			const percent = await getReadingPosition(entry.chapter.url);
-			if (entry.id !== pendingEntryId) return;
+			if (entry.id !== initialEntryId || state !== "pending") return;
 			if (percent === null || percent < 3 || percent > 98) {
-				cancelRestore();
+				allowSaving();
 				return;
 			}
 			savedPercent = percent;
@@ -21120,8 +21110,9 @@ ul, ol {
 			currentEntry()?.sectionProgress !== void 0,
 			currentEntry()?.sectionsIncomplete,
 			isNavigating.value
-		], () => {
-			if (currentEntry()?.id !== pendingEntryId || isNavigating.value || currentEntry()?.sectionsIncomplete) cancelRestore();
+		], (value, previous) => {
+			if (value[0] !== previous[0]) allowSaving();
+			else if (isNavigating.value || currentEntry()?.sectionsIncomplete) cancelRestore();
 			else applySavedPosition();
 		}, { flush: "post" });
 		onScopeDispose(() => {
@@ -21129,7 +21120,7 @@ ul, ol {
 		});
 		function savePosition(url, percent) {
 			const entry = currentEntry();
-			if (pendingEntryId || !isChapterComplete(entry) || entry.chapter.url !== url) return;
+			if (!canSave() || !isChapterComplete(entry) || entry.chapter.url !== url) return;
 			const now = Date.now();
 			if (now - lastSaveAt < 500) return;
 			lastSaveAt = now;
@@ -21139,7 +21130,7 @@ ul, ol {
 			const entry = currentEntry();
 			const mainEl = mainRef.value;
 			const chapterEl = entry && chapterRefs.get(entry.chapter.url);
-			if (!pendingEntryId && isChapterComplete(entry) && mainEl && chapterEl) saveReadingPosition(entry.chapter.url, getChapterPercent(mainEl, chapterEl, true));
+			if (canSave() && isChapterComplete(entry) && mainEl && chapterEl) saveReadingPosition(entry.chapter.url, getChapterPercent(mainEl, chapterEl, true));
 			flushReadingPositions();
 		}
 		return {
@@ -23649,15 +23640,7 @@ ul, ol {
 		if (event.stage === "initial") readerStore.beginChapterSections(entryId, event.progress, event.abort);
 		appState.isActive = true;
 		mountReaderUI();
-		if (event.stage === "initial") return async (update) => {
-			if (update.stage === "append") await readerStore.appendChapterSection(entryId, {
-				...update.delta,
-				loaded: update.progress.loaded,
-				total: update.progress.total
-			});
-			else if (update.stage === "complete") await readerStore.completeChapterSections(entryId, update.chapter, update.rule, { truncated: update.truncated });
-			else readerStore.cancelChapterSections(entryId, update.reason);
-		};
+		if (event.stage === "initial") return readerStore.sectionDelivery(entryId);
 	}
 	function mountReaderUI() {
 		if (document.getElementById("mnr-reader-root")) return;

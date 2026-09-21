@@ -123,6 +123,41 @@ describe('reader positions across section merging', () => {
     expect(main.scrollTop).toBe(0);
   });
 
+  it.each(['storage', 'frame'] as const)(
+    'preserves saved progress after cancellation during %s until scrolling',
+    async stage => {
+      let releaseRead!: (value: number) => void;
+      let frame!: FrameRequestCallback;
+      vi.mocked(getReadingPosition).mockReturnValue(
+        new Promise(resolve => {
+          releaseRead = resolve;
+        })
+      );
+      vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+        frame = callback;
+        return 1;
+      });
+      const { position, main } = setup(false);
+      const pending = position.restorePosition();
+      if (stage === 'frame') {
+        releaseRead(70);
+        await vi.waitFor(() => expect(frame).toBeTypeOf('function'));
+      }
+      position.cancelRestore();
+      position.savePosition(url, 0);
+      position.flushPosition();
+      expect(saveReadingPosition).not.toHaveBeenCalled();
+      if (stage === 'storage') releaseRead(70);
+      else frame(0);
+      await pending;
+      position.flushPosition();
+      expect(saveReadingPosition).not.toHaveBeenCalled();
+      main.scrollTop = 450;
+      position.flushPosition();
+      expect(saveReadingPosition).toHaveBeenLastCalledWith(url, 50);
+    }
+  );
+
   it('does not overwrite a saved position when closing before its frame commits', async () => {
     let frame!: FrameRequestCallback;
     vi.stubGlobal('requestAnimationFrame', (fn: FrameRequestCallback) => {

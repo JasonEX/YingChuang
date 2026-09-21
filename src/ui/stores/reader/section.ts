@@ -5,7 +5,11 @@
  * Delegates to the core SectionMerger for the actual merge logic.
  */
 
-import { createSectionMerger } from '@/core/auto-enable/SectionMerger';
+import {
+  createSectionMerger,
+  type SectionDelivery,
+  streamSectionMerge,
+} from '@/core/auto-enable/SectionMerger';
 import { getParser } from '@/core/parser';
 import type { ParsedChapter } from '@/core/parser';
 import type { SectionMergeSink } from './sectionProgress';
@@ -22,7 +26,15 @@ export async function parseWithSectionMerge(
   options: { signal?: AbortSignal } = {}
 ): Promise<ParsedChapter | null> {
   const merger = createSectionMerger(parser);
-  return merger.merge(initialDoc, url, options);
+  let truncated = false;
+  const chapter = await merger.merge(initialDoc, url, {
+    ...options,
+    onMergeEnd: end => {
+      truncated = end.truncated;
+    },
+  });
+  // Whole-chapter consumers must never cache or insert a truncated result as complete.
+  return truncated || options.signal?.aborted ? null : chapter;
 }
 
 /** Handle the caller uses to commit or drop the first section page of a progressive merge. */
@@ -64,53 +76,31 @@ export async function startProgressiveSectionMerge(
     resolveFirst = resolve;
   });
 
-  let releaseGate!: () => void;
-  const gate = new Promise<void>(resolve => {
+  let releaseGate!: (delivery?: SectionDelivery) => void;
+  const gate = new Promise<SectionDelivery | void>(resolve => {
     releaseGate = resolve;
   });
 
-  let entryId: string | null = null;
-  let progressive = false;
-  let progress: SectionProgressState = { loaded: 1 };
-  let truncated = false;
-
-  void createSectionMerger(parser)
-    .merge(initialDoc, url, {
-      signal: controller.signal,
-      onFirstPage: (chapter, info) => {
-        progressive = true;
-        progress = { loaded: info.loaded, total: info.total };
-        resolveFirst(chapter);
-        return gate;
-      },
-      onSectionPage: async (delta, info) => {
-        const target = entryId;
-        if (!target) return;
-        await sink.append(target, { ...delta, loaded: info.loaded, total: info.total });
-      },
-      onMergeEnd: end => {
-        truncated = end.truncated;
-      },
-    })
-    .then(async chapter => {
+  let progress: SectionProgressState | null = null;
+  void streamSectionMerge(
+    createSectionMerger(parser),
+    initialDoc,
+    url,
+    controller.signal,
+    (chapter, info) => {
+      progress = { loaded: info.loaded, total: info.total };
       resolveFirst(chapter);
-      const target = entryId;
-      if (!target) return;
-      if (!chapter || controller.signal.aborted) {
-        sink.cancel(target, controller.signal.aborted ? 'aborted' : 'failed');
-        return;
-      }
-      await sink.complete(target, chapter, chapter.rule, { truncated });
-    })
+      return gate;
+    }
+  )
+    .then(resolveFirst)
     .catch(error => {
       console.error('[MNR] Background section merge failed:', error);
-      const target = entryId;
-      if (target) sink.cancel(target, 'failed');
       resolveFirst(null);
     });
 
   const chapter = await firstReady;
-  if (!progressive) return { chapter, merge: null };
+  if (!progress) return { chapter, merge: null };
 
   return {
     chapter,
@@ -118,8 +108,7 @@ export async function startProgressiveSectionMerge(
       progress,
       abort: () => controller.abort(),
       commit: (id: string) => {
-        entryId = id;
-        releaseGate();
+        releaseGate(sink(id));
       },
       reject: () => {
         controller.abort();

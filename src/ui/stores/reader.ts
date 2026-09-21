@@ -680,6 +680,7 @@ export const useReaderStore = defineStore('reader', () => {
     cancelCacheAll,
     retryFailedCache,
     loadToc: tocActions.loadToc,
+    sectionDelivery: nav.sectionDelivery,
     appendChapterSection: nav.appendChapterSection,
     beginChapterSections: nav.beginChapterSections,
     cancelChapterSections: nav.cancelChapterSections,

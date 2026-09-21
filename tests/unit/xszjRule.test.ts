@@ -159,7 +159,6 @@ describe('xszj rule', () => {
     expect(xszjRule.version).toBe(1);
     expect(xszjRule.advanced?.checkSection).toBe(true);
     expect(xszjRule.advanced?.sectionMaxPages).toBe(99);
-    expect(xszjRule.advanced?.disableProgressiveSectionMerge).toBeUndefined();
 
     const pattern = new RegExp(xszjRule.match.pattern, 'i');
     expect(pattern.test(page1Url)).toBe(true);
