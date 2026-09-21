@@ -20141,7 +20141,9 @@ ul, ol {
 			const current = ctx.chapters.value[ctx.currentChapterIndex.value];
 			if (!current) return;
 			const url = current.chapter.url;
+			const abandonedMerge = ctx.sectionMerges.value.has(current.id);
 			cancelChapterSections(ctx, current.id, "aborted");
+			if (abandonedMerge) current.sectionsIncomplete = true;
 			ctx.showToast("正在重新加载...", "info");
 			ctx.reloadAbort.value?.();
 			ctx.reloadAbort.value = null;
