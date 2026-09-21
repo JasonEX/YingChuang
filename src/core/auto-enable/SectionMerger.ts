@@ -280,6 +280,14 @@ export class SectionMerger {
     return undefined;
   }
 
+  /** A merge is truncated whenever pages it was still owed never arrived. */
+  private isTruncatedMerge(cursor: MergeCursor, signal?: AbortSignal): boolean {
+    if (cursor.nextSectionUrl || signal?.aborted) return true;
+    // Every merged page confirmed this total, so falling short of it means pages are missing
+    // even though the site stopped linking to them.
+    return cursor.totalPages !== undefined && cursor.loadedPages < cursor.totalPages;
+  }
+
   /** Keep a section total only while every page agrees with it. */
   private reconcileSectionTotal(
     cursor: MergeCursor,
@@ -378,7 +386,7 @@ export class SectionMerger {
       options.onMergeEnd?.({
         loaded: cursor.loadedPages,
         total: cursor.totalPages,
-        truncated: !!cursor.nextSectionUrl || !!signal?.aborted,
+        truncated: this.isTruncatedMerge(cursor, signal),
       });
     }
 

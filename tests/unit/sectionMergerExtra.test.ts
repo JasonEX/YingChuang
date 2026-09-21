@@ -674,6 +674,14 @@ describe('SectionMerger (progressive section streaming)', () => {
     expect(s.ends).toEqual([{ loaded: 3, total: undefined, truncated: false }]);
   });
 
+  it('reports truncation when the pages stop short of their own declared total', async () => {
+    // Every page agrees the chapter has 3, but page 2's next-section link is missing.
+    const s = setup({ marker: page => `(${page}/3)`, pages: 2 });
+    await s.merger.merge(s.startDoc, s.startUrl, s.handlers);
+
+    expect(s.ends[0]).toEqual({ loaded: 2, total: 3, truncated: true });
+  });
+
   it('reports truncation when a section page cannot be fetched', async () => {
     const s = setup({ missing: [3] });
     await s.merger.merge(s.startDoc, s.startUrl, s.handlers);
