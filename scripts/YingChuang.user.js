@@ -3,7 +3,7 @@
 // @name:zh-CN         萤窗
 // @name:zh-TW         螢窗
 // @namespace          https://github.com/JasonEX
-// @version            1.0.4
+// @version            1.0.5
 // @author             JasonEX
 // @description        萤窗：小说阅读脚本，智能正文识别、连续阅读、阅读位置恢复、简繁转换
 // @description:zh-CN  萤窗：小说阅读脚本，智能正文识别、连续阅读、阅读位置恢复、简繁转换
@@ -8895,8 +8895,8 @@
 		else if (options) managerInstance.updateOptions(options);
 		return managerInstance;
 	}
-	var VERSION = "1.0.4";
-	var BUILD_DATE = "2026-09-20";
+	var VERSION = "1.0.5";
+	var BUILD_DATE = "2026-09-21";
 	var SENSITIVE_QUERY_KEY = /(?:^|[_-])(?:token|auth|session|sid|key|sign|signature|ticket|password|passwd|pwd|jwt|credential|access|refresh|challenge|chl)(?:[_-]|$)|^__cf_|^_csrfToken$/i;
 	function redactUrl(url) {
 		if (!url) return null;
