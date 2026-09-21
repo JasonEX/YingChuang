@@ -941,6 +941,123 @@ describe('ReaderStore - workflows', () => {
     store.clearError();
   });
 
+  it('stops a running section merge before a reload replaces the chapter', async () => {
+    const store = useReaderStore();
+    const entryId = store.setChapter({
+      title: '第1章',
+      content: '<p>第一页</p>',
+      rawContent: '<p>第一页</p>',
+      url: 'https://example.com/book/1/1.html',
+      indexUrl: 'https://example.com/book/1/index.html',
+      confidence: 1,
+      method: 'rule',
+    });
+    const abort = vi.fn();
+    store.beginChapterSections(entryId, { loaded: 1, total: 4 }, abort);
+
+    const doc = new DOMParser().parseFromString('<html><body>new</body></html>', 'text/html');
+    mockFetchAndParseUrl.mockReturnValue({
+      promise: Promise.resolve({
+        doc,
+        status: 200,
+        finalUrl: 'https://example.com/book/1/1.html',
+        error: null,
+      }),
+      abort: vi.fn(),
+    });
+    mockParseWithSectionMerge.mockResolvedValueOnce({
+      title: '第1章',
+      content: '<p>重新加载</p>',
+      rawContent: '<p>重新加载</p>',
+      url: 'https://example.com/book/1/1.html',
+      indexUrl: 'https://example.com/book/1/index.html',
+      confidence: 1,
+      method: 'rule',
+    });
+
+    await store.reloadCurrentChapter();
+
+    expect(abort).toHaveBeenCalledTimes(1);
+    expect(store.chapters[0]?.sectionProgress).toBeUndefined();
+    expect(store.chapters[0]?.chapter.content).toBe('<p>重新加载</p>');
+
+    // The abandoned merge must not append its remaining pages onto the replacement.
+    await expect(
+      store.appendChapterSection(entryId, {
+        content: '<p>陈旧分页</p>',
+        rawContent: '<p>陈旧分页</p>',
+        loaded: 2,
+        total: 4,
+      })
+    ).resolves.toBe(false);
+    expect(store.chapters[0]?.chapter.content).not.toContain('陈旧分页');
+
+    store.clearError();
+  });
+
+  it('waits for a whole previous chapter instead of streaming it above the reader', async () => {
+    const store = useReaderStore();
+    store.setChapter({
+      title: '第2章',
+      content: '<p>c2</p>',
+      rawContent: '<p>c2</p>',
+      url: 'https://example.com/book/1/2.html',
+      indexUrl: 'https://example.com/book/1/index.html',
+      prevUrl: 'https://example.com/book/1/1.html',
+      confidence: 1,
+      method: 'rule',
+    });
+
+    const doc = new DOMParser().parseFromString('<html><body><p>x</p></body></html>', 'text/html');
+    mockFetchAndParseUrl.mockReturnValue({
+      promise: Promise.resolve({
+        doc,
+        status: 200,
+        finalUrl: 'https://example.com/book/1/1.html',
+        error: null,
+      }),
+      abort: vi.fn(),
+    });
+    // Had the prev load streamed, it would have received this first section, which names no
+    // next chapter and is rejected as a table of contents.
+    mockStartProgressiveSectionMerge.mockResolvedValue({
+      chapter: {
+        title: '第1章',
+        content: '<p>第一页</p>',
+        rawContent: '<p>第一页</p>',
+        url: 'https://example.com/book/1/1.html',
+        indexUrl: 'https://example.com/book/1/index.html',
+        prevUrl: 'https://example.com/book/1/0.html',
+        confidence: 1,
+        method: 'rule',
+      },
+      merge: {
+        progress: { loaded: 1, total: 2 },
+        abort: vi.fn(),
+        commit: vi.fn(),
+        reject: vi.fn(),
+      },
+    });
+    // Only the merged chapter names a next URL.
+    mockParseWithSectionMerge.mockResolvedValueOnce({
+      title: '第1章',
+      content: '<p>第一页</p><p>第二页</p>',
+      rawContent: '<p>第一页</p><p>第二页</p>',
+      url: 'https://example.com/book/1/1.html',
+      indexUrl: 'https://example.com/book/1/index.html',
+      prevUrl: 'https://example.com/book/1/0.html',
+      nextUrl: 'https://example.com/book/1/2.html',
+      confidence: 1,
+      method: 'rule',
+    });
+
+    expect(await store.loadPrevChapter('manual')).toBe(true);
+
+    expect(mockStartProgressiveSectionMerge).not.toHaveBeenCalled();
+    expect(store.chapters[0]?.chapter.content).toContain('第二页');
+    expect(store.chapters[0]?.sectionProgress).toBeUndefined();
+  });
+
   it('loadNextChapter falls back to fetch when iframe parsing returns empty', async () => {
     vi.useFakeTimers();
 

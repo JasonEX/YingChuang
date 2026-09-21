@@ -292,6 +292,11 @@ export function createNavigation(ctx: NavigationContext) {
 
     const url = current.chapter.url;
 
+    // The reload rewrites this entry wholesale. Left running, the old merge would append its
+    // remaining pages onto the replacement, and an unchanged source script means completion
+    // never rewrites the content that would have hidden the duplication.
+    cancelChapterSections(ctx, current.id, 'aborted');
+
     ctx.showToast('正在重新加载...', 'info');
 
     ctx.reloadAbort.value?.();
