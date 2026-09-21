@@ -25,6 +25,59 @@ afterEach(() => {
 });
 
 describe('site request lifecycle', () => {
+  it.each(['cancelled', 'timeout'] as const)(
+    'reports %s once even when a late response arrives',
+    async reason => {
+      let respond!: (value: Response) => void;
+      vi.stubGlobal('unsafeWindow', {
+        fetch: vi.fn(
+          () =>
+            new Promise(resolve => {
+              respond = resolve;
+            })
+        ),
+      });
+      const onResult = vi.fn();
+      const setAbort = vi.fn();
+      const pending = requestSiteData(url, {
+        responseType: 'text',
+        parse,
+        setAbort,
+        onResult,
+        timeoutMs: 100,
+      });
+      if (reason === 'cancelled') setAbort.mock.calls[0][0]();
+      else await vi.advanceTimersByTimeAsync(100);
+      expect(await pending).toBeNull();
+      respond(new Response('chapter:late'));
+      await Promise.resolve();
+      expect(onResult).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ url, transport: 'fetch', reason })
+      );
+    }
+  );
+
+  it('reports the final GM response after native fallback without exposing response content', async () => {
+    vi.stubGlobal('unsafeWindow', {
+      fetch: vi.fn().mockResolvedValue({ ok: false, status: 403, url }),
+    });
+    vi.stubGlobal('GM_xmlhttpRequest', (options: GM_xmlhttpRequestOptions) => {
+      options.onload?.(response('chapter:private-content'));
+      return { abort: vi.fn() };
+    });
+    const onResult = vi.fn();
+    expect(
+      await requestSiteData(url, { responseType: 'text', parse, setAbort: vi.fn(), onResult })
+    ).toBe('chapter:private-content');
+    expect(onResult).toHaveBeenCalledExactlyOnceWith({
+      url,
+      finalUrl: url,
+      transport: 'gm',
+      status: 200,
+      reason: 'success',
+    });
+  });
+
   it('binds page fetch and keeps POST headers, body and cookies', async () => {
     const owner = {
       fetch: vi.fn(function (this: unknown, _url: string, init: RequestInit) {

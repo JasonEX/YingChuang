@@ -125,6 +125,7 @@ async function loadChapterList(
     (await requestSiteData(apiUrl, {
       responseType: 'text',
       setAbort: context.setAbort,
+      onResult: context.onRequest,
       referrer: context.currentUrl || context.indexUrl,
       headers: { Accept: 'text/html, */*; q=0.01', 'X-Requested-With': 'XMLHttpRequest' },
       parse: data => {

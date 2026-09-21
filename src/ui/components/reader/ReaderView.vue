@@ -1,6 +1,10 @@
 <template>
   <div
     class="mnr-reader"
+    @wheel.capture="cancelRestore"
+    @touchstart.capture="cancelRestore"
+    @pointerdown.capture="cancelRestore"
+    @keydown.capture="cancelRestore"
     @click="shieldEvent"
     @mousedown="shieldEvent"
     @mouseup="shieldEvent"
@@ -69,7 +73,7 @@
         @click="handleContentClick"
       >
         <h1 class="mnr-chapter-title">{{ entry.chapter.title }}</h1>
-        <div v-html="entry.displayContent"></div>
+        <div v-chapter-content="entry.displayContent"></div>
 
         <!-- Remaining section pages of this chapter, still merging in the background -->
         <div
@@ -152,17 +156,15 @@ import {
 } from '@/ui/stores/reader';
 import { useConfigStore } from '@/ui/stores/config';
 import { useKeyboardShortcuts } from '@/ui/composables/useKeyboardShortcuts';
+import { useReaderPosition } from '@/ui/composables/reader/useReaderPosition';
 import { useReaderScroll } from '@/ui/composables/reader/useReaderScroll';
 import { useReaderAutoLoad } from '@/ui/composables/reader/useReaderAutoLoad';
 import { useTouchGestures } from '@/ui/composables/reader/useTouchGestures';
 import { useChapterNavigation } from '@/ui/composables/reader/useChapterNavigation';
 import { useReaderUIControls } from '@/ui/composables/reader/useReaderUIControls';
-import {
-  flushReadingPositions,
-  getReadingPosition,
-  saveReadingPosition,
-} from '@/ui/stores/reader/readingPosition';
+import { flushReadingPositions } from '@/ui/stores/reader/readingPosition';
 import ProgressIndicator from './ProgressIndicator.vue';
+import { vChapterContent } from './chapterContent';
 import FloatingToolbar from './FloatingToolbar.vue';
 import ChapterDrawer from './ChapterDrawer.vue';
 import SettingsPanel from '@/ui/components/settings/SettingsPanel.vue';
@@ -241,6 +243,13 @@ const { scheduleAutoLoadNext, observeBottomSentinel } = useReaderAutoLoad({
   isNavigating,
 });
 
+const { restorePosition, cancelRestore, savePosition, flushPosition } = useReaderPosition({
+  mainRef,
+  chapterRefs,
+  readerStore,
+  isNavigating,
+});
+
 // Scroll composable
 const { handleScroll } = useReaderScroll({
   mainRef,
@@ -250,6 +259,7 @@ const { handleScroll } = useReaderScroll({
   showControls,
   isNavigating,
   scheduleAutoLoadNext,
+  savePosition,
 });
 
 // Chapter navigation composable
@@ -473,28 +483,6 @@ useKeyboardShortcuts(
 
 // === Lifecycle ===
 
-async function restoreReadingPosition(): Promise<void> {
-  const mainEl = mainRef.value;
-  const currentUrl = readerStore.chapter?.url;
-  if (!mainEl || !currentUrl) return;
-
-  const percent = await getReadingPosition(currentUrl);
-  if (percent === null || percent < 3 || percent > 98) return;
-
-  await nextTick();
-  await new Promise<void>(resolve => globalThis.requestAnimationFrame(() => resolve()));
-  const chapterEl = chapterRefs.get(currentUrl);
-  if (!chapterEl) return;
-
-  const mainRect = mainEl.getBoundingClientRect();
-  const chapterRect = chapterEl.getBoundingClientRect();
-  const chapterTop = mainEl.scrollTop + chapterRect.top - mainRect.top;
-  const scrollableHeight = Math.max(0, chapterEl.offsetHeight - mainEl.clientHeight * 0.5);
-  mainEl.scrollTop = chapterTop + (percent / 100) * scrollableHeight;
-  readerStore.updateScroll(percent);
-  readerStore.showToast('已回到上次阅读位置', 'info', 1800);
-}
-
 watch(
   () => readerStore.currentChapterIndex,
   () => {
@@ -503,10 +491,7 @@ watch(
 );
 
 function flushPersistentState(): void {
-  if (readerStore.chapter?.url) {
-    saveReadingPosition(readerStore.chapter.url, readerStore.scrollPercent);
-  }
-  void flushReadingPositions();
+  flushPosition();
   void configStore.flushSave();
 }
 
@@ -536,7 +521,7 @@ onMounted(async () => {
   observeBottomSentinel(bottomSentinel.value);
 
   await nextTick();
-  await restoreReadingPosition();
+  await restorePosition();
   mainRef.value?.focus();
 
   scheduleAutoLoadNext('state');

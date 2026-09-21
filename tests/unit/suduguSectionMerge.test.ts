@@ -101,6 +101,9 @@ describe('sudugu section merge', () => {
     manager.setLaunchCallback(event => {
       // Progressive merging also emits the partial first page; only the merged chapter counts.
       if (event.stage === 'complete') launched = event.chapter;
+      return update => {
+        if (update.stage === 'complete') launched = update.chapter;
+      };
     });
 
     await manager.manualEnable(dom.window.document);

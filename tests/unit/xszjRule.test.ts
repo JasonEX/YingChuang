@@ -349,6 +349,9 @@ describe('xszj section merge from a middle page', () => {
     manager.setLaunchCallback(event => {
       // Progressive merging also emits the partial first page; only the merged chapter counts.
       if (event.stage === 'complete') launched = event.chapter;
+      return update => {
+        if (update.stage === 'complete') launched = update.chapter;
+      };
     });
 
     try {

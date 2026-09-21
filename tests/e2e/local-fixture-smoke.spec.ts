@@ -27,6 +27,28 @@ import {
 
 const targetUrl = 'http://mnr.test/chapter/100.html';
 
+async function copyReaderDiagnostic(page: Page) {
+  await page.evaluate(() => {
+    const target = window as Window & {
+      __mnrDiagnosticText?: string;
+      __mnrMenuCommands?: Array<{ caption: string; fn: () => void }>;
+    };
+    target.__mnrDiagnosticText = '';
+    globalThis.GM_setClipboard = text => {
+      target.__mnrDiagnosticText = text;
+    };
+    const command = target.__mnrMenuCommands?.find(item => item.caption === '复制诊断信息');
+    if (!command) throw new Error('Diagnostic menu command is missing');
+    command.fn();
+  });
+  const read = () =>
+    page.evaluate(
+      () => (window as Window & { __mnrDiagnosticText?: string }).__mnrDiagnosticText || ''
+    );
+  await expect.poll(read).not.toBe('');
+  return JSON.parse(await read());
+}
+
 for (const site of pagedCatalogSites) {
   for (const width of site.id === 'wxsl' ? [1280, 390] : [390]) {
     test(`${site.id} catalog stays ordered at ${width}px and retries incomplete pagination`, async ({
@@ -82,6 +104,17 @@ for (const site of pagedCatalogSites) {
       await expect(root).toContainText('目录加载失败');
       await expect(root.locator('.mnr-chapter-button')).toHaveCount(0);
       expect(catalogRequests).toEqual([1, 2]);
+      const failedDiagnostic = await copyReaderDiagnostic(page);
+      expect(failedDiagnostic.reader.toc.lastLoad).toMatchObject({
+        loader: 'paged',
+        outcome: 'failed',
+        pages: 1,
+        request: { url: site.origin + site.tocPath(2), status: 403 },
+      });
+      expect(Array.isArray(failedDiagnostic.reader.navigation.loadedUrls.tail)).toBe(true);
+      expect(
+        failedDiagnostic.recentEvents.some((event: { type: string }) => event.type === 'toc.load')
+      ).toBe(true);
 
       // Cache-all must retry the failed catalog, not offer to cache its first page.
       let cacheConfirmations = 0;
@@ -93,6 +126,17 @@ for (const site of pagedCatalogSites) {
       await expect(root.locator('.mnr-drawer-position')).toContainText('第 25 / 46 章');
       expect(cacheConfirmations).toBe(0);
       expect(catalogRequests).toEqual([1, 2, 1, 2, 3]);
+      const completedDiagnostic = await copyReaderDiagnostic(page);
+      expect(completedDiagnostic.reader.toc.lastLoad).toMatchObject({
+        outcome: 'complete',
+        pages: 3,
+        entries: 46,
+        reason: 'last-page',
+      });
+      expect(completedDiagnostic.reader.toc.firstUrls[0]).toBe(site.origin + site.chapterPath(1));
+      expect(completedDiagnostic.reader.toc.lastUrls.at(-1)).toBe(
+        site.origin + site.chapterPath(46)
+      );
       // The drawer virtualizes rows. Check both ends through its scroll surface.
       const list = root.locator('.mnr-drawer-content');
       await list.evaluate(el => {
@@ -2185,4 +2229,193 @@ test('uses the Tiantang full catalog and shared pagination to navigate', async (
     tiantangDirectory,
     ...[2, 3, 4, 5, 6].map(number => `${tiantangDirectory}${number}/`),
   ]);
+});
+
+test('does not persist a temporary section percentage on pagehide', async ({ context, page }) => {
+  const url = 'https://m.goboo.cc/gb_1/94443/1';
+  await context.route(url, route =>
+    route.fulfill({ body: makeGobooPage(1, '/gb_1/94443/1/2'), contentType: 'text/html' })
+  );
+  let release!: () => void;
+  const gate = new Promise<void>(r => {
+    release = r;
+  });
+  await context.route(url + '/2', async route => {
+    await gate;
+    await route.fulfill({
+      body: makeGobooPage(2, '/gb_1/94443/2', '下一章'),
+      contentType: 'text/html',
+    });
+  });
+  const script = fs.readFileSync(getMnrE2eConfig().userScriptPath, 'utf8');
+  await context.addInitScript({ content: createGmMockScript() + '\n' + script });
+  await page.goto(url);
+  const root = page.locator('#mnr-reader-root');
+  await expect(root.locator('.mnr-section-progress')).toBeVisible();
+  await root.locator('.mnr-reader-main').evaluate(el => {
+    el.scrollTop = 200;
+    el.dispatchEvent(new Event('scroll'));
+  });
+  await page.waitForTimeout(250);
+  await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
+  await page.waitForTimeout(100);
+  const stored = await page.evaluate(() =>
+    (window as any).GM_getValue('mnr-reading-positions', null)
+  );
+  console.log('position during merge:', stored);
+  release();
+  expect(stored).toBeNull();
+});
+
+for (const moveWhileLoading of [false, true]) {
+  test(
+    moveWhileLoading
+      ? 'does not restore over user scrolling during section merging'
+      : 'restores a saved percentage only after the chapter finishes merging',
+    async ({ context, page }) => {
+      const url = 'https://m.goboo.cc/gb_1/94443/1';
+      await page.setViewportSize({ width: 390, height: 844 });
+      await context.route(url, route =>
+        route.fulfill({ body: makeGobooPage(1, '/gb_1/94443/1/2'), contentType: 'text/html' })
+      );
+      let release!: () => void;
+      const gate = new Promise<void>(r => {
+        release = r;
+      });
+      await context.route(url + '/2', async route => {
+        await gate;
+        await route.fulfill({
+          body: makeGobooPage(2, '/gb_1/94443/1/3'),
+          contentType: 'text/html',
+        });
+      });
+      await context.route(url + '/3', route =>
+        route.fulfill({
+          body: makeGobooPage(3, 'javascript:void(0);', '下一章'),
+          contentType: 'text/html',
+        })
+      );
+      const script = fs.readFileSync(getMnrE2eConfig().userScriptPath, 'utf8');
+      const seed = `window.GM_setValue('mnr-reading-positions', JSON.stringify({[${JSON.stringify(url)}]:{percent:70,updatedAt:Date.now()}}));`;
+      await context.addInitScript({ content: createGmMockScript() + '\n' + seed + '\n' + script });
+      await page.goto(url);
+      const root = page.locator('#mnr-reader-root');
+      await expect(root.locator('.mnr-section-progress')).toBeVisible();
+      await expect(root).not.toContainText('已回到上次阅读位置');
+      const measure = () =>
+        root.evaluate(host => {
+          const main = host.shadowRoot!.querySelector('.mnr-reader-main') as HTMLElement;
+          const article = host.shadowRoot!.querySelector('article') as HTMLElement;
+          const top =
+            main.scrollTop + article.getBoundingClientRect().top - main.getBoundingClientRect().top;
+          return {
+            scrollTop: main.scrollTop,
+            height: article.offsetHeight,
+            percent:
+              (100 * (main.scrollTop - top)) / (article.offsetHeight - main.clientHeight * 0.5),
+          };
+        });
+      if (moveWhileLoading) {
+        await root.locator('.mnr-reader-main').hover();
+        await page.mouse.wheel(0, 300);
+        await expect.poll(async () => (await measure()).scrollTop).toBeGreaterThan(100);
+        await page.waitForTimeout(200);
+      }
+      const before = await measure();
+      release();
+      await expect(root.locator('.mnr-section-progress')).toHaveCount(0);
+      const after = await measure();
+      console.log('restored position:', JSON.stringify({ before, after }));
+      if (moveWhileLoading) {
+        expect(after.scrollTop).toBe(before.scrollTop);
+        await expect(root).not.toContainText('已回到上次阅读位置');
+      } else {
+        expect(after.percent).toBeCloseTo(70, 0);
+      }
+    }
+  );
+}
+
+test('keeps the first-page DOM and selection while merging an 80-page Xszj chapter', async ({
+  context,
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const url = 'https://xszj.org/b/490346/c/1534359';
+  const pages: number[] = [];
+  const times: number[] = [];
+  await context.route('https://xszj.org/**', async route => {
+    const requestUrl = new URL(route.request().url());
+    const n = Number(requestUrl.searchParams.get('page') || 1);
+    if (requestUrl.pathname !== '/b/490346/c/1534359') {
+      await route.fulfill({ status: 404, body: '' });
+      return;
+    }
+    pages.push(n);
+    times.push(Date.now());
+    const next = n < 80 ? `<a href="?page=${n + 1}">下一页</a>` : '';
+    await route.fulfill({
+      contentType: 'text/html; charset=utf-8',
+      body: `<!doctype html><html lang="zh-Hans"><head><title>第一章 长分页(${n}/80)</title></head><body>
+      <h1 class="bookname">第一章 长分页(${n}/80)</h1>
+      <div class="con_top"><a href="/b/490346">测试书</a></div>
+      <div class="bottem1"><a href="/b/490346/cs/1">目录</a>${next}</div>
+      <div id="booktxt"><p>第${n}页正文。${'山间的风吹过树林，他沿着熟悉的小路慢慢向前走去。'.repeat(60)}</p></div>
+    </body></html>`,
+    });
+  });
+  const script = fs.readFileSync(getMnrE2eConfig().userScriptPath, 'utf8');
+  await context.addInitScript({
+    content:
+      createGmMockScript() +
+      `
+    window.GM_setValue('mnr-config',{behavior:{preloadNext:false}});
+  ` +
+      script,
+  });
+  await page.goto(url);
+  const root = page.locator('#mnr-reader-root');
+  await expect(root.locator('.mnr-section-progress')).toContainText('1/80');
+  await root.evaluate(host => {
+    const root = host.shadowRoot!;
+    const paragraph = root.querySelector('article p')!;
+    const text = paragraph.firstChild!;
+    const range = document.createRange();
+    range.setStart(text, 0);
+    range.setEnd(text, 6);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const main = root.querySelector('.mnr-reader-main') as HTMLElement;
+    main.scrollTop = 150;
+    (window as any).__sectionProof = {
+      paragraph,
+      text,
+      selected: selection.toString(),
+      scrollTop: main.scrollTop,
+    };
+  });
+  const retained = () =>
+    root.evaluate(host => {
+      const proof = (window as any).__sectionProof;
+      const main = host.shadowRoot!.querySelector('.mnr-reader-main') as HTMLElement;
+      return {
+        sameNode: host.shadowRoot!.querySelector('article p') === proof.paragraph,
+        selection: window.getSelection()?.toString(),
+        expected: proof.selected,
+        scrollTop: main.scrollTop,
+        initialTop: proof.scrollTop,
+      };
+    });
+  await expect(root.locator('article')).toContainText('第2页正文');
+  expect((await retained()).sameNode).toBe(true);
+  await expect(root.locator('.mnr-section-progress')).toHaveCount(0, { timeout: 100_000 });
+  const final = await retained();
+  expect(final.sameNode).toBe(true);
+  expect(final.selection).toBe(final.expected);
+  expect(final.expected.length).toBeGreaterThan(0);
+  expect(final.scrollTop).toBe(final.initialTop);
+  expect(pages).toEqual(Array.from({ length: 80 }, (_, i) => i + 1));
+  expect(times[79] - times[0]).toBeGreaterThanOrEqual(79 * 750);
+  console.log('80-page merge elapsed ms:', times[79] - times[0]);
 });

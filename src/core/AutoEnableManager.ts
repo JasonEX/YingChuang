@@ -53,33 +53,25 @@ export interface UserPromptResponse {
 /** Callback for showing prompt to user */
 export type PromptCallback = () => Promise<UserPromptResponse>;
 
-/** What the reader should do with a chapter as it is parsed and merged. */
+/** Initial delivery mounts the reader; further events belong to that delivery only. */
 export type LaunchEvent =
   | {
       stage: 'initial';
       chapter: ParsedChapter;
       rule?: SiteRule;
       progress: SectionMergeProgress;
-      /** Stops the background merge, so the reader can cancel it when it closes. */
       abort: () => void;
     }
-  | { stage: 'append'; delta: SectionPageDelta; progress: SectionMergeProgress }
-  | {
-      /** The merge stopped without a chapter, so the reader must drop its progress state. */
-      stage: 'cancel';
-      reason: 'aborted' | 'failed';
-    }
-  | {
-      stage: 'complete';
-      chapter: ParsedChapter;
-      rule?: SiteRule;
-      /** True when an `initial` event was already delivered for this chapter. */
-      progressive: boolean;
-      truncated: boolean;
-    };
+  | { stage: 'complete'; chapter: ParsedChapter; rule?: SiteRule };
 
-/** Callback when reader should launch */
-export type LaunchCallback = (event: LaunchEvent) => void;
+export type LaunchUpdate =
+  | { stage: 'append'; delta: SectionPageDelta; progress: SectionMergeProgress }
+  | { stage: 'cancel'; reason: 'aborted' | 'failed' }
+  | { stage: 'complete'; chapter: ParsedChapter; rule?: SiteRule; truncated: boolean };
+
+/** Bound to the entry created by one launch, never looked up through current UI state. */
+export type LaunchContinuation = (event: LaunchUpdate) => void | Promise<void>;
+export type LaunchCallback = (event: LaunchEvent) => LaunchContinuation | void;
 
 /** Auto-enable options */
 export interface AutoEnableOptions {
@@ -420,6 +412,7 @@ export class AutoEnableManager {
     // the reader can pull when it closes.
     const controller = new AbortController();
     let launchedEarly = false;
+    const delivery: { update?: LaunchContinuation } = {};
     let truncated = false;
 
     try {
@@ -428,37 +421,40 @@ export class AutoEnableManager {
         signal: controller.signal,
         onFirstPage: (firstPage, progress) => {
           if (!this.launchCallback) return;
-          this.launchCallback({
-            stage: 'initial',
-            chapter: firstPage,
-            rule: rule || firstPage.rule,
-            progress,
-            abort: () => controller.abort(),
-          });
+          delivery.update =
+            this.launchCallback({
+              stage: 'initial',
+              chapter: firstPage,
+              rule: rule || firstPage.rule,
+              progress,
+              abort: () => controller.abort(),
+            }) || undefined;
           launchedEarly = true;
         },
-        onSectionPage: (delta, progress) => {
-          this.launchCallback?.({ stage: 'append', delta, progress });
+        onSectionPage: async (delta, progress) => {
+          await delivery.update?.({ stage: 'append', delta, progress });
         },
         onMergeEnd: end => {
           truncated = end.truncated;
         },
       });
 
-      if (chapter && this.launchCallback) {
-        this.launchCallback({
-          stage: 'complete',
-          chapter,
-          rule: rule || chapter.rule,
-          progressive: launchedEarly,
-          truncated,
-        });
-        return 'complete';
-      }
       if (launchedEarly) {
-        // Reaching here after the first page means the signal was pulled mid-merge.
-        this.launchCallback?.({ stage: 'cancel', reason: 'aborted' });
+        if (chapter && !controller.signal.aborted) {
+          await delivery.update?.({
+            stage: 'complete',
+            chapter,
+            rule: rule || chapter.rule,
+            truncated,
+          });
+          return 'complete';
+        }
+        await delivery.update?.({ stage: 'cancel', reason: 'aborted' });
         return 'initial';
+      }
+      if (chapter && this.launchCallback) {
+        this.launchCallback({ stage: 'complete', chapter, rule: rule || chapter.rule });
+        return 'complete';
       }
       this.deactivateProtection();
       return false;
@@ -467,7 +463,7 @@ export class AutoEnableManager {
       if (launchedEarly) {
         // The reader is already showing the first page; without this the chapter would stay
         // marked as merging forever.
-        this.launchCallback?.({ stage: 'cancel', reason: 'failed' });
+        await delivery.update?.({ stage: 'cancel', reason: 'failed' });
         return 'initial';
       }
       this.deactivateProtection();

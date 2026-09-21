@@ -56,7 +56,6 @@ export interface SectionMergeRecord {
   convertedScript?: ChineseScript;
   /** Serialises this merge's writes; see `queueMergeWrite` */
   queue: Promise<unknown>;
-  viewId: number;
 }
 
 /** Chapter entry for infinite scroll */
@@ -68,6 +67,17 @@ export interface ChapterEntry {
   sectionProgress?: SectionProgressState;
   /** Set once a merge ended without every page, so the chapter is known to be short */
   sectionsIncomplete?: boolean;
+}
+
+let nextChapterEntryId = 0;
+/** Never reused, including same-tick replacements and display-window trimming. */
+export function createChapterEntryId(): string {
+  return `chapter-${++nextChapterEntryId}`;
+}
+
+/** Partial chapters have no stable whole-chapter reading position. */
+export function isChapterComplete(entry: ChapterEntry | undefined): entry is ChapterEntry {
+  return !!entry && !entry.sectionProgress && !entry.sectionsIncomplete;
 }
 
 /** Table of contents entry */

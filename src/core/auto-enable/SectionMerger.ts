@@ -77,7 +77,7 @@ export interface SectionMergeOptions {
    */
   onFirstPage?: (chapter: ParsedChapter, progress: SectionMergeProgress) => void | Promise<void>;
   /** Called once per additional section page with that page's content only. */
-  onSectionPage?: (delta: SectionPageDelta, progress: SectionMergeProgress) => void;
+  onSectionPage?: (delta: SectionPageDelta, progress: SectionMergeProgress) => void | Promise<void>;
   /** Called once when a progressive merge stops, whether or not it completed. */
   onMergeEnd?: (end: SectionMergeEnd) => void;
 }
@@ -255,7 +255,11 @@ export class SectionMerger {
       kind: 'merge',
       chapterUrl: this.getChapterUrl(startPage.url, nextSectionUrl),
       nextSectionUrl,
-      nextChapterUrl: section?.nextChapterUrl || null,
+      nextChapterUrl:
+        section?.nextChapterUrl ||
+        (first.nextUrl && !isSectionLikeUrl(startPage.url, first.nextUrl, parseSectionUrl)
+          ? first.nextUrl
+          : null),
       sectionDelayMs: hasCustomFetcher ? 0 : Math.max(0, first.rule?.advanced?.sectionDelayMs ?? 0),
     };
   }
@@ -361,7 +365,7 @@ export class SectionMerger {
         fetcher,
         signal
       );
-      if (!nextParsed) break;
+      if (signal?.aborted || !nextParsed) break;
 
       const section = this.parser.detectSection(page.doc, page.url) as SectionInfo | undefined;
       this.advanceMergeCursor(cursor, page.url, nextParsed, section);
@@ -370,7 +374,7 @@ export class SectionMerger {
       cursor.totalPages = this.reconcileSectionTotal(cursor, page.doc, maxPages);
 
       if (progressive) {
-        options.onSectionPage?.(
+        await options.onSectionPage?.(
           {
             content: nextParsed.content,
             rawContent: nextParsed.rawContent,
@@ -485,7 +489,7 @@ export class SectionMerger {
       url: cursor.chapterUrl,
       content: cursor.mergedContent,
       rawContent: cursor.mergedRaw,
-      nextUrl: cursor.nextChapterUrl || first.nextUrl,
+      nextUrl: cursor.nextChapterUrl || undefined,
       sourceScript: cursor.sourceScript,
     };
   }

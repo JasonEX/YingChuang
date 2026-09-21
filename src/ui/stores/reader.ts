@@ -39,6 +39,7 @@ import {
 import { createTocActions, loadTocEntriesPaged } from './reader/toc';
 import { normalizeUrlForBlock, normalizeUrlForFetch } from './reader/utils';
 import { createCacheAll } from './reader/cacheAll';
+import { createChapterEntryId } from './reader/types';
 import { createNavigation } from './reader/navigation';
 import { createReaderRuntime } from './reader/runtime';
 import { syncHostPageToChapter } from './reader/hostPage';
@@ -64,7 +65,6 @@ export const useReaderStore = defineStore('reader', () => {
   const toastType = ref<'info' | 'error'>('error');
   const toastTimer = ref<number | null>(null);
   const scrollPercent = ref(0);
-  const history = ref<string[]>([]);
   const loadedUrls = computed(() => new Set(chapters.value.map(entry => entry.chapter.url)));
   const vipBlockedUrls = ref<Set<string>>(new Set());
   const blockedNavUrls = ref<Set<string>>(new Set());
@@ -75,7 +75,6 @@ export const useReaderStore = defineStore('reader', () => {
   const pendingPrevAbort = ref<(() => void) | null>(null);
   const navFailures = new Map<string, { count: number; nextRetryAt: number }>();
   const cacheProgress = ref<CacheProgressState>({ done: 0, total: 0, failed: 0, running: false });
-  const cacheQueue = ref<string[]>([]);
   const cacheFailedUrls = ref<string[]>([]);
   const cacheAbort = ref<(() => void) | null>(null);
   const reloadAbort = ref<(() => void) | null>(null);
@@ -308,7 +307,6 @@ export const useReaderStore = defineStore('reader', () => {
     originalTitles,
     currentConversionMode,
     navFailures,
-    history,
     runtime,
     showToast,
     setError,
@@ -331,23 +329,24 @@ export const useReaderStore = defineStore('reader', () => {
     loadTocEntriesPaged,
   });
 
-  const { startCacheAll, cancelCacheAll, retryFailedCache } = createCacheAll({
-    cacheProgress,
-    cacheQueue,
-    cacheFailedUrls,
-    cacheAbort,
-    cachedContents,
-    persistedUrls,
-    tocOriginal,
-    chapter,
-    rule,
-    chapters,
-    runtime,
-    loadToc: tocActions.loadToc,
-    restoreCache,
-    persistCache,
-    showToast,
-  });
+  const { startCacheAll, cancelCacheAll, retryFailedCache, getCacheDebugSnapshot } = createCacheAll(
+    {
+      cacheProgress,
+      cacheFailedUrls,
+      cacheAbort,
+      cachedContents,
+      persistedUrls,
+      tocOriginal,
+      chapter,
+      rule,
+      chapters,
+      runtime,
+      loadToc: tocActions.loadToc,
+      restoreCache,
+      persistCache,
+      showToast,
+    }
+  );
 
   // ---- Core actions ----
   /** Cancel all in-flight requests and reset loading states */
@@ -356,8 +355,7 @@ export const useReaderStore = defineStore('reader', () => {
     pendingNextAbort.value = null;
     pendingPrevAbort.value?.();
     pendingPrevAbort.value = null;
-    cacheAbort.value?.();
-    cacheAbort.value = null;
+    cancelCacheAll();
     reloadAbort.value?.();
     reloadAbort.value = null;
     tocAbort.value?.();
@@ -367,9 +365,6 @@ export const useReaderStore = defineStore('reader', () => {
     isLoadingPrev.value = false;
     isLoadingNext.value = false;
     tocLoading.value = false;
-    cacheProgress.value = { done: 0, total: 0, failed: 0, running: false };
-    cacheQueue.value = [];
-    cacheFailedUrls.value = [];
   }
 
   /** Clear all navigation/cache/toc data */
@@ -421,7 +416,7 @@ export const useReaderStore = defineStore('reader', () => {
     if (newChapter.nextUrl) newChapter.nextUrl = normalizeUrlForFetch(newChapter.nextUrl);
     if (newChapter.indexUrl) newChapter.indexUrl = normalizeUrlForFetch(newChapter.indexUrl);
 
-    const id = `chapter-${Date.now()}-0`;
+    const id = createChapterEntryId();
     chapters.value = [{ chapter: newChapter, rule: effectiveRule, id }];
 
     // Store original content for text conversion
@@ -434,14 +429,6 @@ export const useReaderStore = defineStore('reader', () => {
       rule: effectiveRule,
       cachedAt: Date.now(),
     });
-
-    // Add to history
-    if (newChapter.url && !history.value.includes(newChapter.url)) {
-      history.value.push(newChapter.url);
-      if (history.value.length > 100) {
-        history.value = history.value.slice(-100);
-      }
-    }
 
     if (currentConversionMode.value !== 'none') {
       void applyConversionToChapterEntry(id, currentConversionMode.value).then(() => {
@@ -561,10 +548,6 @@ export const useReaderStore = defineStore('reader', () => {
       first: summarizeChapterForDebug(firstEntry),
       last: summarizeChapterForDebug(lastEntry),
       navigation: {
-        history: {
-          count: history.value.length,
-          tail: tailStrings(history.value),
-        },
         loadedUrls: summarizeUrlSet(loadedUrls.value),
         vipBlockedUrls: summarizeUrlSet(vipBlockedUrls.value),
         blockedNavUrls: summarizeUrlSet(blockedNavUrls.value),
@@ -587,10 +570,7 @@ export const useReaderStore = defineStore('reader', () => {
             }
           : null,
         progress: { ...cacheProgress.value },
-        queue: {
-          count: cacheQueue.value.length,
-          tail: tailStrings(cacheQueue.value),
-        },
+        task: getCacheDebugSnapshot(),
         memory: {
           count: cachedContents.value.size,
           tail: Array.from(cachedContents.value.entries())
@@ -606,6 +586,9 @@ export const useReaderStore = defineStore('reader', () => {
         persistedUrls: summarizeUrlSet(persistedUrls.value),
       },
       toc: {
+        lastLoad: tocActions.getLoadDiagnostic(),
+        firstUrls: tocOriginal.value.slice(0, 4).map(entry => redactUrl(entry.url)),
+        lastUrls: tocOriginal.value.slice(-4).map(entry => redactUrl(entry.url)),
         loading: tocLoading.value,
         count: toc.value.length,
         originalCount: tocOriginal.value.length,
@@ -669,7 +652,6 @@ export const useReaderStore = defineStore('reader', () => {
     error,
     toastType,
     scrollPercent,
-    history,
     cacheProgress,
     toc,
     tocLoading,

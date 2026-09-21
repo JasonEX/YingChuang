@@ -2,7 +2,7 @@ export type DebugJsonValue =
   null | string | number | boolean | DebugJsonValue[] | { [key: string]: DebugJsonValue };
 
 const SENSITIVE_QUERY_KEY =
-  /(?:^|[_-])(?:token|auth|session|sid|key|sign|signature|ticket|password|passwd|pwd|jwt|credential|access|refresh|challenge|chl)(?:[_-]|$)|^__cf_/i;
+  /(?:^|[_-])(?:token|auth|session|sid|key|sign|signature|ticket|password|passwd|pwd|jwt|credential|access|refresh|challenge|chl)(?:[_-]|$)|^__cf_|^_csrfToken$/i;
 
 export function redactUrl(url: string | null | undefined): string | null {
   if (!url) return null;

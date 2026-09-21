@@ -67,9 +67,10 @@ export function buildDiagnosticInfo(options: DiagnosticOptions = {}): Diagnostic
     page: getPageSnapshot(),
     config: options.configStore ? getConfigSnapshot(options.configStore) : null,
     reader: options.readerStore?.getDebugSnapshot
-      ? toDebugValue(options.readerStore.getDebugSnapshot())
+      ? toDebugValue(options.readerStore.getDebugSnapshot(), 5)
       : null,
-    recentEvents: toDebugValue(getDebugEvents()),
+    // The event buffer is already bounded; do not truncate away its newest entries.
+    recentEvents: getDebugEvents().map(event => toDebugValue(event, 4)),
   };
 }
 

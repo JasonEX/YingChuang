@@ -74,13 +74,6 @@ export async function startProgressiveSectionMerge(
   let progress: SectionProgressState = { loaded: 1 };
   let truncated = false;
 
-  // Appends convert HTML and therefore yield; serialising them keeps one page from
-  // overwriting another's growth.
-  let chain: Promise<unknown> = Promise.resolve();
-  const enqueue = (task: () => Promise<unknown>): void => {
-    chain = chain.then(task, task);
-  };
-
   void createSectionMerger(parser)
     .merge(initialDoc, url, {
       signal: controller.signal,
@@ -90,29 +83,29 @@ export async function startProgressiveSectionMerge(
         resolveFirst(chapter);
         return gate;
       },
-      onSectionPage: (delta, info) => {
+      onSectionPage: async (delta, info) => {
         const target = entryId;
         if (!target) return;
-        enqueue(() => sink.append(target, { ...delta, loaded: info.loaded, total: info.total }));
+        await sink.append(target, { ...delta, loaded: info.loaded, total: info.total });
       },
       onMergeEnd: end => {
         truncated = end.truncated;
       },
     })
-    .then(chapter => {
+    .then(async chapter => {
       resolveFirst(chapter);
       const target = entryId;
       if (!target) return;
       if (!chapter || controller.signal.aborted) {
-        enqueue(async () => sink.cancel(target, controller.signal.aborted ? 'aborted' : 'failed'));
+        sink.cancel(target, controller.signal.aborted ? 'aborted' : 'failed');
         return;
       }
-      enqueue(() => sink.complete(target, chapter, chapter.rule, { truncated }));
+      await sink.complete(target, chapter, chapter.rule, { truncated });
     })
     .catch(error => {
       console.error('[MNR] Background section merge failed:', error);
       const target = entryId;
-      if (target) enqueue(async () => sink.cancel(target, 'failed'));
+      if (target) sink.cancel(target, 'failed');
       resolveFirst(null);
     });
 

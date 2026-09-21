@@ -1,7 +1,9 @@
+import type { SiteRequestDiagnostic } from '@/core/utils/siteRequest';
 import type { SiteRule } from '@/core/rules/types';
 import type { TocEntry } from '../types';
 
 export interface SpecialTocLoaderContext {
+  onRequest?: (result: SiteRequestDiagnostic) => void;
   currentUrl: string;
   indexUrl: string;
   rule?: SiteRule;

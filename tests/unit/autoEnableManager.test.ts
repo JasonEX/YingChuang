@@ -399,7 +399,8 @@ describe('AutoEnableManager', () => {
 
     const { AutoEnableManager } = await import('@/core/AutoEnableManager');
     const manager = new AutoEnableManager({ enableProtection: false });
-    const launchCallback = vi.fn();
+    const update = vi.fn();
+    const launchCallback = vi.fn(() => update);
     manager.setLaunchCallback(launchCallback);
 
     await manager.execute(createDoc('https://example.com/chapter/1'));
@@ -411,16 +412,15 @@ describe('AutoEnableManager', () => {
       progress: { url: firstPage.url, loaded: 1 },
       abort: expect.any(Function),
     });
-    expect(launchCallback).toHaveBeenNthCalledWith(2, {
+    expect(update).toHaveBeenNthCalledWith(1, {
       stage: 'append',
       delta: { content: '<p>second</p>', rawContent: '<p>second</p>' },
       progress: { url: firstPage.url, loaded: 2 },
     });
-    expect(launchCallback).toHaveBeenNthCalledWith(3, {
+    expect(update).toHaveBeenNthCalledWith(2, {
       stage: 'complete',
       chapter: merged,
       rule,
-      progressive: true,
       truncated: false,
     });
   });
@@ -621,8 +621,6 @@ describe('AutoEnableManager', () => {
       stage: 'complete',
       chapter: expect.objectContaining({ rule }),
       rule,
-      progressive: false,
-      truncated: false,
     });
   });
 
@@ -673,7 +671,8 @@ describe('AutoEnableManager', () => {
       throw new Error('second page failed');
     });
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    const launch = vi.fn();
+    const update = vi.fn();
+    const launch = vi.fn(() => update);
     manager.setLaunchCallback(launch);
     await manager.manualEnable(doc);
     expect(launch).toHaveBeenNthCalledWith(1, {
@@ -684,8 +683,8 @@ describe('AutoEnableManager', () => {
       abort: expect.any(Function),
     });
     // Without this the chapter would stay marked as merging for the rest of the session.
-    expect(launch).toHaveBeenNthCalledWith(2, { stage: 'cancel', reason: 'failed' });
-    expect(launch).toHaveBeenCalledTimes(2);
+    expect(update).toHaveBeenCalledWith({ stage: 'cancel', reason: 'failed' });
+    expect(launch).toHaveBeenCalledTimes(1);
     expect(mockedProtection.deactivate).not.toHaveBeenCalled();
     expect(mockedRuleStorage.setSitePreference).not.toHaveBeenCalled();
   });

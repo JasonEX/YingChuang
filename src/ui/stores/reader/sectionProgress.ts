@@ -98,7 +98,6 @@ export function beginChapterSections(
     convertedMode: ctx.currentConversionMode.value,
     convertedScript: entry.chapter.sourceScript,
     queue: Promise.resolve(),
-    viewId: ctx.runtime.viewId(),
   });
 
   ctx.cachedContents.value.delete(entry.chapter.url);
@@ -153,27 +152,27 @@ async function appendSectionPage(
   };
 
   const mode = ctx.currentConversionMode.value;
-  if (mode !== merge.convertedMode) {
-    // The reader switched script mid-merge: re-convert everything folded so far, once.
-    merge.convertedMode = mode;
-    ctx.originalContents.value.set(entryId, folded);
+  const displayBefore = entry.chapter.content;
+  // Publish the source before yielding: a concurrent mode change must include this page.
+  ctx.originalContents.value.set(entryId, folded);
+  if (mode !== merge.convertedMode || delta.sourceScript !== merge.convertedScript) {
     await ctx.applyConversionToChapterEntry(entryId, mode);
   } else {
     const displayDelta =
       mode === 'none'
         ? delta.content
         : await convertHTML(delta.content, mode, { sourceScript: delta.sourceScript });
-
-    // Converting yields, so re-check ownership before committing the growth.
     const current = findMergingEntry(ctx, entryId, merge);
     if (!current) return false;
-
-    ctx.originalContents.value.set(entryId, folded);
-    current.chapter = {
-      ...current.chapter,
-      content: joinHtml(current.chapter.content, displayDelta),
-    };
+    if (mode !== ctx.currentConversionMode.value || current.chapter.content !== displayBefore) {
+      // Full conversion and incremental conversion share the same original source. Do not
+      // append a stale delta to text that another conversion may already have replaced.
+      await ctx.applyConversionToChapterEntry(entryId, ctx.currentConversionMode.value);
+    } else {
+      current.chapter = { ...current.chapter, content: joinHtml(displayBefore, displayDelta) };
+    }
   }
+  merge.convertedMode = mode;
 
   const committed = findMergingEntry(ctx, entryId, merge);
   if (!committed) return false;
@@ -262,7 +261,14 @@ async function finishChapterSections(
   if (info.truncated) entry.sectionsIncomplete = true;
   else delete entry.sectionsIncomplete;
 
-  await reconcileMergedConversion(ctx, entryId, entry, merged, merge.convertedScript);
+  await reconcileMergedConversion(
+    ctx,
+    entryId,
+    entry,
+    merged,
+    merge.convertedScript,
+    merge.convertedMode
+  );
 
   return true;
 }
@@ -278,7 +284,8 @@ async function reconcileMergedConversion(
   entryId: string,
   entry: ChapterEntry,
   merged: ParsedChapter,
-  convertedScript: ChineseScript | undefined
+  convertedScript: ChineseScript | undefined,
+  convertedMode: ConversionMode
 ): Promise<void> {
   const mode: ConversionMode = ctx.currentConversionMode.value;
 
@@ -287,7 +294,7 @@ async function reconcileMergedConversion(
     return;
   }
 
-  if (convertedScript !== merged.sourceScript) {
+  if (convertedScript !== merged.sourceScript || convertedMode !== mode) {
     await ctx.applyConversionToChapterEntry(entryId, mode);
   }
 }

@@ -11,6 +11,7 @@
 import {
   type AutoEnableDecision,
   getAutoEnableManager,
+  type LaunchContinuation,
   type LaunchEvent,
 } from '@/core/AutoEnableManager';
 import { type BootstrapDebugSnapshot, copyDiagnosticInfo } from '@/ui/debug/diagnostics';
@@ -57,7 +58,6 @@ interface AppState {
   originalHostPage: HostPageSnapshot | null; // Host page state when reader was opened
   entryPageKind: PageKind | null; // page kind when reader was opened
   pendingHostOverlayCleanup: boolean; // deferred until the hidden host page is restored
-  progressiveEntryId: string | null; // chapter entry still receiving background section pages
 }
 
 // Global app state
@@ -69,7 +69,6 @@ const appState: AppState = {
   originalHostPage: null,
   entryPageKind: null,
   pendingHostOverlayCleanup: false,
-  progressiveEntryId: null,
 };
 
 // Vue app instance
@@ -266,41 +265,13 @@ async function showPrompt(): Promise<{
 /**
  * Launch the reader, then keep feeding it the chapter's remaining section pages.
  */
-function launchReader(event: LaunchEvent): void {
+function launchReader(event: LaunchEvent): LaunchContinuation | void {
   if (!pinia) {
     console.error('[MNR] Pinia not initialized');
     return;
   }
 
   const readerStore = useReaderStore(pinia);
-
-  if (event.stage === 'append') {
-    if (!appState.isActive || !appState.progressiveEntryId) return;
-    void readerStore.appendChapterSection(appState.progressiveEntryId, {
-      ...event.delta,
-      loaded: event.progress.loaded,
-      total: event.progress.total,
-    });
-    return;
-  }
-
-  if (event.stage === 'cancel') {
-    const mergingEntryId = appState.progressiveEntryId;
-    appState.progressiveEntryId = null;
-    if (!appState.isActive || !mergingEntryId) return;
-    readerStore.cancelChapterSections(mergingEntryId, event.reason);
-    return;
-  }
-
-  if (event.stage === 'complete' && event.progressive) {
-    const mergingEntryId = appState.progressiveEntryId;
-    appState.progressiveEntryId = null;
-    if (!appState.isActive || !mergingEntryId) return;
-    void readerStore.completeChapterSections(mergingEntryId, event.chapter, event.rule, {
-      truncated: event.truncated,
-    });
-    return;
-  }
 
   if (appState.isActive) return;
 
@@ -322,8 +293,7 @@ function launchReader(event: LaunchEvent): void {
   readerStore.activate();
   const entryId = readerStore.setChapter(chapter, rule);
   if (event.stage === 'initial') {
-    // Register after setChapter: that call cancels in-flight merges, including this one.
-    appState.progressiveEntryId = entryId;
+    // Register after setChapter, which tears down the previous session's merges.
     readerStore.beginChapterSections(entryId, event.progress, event.abort);
   }
 
@@ -331,6 +301,25 @@ function launchReader(event: LaunchEvent): void {
 
   // Mount reader UI
   mountReaderUI();
+
+  if (event.stage === 'initial') {
+    // The store owns cancellation and serialization. Late writes can only address this entry.
+    return async update => {
+      if (update.stage === 'append') {
+        await readerStore.appendChapterSection(entryId, {
+          ...update.delta,
+          loaded: update.progress.loaded,
+          total: update.progress.total,
+        });
+      } else if (update.stage === 'complete') {
+        await readerStore.completeChapterSections(entryId, update.chapter, update.rule, {
+          truncated: update.truncated,
+        });
+      } else {
+        readerStore.cancelChapterSections(entryId, update.reason);
+      }
+    };
+  }
 }
 
 /**
@@ -523,7 +512,6 @@ export function closeReader(): void {
   appState.isActive = false;
   appState.originalHostPage = null; // Clear saved host page state
   appState.entryPageKind = null;
-  appState.progressiveEntryId = null;
 
   // If current chapter URL is different from the original page URL,
   // navigate to the target URL so page content matches what user was reading

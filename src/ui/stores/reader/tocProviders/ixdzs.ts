@@ -31,6 +31,7 @@ export const ixdzsTocLoader: SpecialTocLoader = {
       (await requestSiteData(new URL('/novel/clist/', pageUrl.origin).href, {
         responseType: 'json',
         setAbort: context.setAbort,
+        onResult: context.onRequest,
         timeoutMs: 15_000,
         gmFallback: false,
         method: 'POST',

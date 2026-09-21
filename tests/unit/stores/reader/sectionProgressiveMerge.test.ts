@@ -66,6 +66,35 @@ describe('reader store - section progress', () => {
     return { abort, entryId };
   }
 
+  it('a mode switch during delta conversion must not append stale text', async () => {
+    const store = useReaderStore();
+    await store.applyTextConversion('tc');
+    const { entryId } = startMerge(store);
+    await Promise.resolve();
+    let release!: (html: string) => void;
+    mocks.html.mockImplementationOnce(
+      () =>
+        new Promise<string>(resolve => {
+          release = resolve;
+        })
+    );
+    const pending = store.appendChapterSection(entryId, {
+      content: '<p>头发</p>',
+      rawContent: '<p>头发</p>',
+      loaded: 2,
+      total: 2,
+    });
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+    await store.applyTextConversion('sc');
+    release('<p>頭髮</p>');
+    await pending;
+    await store.completeChapterSections(
+      entryId,
+      makeChapter({ content: fold('<p>第一页</p>', '<p>头发</p>') })
+    );
+    expect(store.chapters[0]?.chapter.content).not.toContain('頭髮');
+  });
+
   it('folds appended pages exactly the way the merger joins them', async () => {
     const store = useReaderStore();
     const { entryId } = startMerge(store);
@@ -213,6 +242,22 @@ describe('reader store - section progress', () => {
 
     await expect(store.completeChapterSections(entryId, makeChapter())).resolves.toBe(true);
     expect(store.cachedContents.has(CHAPTER_URL)).toBe(true);
+  });
+
+  it('does not reuse a same-tick entry or accept its late writes after reopening', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(12345);
+    const store = useReaderStore();
+    const old = startMerge(store);
+    store.deactivate();
+    const current = startMerge(store);
+    expect(current.entryId).not.toBe(old.entryId);
+    await store.appendChapterSection(old.entryId, { content: 'OLD', rawContent: 'OLD', loaded: 2 });
+    await store.completeChapterSections(old.entryId, makeChapter({ content: 'OLD' }));
+    store.cancelChapterSections(old.entryId, 'failed');
+    expect(store.chapters[0].chapter.content).not.toContain('OLD');
+    expect(store.chapters[0].sectionProgress).toBeDefined();
+    expect(current.abort).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
   });
 
   it('stops appending and aborts the merge when the reader tears down', async () => {
@@ -378,7 +423,7 @@ describe('startProgressiveSectionMerge', () => {
   function stubMerger(
     run: (options: {
       onFirstPage: (chapter: ParsedChapter, progress: unknown) => void | Promise<void>;
-      onSectionPage: (delta: unknown, progress: unknown) => void;
+      onSectionPage: (delta: unknown, progress: unknown) => Promise<void>;
       onMergeEnd: (end: unknown) => void;
     }) => Promise<ParsedChapter | null>
   ) {
@@ -396,7 +441,7 @@ describe('startProgressiveSectionMerge', () => {
     stubMerger(async options => {
       await options.onFirstPage(makeChapter(), { url: CHAPTER_URL, loaded: 1, total: 2 });
       released = true;
-      options.onSectionPage(
+      await options.onSectionPage(
         { content: '<p>第二页</p>', rawContent: '<p>raw2</p>' },
         { url: CHAPTER_URL, loaded: 2, total: 2 }
       );
@@ -440,11 +485,11 @@ describe('startProgressiveSectionMerge', () => {
 
     stubMerger(async options => {
       await options.onFirstPage(makeChapter(), { url: CHAPTER_URL, loaded: 1 });
-      options.onSectionPage(
+      await options.onSectionPage(
         { content: '<p>2</p>', rawContent: '<p>2</p>' },
         { url: CHAPTER_URL, loaded: 2 }
       );
-      options.onSectionPage(
+      await options.onSectionPage(
         { content: '<p>3</p>', rawContent: '<p>3</p>' },
         { url: CHAPTER_URL, loaded: 3 }
       );

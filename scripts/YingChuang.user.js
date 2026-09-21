@@ -3,7 +3,7 @@
 // @name:zh-CN         萤窗
 // @name:zh-TW         螢窗
 // @namespace          https://github.com/JasonEX
-// @version            1.0.3
+// @version            1.0.4
 // @author             JasonEX
 // @description        萤窗：小说阅读脚本，智能正文识别、连续阅读、阅读位置恢复、简繁转换
 // @description:zh-CN  萤窗：小说阅读脚本，智能正文识别、连续阅读、阅读位置恢复、简繁转换
@@ -5004,7 +5004,7 @@
 				kind: "merge",
 				chapterUrl: this.getChapterUrl(startPage.url, nextSectionUrl),
 				nextSectionUrl,
-				nextChapterUrl: section?.nextChapterUrl || null,
+				nextChapterUrl: section?.nextChapterUrl || (first.nextUrl && !isSectionLikeUrl(startPage.url, first.nextUrl, parseSectionUrl) ? first.nextUrl : null),
 				sectionDelayMs: hasCustomFetcher ? 0 : Math.max(0, first.rule?.advanced?.sectionDelayMs ?? 0)
 			};
 		}
@@ -5053,13 +5053,13 @@
 				const page = await this.loadNextSectionPage(cursor, startPage.knownDocs, fetcher, signal);
 				if (!page) break;
 				const nextParsed = await this.parseLoadedSection(page, cursor.lastUrl, startPage.knownDocs, fetcher, signal);
-				if (!nextParsed) break;
+				if (signal?.aborted || !nextParsed) break;
 				const section = this.parser.detectSection(page.doc, page.url);
 				this.advanceMergeCursor(cursor, page.url, nextParsed, section);
 				cursor.remainingPages -= 1;
 				cursor.loadedPages += 1;
 				cursor.totalPages = this.reconcileSectionTotal(cursor, page.doc, maxPages);
-				if (progressive) options.onSectionPage?.({
+				if (progressive) await options.onSectionPage?.({
 					content: nextParsed.content,
 					rawContent: nextParsed.rawContent,
 					sourceScript: cursor.sourceScript,
@@ -5138,7 +5138,7 @@
 				url: cursor.chapterUrl,
 				content: cursor.mergedContent,
 				rawContent: cursor.mergedRaw,
-				nextUrl: cursor.nextChapterUrl || first.nextUrl,
+				nextUrl: cursor.nextChapterUrl || void 0,
 				sourceScript: cursor.sourceScript
 			};
 		}
@@ -8778,6 +8778,7 @@
 			this.activateProtection();
 			const controller = new AbortController();
 			let launchedEarly = false;
+			const delivery = {};
 			let truncated = false;
 			try {
 				const currentUrl = doc.location?.href || window.location.href;
@@ -8785,17 +8786,17 @@
 					signal: controller.signal,
 					onFirstPage: (firstPage, progress) => {
 						if (!this.launchCallback) return;
-						this.launchCallback({
+						delivery.update = this.launchCallback({
 							stage: "initial",
 							chapter: firstPage,
 							rule: rule || firstPage.rule,
 							progress,
 							abort: () => controller.abort()
-						});
+						}) || void 0;
 						launchedEarly = true;
 					},
-					onSectionPage: (delta, progress) => {
-						this.launchCallback?.({
+					onSectionPage: async (delta, progress) => {
+						await delivery.update?.({
 							stage: "append",
 							delta,
 							progress
@@ -8805,29 +8806,36 @@
 						truncated = end.truncated;
 					}
 				});
-				if (chapter && this.launchCallback) {
-					this.launchCallback({
-						stage: "complete",
-						chapter,
-						rule: rule || chapter.rule,
-						progressive: launchedEarly,
-						truncated
-					});
-					return "complete";
-				}
 				if (launchedEarly) {
-					this.launchCallback?.({
+					if (chapter && !controller.signal.aborted) {
+						await delivery.update?.({
+							stage: "complete",
+							chapter,
+							rule: rule || chapter.rule,
+							truncated
+						});
+						return "complete";
+					}
+					await delivery.update?.({
 						stage: "cancel",
 						reason: "aborted"
 					});
 					return "initial";
+				}
+				if (chapter && this.launchCallback) {
+					this.launchCallback({
+						stage: "complete",
+						chapter,
+						rule: rule || chapter.rule
+					});
+					return "complete";
 				}
 				this.deactivateProtection();
 				return false;
 			} catch (e) {
 				console.error("[AutoEnableManager] Parse error:", e);
 				if (launchedEarly) {
-					this.launchCallback?.({
+					await delivery.update?.({
 						stage: "cancel",
 						reason: "failed"
 					});
@@ -8879,9 +8887,9 @@
 		else if (options) managerInstance.updateOptions(options);
 		return managerInstance;
 	}
-	var VERSION = "1.0.3";
+	var VERSION = "1.0.4";
 	var BUILD_DATE = "2026-09-20";
-	var SENSITIVE_QUERY_KEY = /(?:^|[_-])(?:token|auth|session|sid|key|sign|signature|ticket|password|passwd|pwd|jwt|credential|access|refresh|challenge|chl)(?:[_-]|$)|^__cf_/i;
+	var SENSITIVE_QUERY_KEY = /(?:^|[_-])(?:token|auth|session|sid|key|sign|signature|ticket|password|passwd|pwd|jwt|credential|access|refresh|challenge|chl)(?:[_-]|$)|^__cf_|^_csrfToken$/i;
 	function redactUrl(url) {
 		if (!url) return null;
 		try {
@@ -9022,8 +9030,8 @@
 			browser: getBrowserSnapshot(),
 			page: getPageSnapshot(),
 			config: options.configStore ? getConfigSnapshot(options.configStore) : null,
-			reader: options.readerStore?.getDebugSnapshot ? toDebugValue(options.readerStore.getDebugSnapshot()) : null,
-			recentEvents: toDebugValue(getDebugEvents())
+			reader: options.readerStore?.getDebugSnapshot ? toDebugValue(options.readerStore.getDebugSnapshot(), 5) : null,
+			recentEvents: getDebugEvents().map((event) => toDebugValue(event, 4))
 		};
 	}
 	async function copyDiagnosticInfo(options = {}) {
@@ -14790,6 +14798,13 @@ ul, ol {
 	var VIP_BLOCK_TOAST = "该章节为VIP/付费内容，无法加载";
 	var SECTION_MERGING_TOAST = "本章正在加载后续内容，请稍候";
 	var SECTION_INCOMPLETE_TOAST = "本章内容不完整，无法确认下一章";
+	var nextChapterEntryId = 0;
+	function createChapterEntryId() {
+		return `chapter-${++nextChapterEntryId}`;
+	}
+	function isChapterComplete(entry) {
+		return !!entry && !entry.sectionProgress && !entry.sectionsIncomplete;
+	}
 	var Trie = class {
 		constructor() {
 			this.map = new Map();
@@ -18287,15 +18302,27 @@ ul, ol {
 			let gmRequest;
 			let settled = false;
 			const timeoutMs = options.timeoutMs ?? 1e4;
+			const diagnostic = {
+				url,
+				finalUrl: null,
+				transport: null,
+				status: null,
+				reason: "unavailable"
+			};
 			const finish = (value) => {
 				if (settled) return;
 				settled = true;
 				clearTimeout(timer);
 				options.setAbort(null);
+				options.onResult?.({
+					...diagnostic,
+					reason: value === null ? diagnostic.reason : "success"
+				});
 				resolve(value);
 			};
-			const cancel = () => {
+			const cancel = (reason = "cancelled") => {
 				if (settled) return;
+				diagnostic.reason = reason;
 				finish(null);
 				controller.abort();
 				try {
@@ -18304,7 +18331,7 @@ ul, ol {
 					console.debug("[MNR] Site request abort failed:", error);
 				}
 			};
-			const timer = setTimeout(cancel, timeoutMs);
+			const timer = setTimeout(() => cancel("timeout"), timeoutMs);
 			options.setAbort(cancel);
 			const parse = (data) => {
 				try {
@@ -18318,26 +18345,33 @@ ul, ol {
 				try {
 					if (settled) return;
 					const fetcher = getPageFetch();
-					if (fetcher) try {
-						const response = await fetcher(url, {
-							method: options.method ?? "GET",
-							credentials: "include",
-							headers: options.headers,
-							...options.body === void 0 ? {} : { body: options.body },
-							signal: controller.signal
-						});
-						if (settled) return;
-						if (response.ok) {
-							const data = await response[options.responseType]();
+					if (fetcher) {
+						diagnostic.transport = "fetch";
+						diagnostic.reason = "network";
+						try {
+							const response = await fetcher(url, {
+								method: options.method ?? "GET",
+								credentials: "include",
+								headers: options.headers,
+								...options.body === void 0 ? {} : { body: options.body },
+								signal: controller.signal
+							});
 							if (settled) return;
-							const value = parse(data);
-							if (value !== null) {
-								finish(value);
-								return;
+							diagnostic.status = response.status;
+							diagnostic.finalUrl = response.url || url;
+							diagnostic.reason = response.ok ? "parse" : "http";
+							if (response.ok) {
+								const data = await response[options.responseType]();
+								if (settled) return;
+								const value = parse(data);
+								if (value !== null) {
+									finish(value);
+									return;
+								}
 							}
+						} catch (error) {
+							if (!settled) console.debug("[MNR] Native site request failed:", error);
 						}
-					} catch (error) {
-						if (!settled) console.debug("[MNR] Native site request failed:", error);
 					}
 					if (settled) return;
 					const gmXhr = typeof GM_xmlhttpRequest === "function" ? GM_xmlhttpRequest : null;
@@ -18345,6 +18379,10 @@ ul, ol {
 						finish(null);
 						return;
 					}
+					diagnostic.transport = "gm";
+					diagnostic.status = null;
+					diagnostic.finalUrl = null;
+					diagnostic.reason = "network";
 					gmRequest = gmXhr({
 						method: options.method ?? "GET",
 						url,
@@ -18357,10 +18395,14 @@ ul, ol {
 						withCredentials: true,
 						onload: (response) => {
 							if (settled) return;
+							diagnostic.status = response.status;
+							diagnostic.finalUrl = response.finalUrl || url;
+							diagnostic.reason = "http";
 							if (response.status < 200 || response.status >= 300) {
 								finish(null);
 								return;
 							}
+							diagnostic.reason = "parse";
 							try {
 								const data = options.responseType === "json" ? JSON.parse(response.responseText) : response.responseText;
 								finish(parse(data));
@@ -18370,8 +18412,11 @@ ul, ol {
 							}
 						},
 						onerror: () => finish(null),
-						onabort: () => finish(null),
-						ontimeout: cancel
+						onabort: () => {
+							diagnostic.reason = "cancelled";
+							finish(null);
+						},
+						ontimeout: () => cancel("timeout")
 					});
 				} catch (error) {
 					console.warn("[MNR] Site request failed:", error);
@@ -18449,6 +18494,7 @@ ul, ol {
 		return await requestSiteData(apiUrl, {
 			responseType: "text",
 			setAbort: context.setAbort,
+			onResult: context.onRequest,
 			referrer: context.currentUrl || context.indexUrl,
 			headers: {
 				Accept: "text/html, */*; q=0.01",
@@ -18502,6 +18548,7 @@ ul, ol {
 			return await requestSiteData(new URL("/novel/clist/", pageUrl.origin).href, {
 				responseType: "json",
 				setAbort: context.setAbort,
+				onResult: context.onRequest,
 				timeoutMs: 15e3,
 				gmFallback: false,
 				method: "POST",
@@ -18608,12 +18655,13 @@ ul, ol {
 		}
 		return dedupeQidianTocEntries(entries);
 	}
-	async function loadQidianTocEntries(indexUrl, currentUrl, setAbort) {
+	async function loadQidianTocEntries(indexUrl, currentUrl, context) {
 		const apiUrl = buildQidianCategoryUrl(indexUrl, currentUrl);
 		if (!apiUrl) return [];
 		return await requestSiteData(apiUrl, {
 			responseType: "json",
-			setAbort,
+			setAbort: context.setAbort,
+			onResult: context.onRequest,
 			referrer: currentUrl || indexUrl,
 			headers: {
 				Accept: "application/json, text/javascript, */*; q=0.01",
@@ -18628,7 +18676,7 @@ ul, ol {
 	var qidianTocLoader = {
 		id: "qidian",
 		matches: (context) => isQidianTocRequest(context.indexUrl, context.currentUrl, context.rule),
-		load: (context) => loadQidianTocEntries(context.indexUrl, context.currentUrl, context.setAbort)
+		load: (context) => loadQidianTocEntries(context.indexUrl, context.currentUrl, context)
 	};
 	var sto9_exports = __exportAll({ sto9TocLoader: () => sto9TocLoader });
 	var sto9TocLoader = createAjaxChapterListLoader({
@@ -18896,65 +18944,116 @@ ul, ol {
 		return candidates[0].url;
 	}
 	var MAX_TOC_PAGES = 120;
-	async function loadTocEntriesPaged(indexUrl, currentUrl, rule, setAbort) {
+	async function loadTocEntriesPaged(indexUrl, currentUrl, rule, setAbort, report = () => {}) {
 		const loaderContext = {
 			indexUrl,
 			currentUrl,
 			rule,
-			setAbort
+			setAbort,
+			onRequest: (request) => report({ request })
 		};
 		const loader = specialTocLoaders.find((item) => item.matches(loaderContext));
-		if (loader) return loader.load(loaderContext);
+		report({ loader: loader?.id ?? "paged" });
+		if (loader) {
+			const entries = await loader.load(loaderContext);
+			report({
+				pages: entries.length ? 1 : 0,
+				entries: entries.length,
+				reason: entries.length ? "provider-complete" : "empty"
+			});
+			return entries;
+		}
 		const visitedPages = new Set();
 		const seenChapterUrls = new Set();
 		const allCandidates = [];
-		const aborters = [];
+		let currentAbort = null;
 		let aborted = false;
-		const abortAll = () => {
+		setAbort(() => {
 			aborted = true;
-			for (const fn of aborters) try {
-				fn();
-			} catch {}
-		};
-		setAbort(abortAll);
+			currentAbort?.();
+		});
 		try {
 			let pageUrl = indexUrl;
 			let referer = currentUrl || indexUrl;
-			while (pageUrl && visitedPages.size < MAX_TOC_PAGES) {
+			while (pageUrl && !aborted) {
 				const pageKey = normalizeUrlForCompare(pageUrl);
-				if (visitedPages.has(pageKey)) break;
+				if (visitedPages.has(pageKey)) {
+					report({ reason: "repeated-page" });
+					break;
+				}
+				if (visitedPages.size >= MAX_TOC_PAGES) {
+					report({
+						reason: "page-limit",
+						nextUrl: pageUrl
+					});
+					throw new Error(`TOC page limit reached before: ${pageUrl}`);
+				}
 				visitedPages.add(pageKey);
+				report({ request: {
+					url: pageUrl,
+					finalUrl: null,
+					status: null,
+					transport: null,
+					reason: "pending"
+				} });
 				const { promise, abort } = fetchAndParseUrl(pageUrl, referer);
-				aborters.push(abort);
+				currentAbort = abort;
+				if (aborted) abort();
 				const result = await promise;
-				if (aborted || result.error === "abort") return [];
+				currentAbort = null;
+				report({ request: {
+					url: pageUrl,
+					finalUrl: result.finalUrl,
+					status: result.status,
+					transport: null,
+					reason: result.error || (result.doc ? "success" : "empty")
+				} });
+				if (aborted || result.error === "abort") {
+					report({ reason: "cancelled" });
+					return [];
+				}
 				if (!result.doc || result.error) {
+					report({ reason: result.error || "empty-response" });
 					if (allCandidates.length === 0) return [];
 					throw new Error(`TOC page request failed: ${pageUrl} (${result.error})`);
 				}
 				const effectivePageUrl = result.finalUrl || pageUrl;
 				const pageCandidates = collectTocCandidates(result.doc, effectivePageUrl, rule);
 				if (pageCandidates.length === 0 && (rule?.toc?.selector || allCandidates.length > 0)) {
+					report({ reason: "empty-page" });
 					if (allCandidates.length === 0) return [];
 					throw new Error(`TOC page has no chapter entries: ${effectivePageUrl}`);
 				}
 				allCandidates.push(...pageCandidates);
-				let newCount = 0;
-				for (const entry of pageCandidates) if (!seenChapterUrls.has(entry.url)) {
-					seenChapterUrls.add(entry.url);
-					newCount++;
+				const previousCount = seenChapterUrls.size;
+				for (const entry of pageCandidates) seenChapterUrls.add(entry.url);
+				report({
+					pages: visitedPages.size,
+					entries: seenChapterUrls.size
+				});
+				if (visitedPages.size >= 2 && seenChapterUrls.size === previousCount) {
+					report({ reason: "no-new-chapters" });
+					break;
 				}
-				if (visitedPages.size >= 2 && newCount === 0) break;
 				const nextPageUrl = findNextTocPageUrl(result.doc, effectivePageUrl, indexUrl);
-				if (!nextPageUrl) break;
+				report({ nextUrl: nextPageUrl });
+				if (!nextPageUrl) {
+					report({ reason: "last-page" });
+					break;
+				}
 				referer = effectivePageUrl;
 				pageUrl = nextPageUrl;
 			}
 		} finally {
 			setAbort(null);
 		}
-		if (allCandidates.length === 0) return [];
-		return filterTocEntries(dedupeTocEntries(allCandidates));
+		if (aborted) {
+			report({ reason: "cancelled" });
+			return [];
+		}
+		const entries = filterTocEntries(dedupeTocEntries(allCandidates));
+		report({ entries: entries.length });
+		return entries;
 	}
 	function createTocActions(ctx) {
 		const _loadTocEntriesPaged = ctx.loadTocEntriesPaged ?? loadTocEntriesPaged;
@@ -18984,6 +19083,7 @@ ul, ol {
 				return;
 			}
 		}
+		let lastLoad = null;
 		let inflight = null;
 		function loadToc() {
 			const runId = ctx.runtime.sessionId();
@@ -19000,38 +19100,67 @@ ul, ol {
 		}
 		async function runLoadToc(runId) {
 			ctx.tocLoading.value = true;
+			const diagnostic = {
+				currentUrl: ctx.chapter.value?.url || "",
+				indexUrl: ctx.chapter.value?.indexUrl || null,
+				ruleId: ctx.rule.value?.id || null,
+				attempt: 0,
+				loader: "pending",
+				pages: 0,
+				entries: 0,
+				outcome: "loading",
+				reason: null
+			};
+			lastLoad = diagnostic;
 			try {
 				const currentUrl = ctx.chapter.value?.url || "";
 				let indexUrl = ctx.chapter.value?.indexUrl;
 				if (!indexUrl || currentUrl && normalizeUrlForBlock(indexUrl) === normalizeUrlForBlock(currentUrl)) indexUrl = await ensureIndexUrl() || void 0;
 				if (ctx.runtime.isSessionStale(runId)) return;
+				diagnostic.indexUrl = indexUrl || null;
 				if (!indexUrl) {
+					diagnostic.outcome = "empty";
+					diagnostic.reason = "missing-index";
 					ctx.showToast("未检测到目录链接", "info", 2500);
 					return;
 				}
-				let entries = await _loadTocEntriesPaged(indexUrl, currentUrl || indexUrl, ctx.rule.value ?? void 0, (abort) => {
-					if (!ctx.runtime.isSessionStale(runId)) ctx.tocAbort.value = abort;
-					else abort?.();
-				});
-				if (ctx.runtime.isSessionStale(runId)) return;
-				if (entries.length === 0) {
-					await new Promise((resolve) => window.setTimeout(resolve, 400));
-					if (ctx.runtime.isSessionStale(runId)) return;
-					entries = await _loadTocEntriesPaged(indexUrl, currentUrl || indexUrl, ctx.rule.value ?? void 0, (abort) => {
+				const fetchEntries = () => {
+					diagnostic.attempt++;
+					diagnostic.pages = 0;
+					diagnostic.entries = 0;
+					diagnostic.reason = null;
+					diagnostic.request = void 0;
+					diagnostic.nextUrl = void 0;
+					return _loadTocEntriesPaged(indexUrl, currentUrl || indexUrl, ctx.rule.value ?? void 0, (abort) => {
 						if (!ctx.runtime.isSessionStale(runId)) ctx.tocAbort.value = abort;
 						else abort?.();
-					});
+					}, (update) => Object.assign(diagnostic, update));
+				};
+				let entries = await fetchEntries();
+				if (ctx.runtime.isSessionStale(runId)) return;
+				if (entries.length === 0) {
+					recordDebugEvent("toc.retry", diagnostic);
+					await new Promise((resolve) => window.setTimeout(resolve, 400));
+					if (ctx.runtime.isSessionStale(runId)) return;
+					entries = await fetchEntries();
 					if (ctx.runtime.isSessionStale(runId)) return;
 				}
 				await setTocEntries(entries);
 				if (ctx.runtime.isSessionStale(runId)) return;
+				diagnostic.entries = entries.length;
+				diagnostic.outcome = entries.length ? "complete" : "empty";
 				if (entries.length === 0) ctx.showToast("目录解析为空，可稍后重试或刷新页面", "info", 2500);
 			} catch (e) {
 				if (!ctx.runtime.isSessionStale(runId)) {
+					diagnostic.outcome = "failed";
+					diagnostic.error = String(e);
+					diagnostic.reason ??= "exception";
 					console.error("[MNR] Failed to load TOC:", e);
 					ctx.showToast("目录加载失败，可稍后重试", "error", 2500);
 				}
 			} finally {
+				if (ctx.runtime.isSessionStale(runId)) diagnostic.outcome = "cancelled";
+				recordDebugEvent("toc.load", diagnostic, diagnostic.outcome === "failed" ? "error" : "info");
 				if (!ctx.runtime.isSessionStale(runId)) {
 					ctx.tocLoading.value = false;
 					ctx.tocAbort.value = null;
@@ -19039,9 +19168,8 @@ ul, ol {
 			}
 		}
 		return {
-			setTocEntries,
-			ensureIndexUrl,
-			loadToc
+			loadToc,
+			getLoadDiagnostic: () => lastLoad
 		};
 	}
 	async function parseWithSectionMerge(parser, initialDoc, url, options = {}) {
@@ -19061,10 +19189,6 @@ ul, ol {
 		let progressive = false;
 		let progress = { loaded: 1 };
 		let truncated = false;
-		let chain = Promise.resolve();
-		const enqueue = (task) => {
-			chain = chain.then(task, task);
-		};
 		createSectionMerger(parser).merge(initialDoc, url, {
 			signal: controller.signal,
 			onFirstPage: (chapter, info) => {
@@ -19076,31 +19200,31 @@ ul, ol {
 				resolveFirst(chapter);
 				return gate;
 			},
-			onSectionPage: (delta, info) => {
+			onSectionPage: async (delta, info) => {
 				const target = entryId;
 				if (!target) return;
-				enqueue(() => sink.append(target, {
+				await sink.append(target, {
 					...delta,
 					loaded: info.loaded,
 					total: info.total
-				}));
+				});
 			},
 			onMergeEnd: (end) => {
 				truncated = end.truncated;
 			}
-		}).then((chapter) => {
+		}).then(async (chapter) => {
 			resolveFirst(chapter);
 			const target = entryId;
 			if (!target) return;
 			if (!chapter || controller.signal.aborted) {
-				enqueue(async () => sink.cancel(target, controller.signal.aborted ? "aborted" : "failed"));
+				sink.cancel(target, controller.signal.aborted ? "aborted" : "failed");
 				return;
 			}
-			enqueue(() => sink.complete(target, chapter, chapter.rule, { truncated }));
+			await sink.complete(target, chapter, chapter.rule, { truncated });
 		}).catch((error) => {
 			console.error("[MNR] Background section merge failed:", error);
 			const target = entryId;
-			if (target) enqueue(async () => sink.cancel(target, "failed"));
+			if (target) sink.cancel(target, "failed");
 			resolveFirst(null);
 		});
 		const chapter = await firstReady;
@@ -19162,8 +19286,7 @@ ul, ol {
 			abort,
 			convertedMode: ctx.currentConversionMode.value,
 			convertedScript: entry.chapter.sourceScript,
-			queue: Promise.resolve(),
-			viewId: ctx.runtime.viewId()
+			queue: Promise.resolve()
 		});
 		ctx.cachedContents.value.delete(entry.chapter.url);
 		ctx.cachedContents.value.delete(normalizeUrlForFetch(entry.chapter.url));
@@ -19190,20 +19313,20 @@ ul, ol {
 			...delta.nextUrl ? { nextUrl: normalizeUrlForFetch(delta.nextUrl) } : {}
 		};
 		const mode = ctx.currentConversionMode.value;
-		if (mode !== merge.convertedMode) {
-			merge.convertedMode = mode;
-			ctx.originalContents.value.set(entryId, folded);
-			await ctx.applyConversionToChapterEntry(entryId, mode);
-		} else {
+		const displayBefore = entry.chapter.content;
+		ctx.originalContents.value.set(entryId, folded);
+		if (mode !== merge.convertedMode || delta.sourceScript !== merge.convertedScript) await ctx.applyConversionToChapterEntry(entryId, mode);
+		else {
 			const displayDelta = mode === "none" ? delta.content : await convertHTML(delta.content, mode, { sourceScript: delta.sourceScript });
 			const current = findMergingEntry(ctx, entryId, merge);
 			if (!current) return false;
-			ctx.originalContents.value.set(entryId, folded);
-			current.chapter = {
+			if (mode !== ctx.currentConversionMode.value || current.chapter.content !== displayBefore) await ctx.applyConversionToChapterEntry(entryId, ctx.currentConversionMode.value);
+			else current.chapter = {
 				...current.chapter,
-				content: joinHtml(current.chapter.content, displayDelta)
+				content: joinHtml(displayBefore, displayDelta)
 			};
 		}
+		merge.convertedMode = mode;
 		const committed = findMergingEntry(ctx, entryId, merge);
 		if (!committed) return false;
 		merge.convertedScript = delta.sourceScript;
@@ -19259,10 +19382,10 @@ ul, ol {
 		delete entry.sectionProgress;
 		if (info.truncated) entry.sectionsIncomplete = true;
 		else delete entry.sectionsIncomplete;
-		await reconcileMergedConversion(ctx, entryId, entry, merged, merge.convertedScript);
+		await reconcileMergedConversion(ctx, entryId, entry, merged, merge.convertedScript, merge.convertedMode);
 		return true;
 	}
-	async function reconcileMergedConversion(ctx, entryId, entry, merged, convertedScript) {
+	async function reconcileMergedConversion(ctx, entryId, entry, merged, convertedScript, convertedMode) {
 		const mode = ctx.currentConversionMode.value;
 		if (mode === "none") {
 			entry.chapter = {
@@ -19271,7 +19394,7 @@ ul, ol {
 			};
 			return;
 		}
-		if (convertedScript !== merged.sourceScript) await ctx.applyConversionToChapterEntry(entryId, mode);
+		if (convertedScript !== merged.sourceScript || convertedMode !== mode) await ctx.applyConversionToChapterEntry(entryId, mode);
 	}
 	function cancelChapterSections(ctx, entryId, reason) {
 		const merge = ctx.sectionMerges.value.get(entryId);
@@ -19555,9 +19678,18 @@ ul, ol {
 	}
 	function createCacheAll(ctx) {
 		let taskId = 0;
+		let lastTask = null;
 		async function startCacheAll(urls) {
 			const runId = ctx.runtime.sessionId();
 			if (ctx.cacheProgress.value.running) return;
+			const task = {
+				chapterUrl: ctx.chapter.value?.url ?? null,
+				requested: 0,
+				firstUrls: [],
+				lastUrls: [],
+				currentUrl: null
+			};
+			lastTask = task;
 			const fullBook = urls === void 0;
 			const currentTask = ++taskId;
 			const isCurrent = () => currentTask === taskId && !ctx.runtime.isSessionStale(runId);
@@ -19583,7 +19715,6 @@ ul, ol {
 				const isIndexUrl = (url) => indexUrlKey !== null && normalizeUrlForBlock(url) === indexUrlKey;
 				let cacheableChapterCount = 0;
 				let taskList = urls ? urls.map(normalizeUrlForFetch).filter((url) => !isIndexUrl(url)) : [];
-				ctx.cacheQueue.value = [...taskList];
 				if (fullBook) {
 					const tocEntries = ctx.tocOriginal.value;
 					const tocLinks = new Set();
@@ -19603,9 +19734,11 @@ ul, ol {
 					}
 					cacheableChapterCount = tocLinks.size;
 					taskList = Array.from(tocLinks).filter((url) => !ctx.cachedContents.value.has(url) && !persistedSet.has(url));
-					ctx.cacheQueue.value = [...taskList];
 				}
 				const estimatedTotal = taskList.length;
+				task.requested = estimatedTotal;
+				task.firstUrls = taskList.slice(0, 4);
+				task.lastUrls = taskList.slice(-4);
 				if (!isCurrent()) return;
 				if (estimatedTotal === 0) {
 					if (fullBook) {
@@ -19631,6 +19764,7 @@ ul, ol {
 				const writtenUrls = new Set();
 				while (isCurrent() && ctx.cacheProgress.value.running && nextUrl) {
 					const targetUrl = normalizeUrlForFetch(nextUrl);
+					task.currentUrl = targetUrl;
 					if (seenUrls.has(targetUrl) || ctx.cachedContents.value.has(targetUrl) || persistedSet.has(targetUrl)) {
 						ctx.cacheProgress.value = {
 							...ctx.cacheProgress.value,
@@ -19784,7 +19918,6 @@ ul, ol {
 				failed: 0,
 				running: false
 			};
-			ctx.cacheQueue.value = [];
 			ctx.cacheFailedUrls.value = [];
 			ctx.cacheAbort.value?.();
 			ctx.cacheAbort.value = null;
@@ -19797,13 +19930,13 @@ ul, ol {
 		return {
 			startCacheAll,
 			cancelCacheAll,
-			retryFailedCache
+			retryFailedCache,
+			getCacheDebugSnapshot: () => lastTask
 		};
 	}
 	async function insertCachedChapter(ctx, cached, position) {
 		const runId = ctx.runtime.viewId();
-		const suffix = position === "append" ? "cached" : "cached-prev";
-		const id = `chapter-${Date.now()}-${suffix}-${ctx.chapters.value.length}`;
+		const id = createChapterEntryId();
 		const entry = {
 			chapter: { ...cached.chapter },
 			rule: cached.rule,
@@ -19826,12 +19959,12 @@ ul, ol {
 	}
 	async function insertParsedChapter(ctx, load, parsed) {
 		const runId = ctx.runtime.viewId();
-		const suffix = load.isNext ? "" : "prev-";
-		const id = `chapter-${Date.now()}-${suffix}${ctx.chapters.value.length}`;
+		const id = createChapterEntryId();
 		const entry = {
 			chapter: parsed,
 			rule: parsed.rule,
-			id
+			id,
+			sectionProgress: load.sectionMerge?.progress
 		};
 		if (load.isNext) ctx.chapters.value.push(entry);
 		else {
@@ -19843,18 +19976,16 @@ ul, ol {
 			title: parsed.title,
 			bookTitle: parsed.bookTitle
 		});
-		ctx.cachedContents.value.set(parsed.url, {
-			chapter: parsed,
-			rule: parsed.rule,
-			cachedAt: Date.now()
-		});
-		trimCachedContents(ctx.cachedContents.value, 500);
+		if (!load.sectionMerge) {
+			ctx.cachedContents.value.set(parsed.url, {
+				chapter: parsed,
+				rule: parsed.rule,
+				cachedAt: Date.now()
+			});
+			trimCachedContents(ctx.cachedContents.value, 500);
+		}
 		if (ctx.currentConversionMode.value !== "none") await ctx.applyConversionToChapterEntry(id, ctx.currentConversionMode.value);
 		if (ctx.runtime.isViewStale(runId)) return null;
-		if (!ctx.history.value.includes(parsed.url)) {
-			if (load.isNext) ctx.history.value.push(parsed.url);
-			else ctx.history.value.unshift(parsed.url);
-		}
 		trimDisplayChapters(ctx, load.isNext);
 		return id;
 	}
@@ -19864,7 +19995,7 @@ ul, ol {
 		ctx.currentChapterIndex.value = 0;
 		ctx.originalContents.value.clear();
 		ctx.originalTitles.value.clear();
-		const id = `chapter-${Date.now()}-jump-0`;
+		const id = createChapterEntryId();
 		ctx.chapters.value.push({
 			chapter: { ...cached.chapter },
 			rule: cached.rule,
@@ -20249,7 +20380,6 @@ ul, ol {
 		const toastType = ref("error");
 		const toastTimer = ref(null);
 		const scrollPercent = ref(0);
-		const history = ref([]);
 		const loadedUrls = computed(() => new Set(chapters.value.map((entry) => entry.chapter.url)));
 		const vipBlockedUrls = ref(new Set());
 		const blockedNavUrls = ref(new Set());
@@ -20265,7 +20395,6 @@ ul, ol {
 			failed: 0,
 			running: false
 		});
-		const cacheQueue = ref([]);
 		const cacheFailedUrls = ref([]);
 		const cacheAbort = ref(null);
 		const reloadAbort = ref(null);
@@ -20432,7 +20561,6 @@ ul, ol {
 			originalTitles,
 			currentConversionMode,
 			navFailures,
-			history,
 			runtime,
 			showToast,
 			setError,
@@ -20453,9 +20581,8 @@ ul, ol {
 			applyTocConversion: applyTocConversion$1,
 			loadTocEntriesPaged
 		});
-		const { startCacheAll, cancelCacheAll, retryFailedCache } = createCacheAll({
+		const { startCacheAll, cancelCacheAll, retryFailedCache, getCacheDebugSnapshot } = createCacheAll({
 			cacheProgress,
-			cacheQueue,
 			cacheFailedUrls,
 			cacheAbort,
 			cachedContents,
@@ -20475,8 +20602,7 @@ ul, ol {
 			pendingNextAbort.value = null;
 			pendingPrevAbort.value?.();
 			pendingPrevAbort.value = null;
-			cacheAbort.value?.();
-			cacheAbort.value = null;
+			cancelCacheAll();
 			reloadAbort.value?.();
 			reloadAbort.value = null;
 			tocAbort.value?.();
@@ -20485,14 +20611,6 @@ ul, ol {
 			isLoadingPrev.value = false;
 			isLoadingNext.value = false;
 			tocLoading.value = false;
-			cacheProgress.value = {
-				done: 0,
-				total: 0,
-				failed: 0,
-				running: false
-			};
-			cacheQueue.value = [];
-			cacheFailedUrls.value = [];
 		}
 		function clearAllData() {
 			sectionMerges.value.clear();
@@ -20535,7 +20653,7 @@ ul, ol {
 			if (newChapter.prevUrl) newChapter.prevUrl = normalizeUrlForFetch(newChapter.prevUrl);
 			if (newChapter.nextUrl) newChapter.nextUrl = normalizeUrlForFetch(newChapter.nextUrl);
 			if (newChapter.indexUrl) newChapter.indexUrl = normalizeUrlForFetch(newChapter.indexUrl);
-			const id = `chapter-${Date.now()}-0`;
+			const id = createChapterEntryId();
 			chapters.value = [{
 				chapter: newChapter,
 				rule: effectiveRule,
@@ -20551,10 +20669,6 @@ ul, ol {
 				rule: effectiveRule,
 				cachedAt: Date.now()
 			});
-			if (newChapter.url && !history.value.includes(newChapter.url)) {
-				history.value.push(newChapter.url);
-				if (history.value.length > 100) history.value = history.value.slice(-100);
-			}
 			if (currentConversionMode.value !== "none") applyConversionToChapterEntry$1(id, currentConversionMode.value).then(() => {
 				syncCurrentHostPage();
 			});
@@ -20660,10 +20774,6 @@ ul, ol {
 				first: summarizeChapterForDebug(firstEntry),
 				last: summarizeChapterForDebug(lastEntry),
 				navigation: {
-					history: {
-						count: history.value.length,
-						tail: tailStrings(history.value)
-					},
 					loadedUrls: summarizeUrlSet(loadedUrls.value),
 					vipBlockedUrls: summarizeUrlSet(vipBlockedUrls.value),
 					blockedNavUrls: summarizeUrlSet(blockedNavUrls.value),
@@ -20682,10 +20792,7 @@ ul, ol {
 						indexUrl: redactUrl(cacheBook.indexUrl)
 					} : null,
 					progress: { ...cacheProgress.value },
-					queue: {
-						count: cacheQueue.value.length,
-						tail: tailStrings(cacheQueue.value)
-					},
+					task: getCacheDebugSnapshot(),
 					memory: {
 						count: cachedContents.value.size,
 						tail: Array.from(cachedContents.value.entries()).slice(-8).map(([url, cached]) => ({
@@ -20699,6 +20806,9 @@ ul, ol {
 					persistedUrls: summarizeUrlSet(persistedUrls.value)
 				},
 				toc: {
+					lastLoad: tocActions.getLoadDiagnostic(),
+					firstUrls: tocOriginal.value.slice(0, 4).map((entry) => redactUrl(entry.url)),
+					lastUrls: tocOriginal.value.slice(-4).map((entry) => redactUrl(entry.url)),
 					loading: tocLoading.value,
 					count: toc.value.length,
 					originalCount: tocOriginal.value.length,
@@ -20758,7 +20868,6 @@ ul, ol {
 			error,
 			toastType,
 			scrollPercent,
-			history,
 			cacheProgress,
 			toc,
 			tocLoading,
@@ -20960,15 +21069,93 @@ ul, ol {
 		}).catch((error) => console.error("[MNR] Failed to save reading positions:", error));
 		return persistQueue;
 	}
+	function getChapterPercent(mainEl, chapterEl, complete) {
+		const top = mainEl.scrollTop + chapterEl.getBoundingClientRect().top - mainEl.getBoundingClientRect().top;
+		if (complete && chapterEl.offsetHeight <= mainEl.clientHeight) return 100;
+		const height = Math.max(1, chapterEl.offsetHeight - mainEl.clientHeight * .5);
+		return Math.max(0, Math.min(100, (mainEl.scrollTop - top) / height * 100));
+	}
+	function useReaderPosition(options) {
+		const { mainRef, chapterRefs, readerStore, isNavigating } = options;
+		const currentEntry = () => readerStore.chapters[readerStore.currentChapterIndex];
+		let pendingEntryId = currentEntry()?.id ?? null;
+		let savedPercent = null;
+		let disposed = false;
+		let lastSaveAt = 0;
+		function cancelRestore() {
+			pendingEntryId = null;
+		}
+		async function applySavedPosition() {
+			const entry = currentEntry();
+			if (!pendingEntryId || entry?.id !== pendingEntryId || savedPercent === null) return;
+			if (!isChapterComplete(entry)) return;
+			const id = pendingEntryId;
+			await nextTick();
+			await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+			if (disposed || pendingEntryId !== id || currentEntry()?.id !== id || !isChapterComplete(currentEntry())) return;
+			const mainEl = mainRef.value;
+			const chapterEl = chapterRefs.get(entry.chapter.url);
+			if (!mainEl || !chapterEl) return;
+			const top = mainEl.scrollTop + chapterEl.getBoundingClientRect().top - mainEl.getBoundingClientRect().top;
+			const height = Math.max(0, chapterEl.offsetHeight - mainEl.clientHeight * .5);
+			mainEl.scrollTop = top + savedPercent / 100 * height;
+			readerStore.updateScroll(savedPercent);
+			cancelRestore();
+			readerStore.showToast("已回到上次阅读位置", "info", 1800);
+		}
+		async function restorePosition() {
+			const entry = currentEntry();
+			if (!entry || entry.id !== pendingEntryId) return;
+			const percent = await getReadingPosition(entry.chapter.url);
+			if (entry.id !== pendingEntryId) return;
+			if (percent === null || percent < 3 || percent > 98) {
+				cancelRestore();
+				return;
+			}
+			savedPercent = percent;
+			await applySavedPosition();
+		}
+		watch(() => [
+			currentEntry()?.id,
+			currentEntry()?.sectionProgress !== void 0,
+			currentEntry()?.sectionsIncomplete,
+			isNavigating.value
+		], () => {
+			if (currentEntry()?.id !== pendingEntryId || isNavigating.value || currentEntry()?.sectionsIncomplete) cancelRestore();
+			else applySavedPosition();
+		}, { flush: "post" });
+		onScopeDispose(() => {
+			disposed = true;
+		});
+		function savePosition(url, percent) {
+			const entry = currentEntry();
+			if (pendingEntryId || !isChapterComplete(entry) || entry.chapter.url !== url) return;
+			const now = Date.now();
+			if (now - lastSaveAt < 500) return;
+			lastSaveAt = now;
+			saveReadingPosition(url, percent);
+		}
+		function flushPosition() {
+			const entry = currentEntry();
+			const mainEl = mainRef.value;
+			const chapterEl = entry && chapterRefs.get(entry.chapter.url);
+			if (!pendingEntryId && isChapterComplete(entry) && mainEl && chapterEl) saveReadingPosition(entry.chapter.url, getChapterPercent(mainEl, chapterEl, true));
+			flushReadingPositions();
+		}
+		return {
+			restorePosition,
+			cancelRestore,
+			savePosition,
+			flushPosition
+		};
+	}
 	var SCROLL_THROTTLE_MS = 16;
 	var SCROLL_SETTLE_CHECK_MS = 180;
-	var POSITION_SAVE_INTERVAL_MS = 500;
 	function useReaderScroll(options) {
-		const { mainRef, chapterRefs, readerStore, autoHideHeader, showControls, isNavigating, scheduleAutoLoadNext } = options;
+		const { mainRef, chapterRefs, readerStore, autoHideHeader, showControls, isNavigating, scheduleAutoLoadNext, savePosition } = options;
 		let lastScrollCall = 0;
 		let pendingScrollTimer = null;
 		let lastScrollTop = 0;
-		let lastPositionSaveAt = 0;
 		let pendingScrollSettleTimer = null;
 		onScopeDispose(() => {
 			if (pendingScrollTimer) clearTimeout(pendingScrollTimer);
@@ -21005,24 +21192,6 @@ ul, ol {
 				element: nearest.element
 			} : null;
 		}
-		function isChapterMerging(index) {
-			return !!readerStore.chapters[index]?.sectionProgress;
-		}
-		function getChapterPercent(mainEl, chapterEl, complete) {
-			const mainRect = mainEl.getBoundingClientRect();
-			const chapterRect = chapterEl.getBoundingClientRect();
-			const chapterTop = mainEl.scrollTop + chapterRect.top - mainRect.top;
-			const relativeTop = Math.max(0, mainEl.scrollTop - chapterTop);
-			if (complete && chapterEl.offsetHeight <= mainEl.clientHeight) return 100;
-			const scrollableHeight = Math.max(1, chapterEl.offsetHeight - mainEl.clientHeight * .5);
-			return Math.max(0, Math.min(100, relativeTop / scrollableHeight * 100));
-		}
-		function saveCurrentPosition(url, percent) {
-			const now = Date.now();
-			if (now - lastPositionSaveAt < POSITION_SAVE_INTERVAL_MS) return;
-			lastPositionSaveAt = now;
-			saveReadingPosition(url, percent);
-		}
 		function handleScrollCore() {
 			const mainEl = mainRef.value;
 			if (!mainEl) return;
@@ -21032,7 +21201,7 @@ ul, ol {
 				const currentUrl = readerStore.chapters[currentIndex]?.chapter.url;
 				const currentElement = currentUrl ? chapterRefs.get(currentUrl) : void 0;
 				const fallbackHeight = mainEl.scrollHeight - mainEl.clientHeight;
-				const percent = currentElement ? getChapterPercent(mainEl, currentElement, !isChapterMerging(currentIndex)) : fallbackHeight > 0 ? currentScrollTop / fallbackHeight * 100 : 100;
+				const percent = currentElement ? getChapterPercent(mainEl, currentElement, isChapterComplete(readerStore.chapters[currentIndex])) : fallbackHeight > 0 ? currentScrollTop / fallbackHeight * 100 : 100;
 				readerStore.updateScroll(percent);
 				return;
 			}
@@ -21043,12 +21212,12 @@ ul, ol {
 			lastScrollTop = currentScrollTop;
 			const current = findCurrentChapter(mainEl);
 			if (current) {
-				const merging = isChapterMerging(current.index);
-				const percent = getChapterPercent(mainEl, current.element, !merging);
+				const complete = isChapterComplete(readerStore.chapters[current.index]);
+				const percent = getChapterPercent(mainEl, current.element, complete);
 				readerStore.setCurrentChapter(current.index);
 				readerStore.updateScroll(percent);
 				const url = readerStore.chapters[current.index]?.chapter.url;
-				if (url && !merging) saveCurrentPosition(url, percent);
+				if (url && complete) savePosition(url, percent);
 			} else {
 				const scrollableHeight = mainEl.scrollHeight - mainEl.clientHeight;
 				readerStore.updateScroll(scrollableHeight > 0 ? currentScrollTop / scrollableHeight * 100 : 100);
@@ -21839,6 +22008,16 @@ ul, ol {
 			};
 		}
 	}), [["__scopeId", "data-v-fb6f172c"]]);
+	var vChapterContent = {
+		mounted(element, { value }) {
+			element.innerHTML = value;
+		},
+		updated(element, { value, oldValue }) {
+			if (value === oldValue) return;
+			if (oldValue && value.startsWith(`${oldValue}<p></p>`)) element.insertAdjacentHTML("beforeend", value.slice(oldValue.length));
+			else element.innerHTML = value;
+		}
+	};
 	var _hoisted_1$5 = { class: "mnr-floating-toolbar" };
 	var FloatingToolbar_default = _plugin_vue_export_helper_default(defineComponent({
 		__name: "FloatingToolbar",
@@ -21932,7 +22111,7 @@ ul, ol {
 	var _hoisted_8$3 = { class: "mnr-offline-main" };
 	var _hoisted_9$2 = { class: "mnr-offline-copy" };
 	var _hoisted_10$2 = { "aria-live": "polite" };
-	var _hoisted_11$2 = ["disabled"];
+	var _hoisted_11$1 = ["disabled"];
 	var _hoisted_12$1 = ["aria-valuenow"];
 	var _hoisted_13$1 = {
 		key: 1,
@@ -22130,7 +22309,7 @@ ul, ol {
 							type: "button",
 							disabled: __props.loading,
 							onClick: _cache[3] || (_cache[3] = ($event) => emit("cacheAll"))
-						}, toDisplayString(__props.cacheProgress.running ? "取消" : "缓存本书"), 9, _hoisted_11$2)]),
+						}, toDisplayString(__props.cacheProgress.running ? "取消" : "缓存本书"), 9, _hoisted_11$1)]),
 						__props.cacheProgress.running ? (openBlock(), createElementBlock("div", {
 							key: 0,
 							class: "mnr-cache-progress-track",
@@ -22423,7 +22602,7 @@ ul, ol {
 	var _hoisted_8$1 = { class: "mnr-settings-fieldset" };
 	var _hoisted_9$1 = { class: "mnr-segmented-control" };
 	var _hoisted_10$1 = ["aria-pressed", "onClick"];
-	var _hoisted_11$1 = { class: "mnr-settings-group" };
+	var _hoisted_11 = { class: "mnr-settings-group" };
 	var _hoisted_12 = { class: "mnr-settings-group-content" };
 	var _hoisted_13 = { class: "mnr-settings-group" };
 	var _hoisted_14 = { class: "mnr-settings-group-content" };
@@ -22724,7 +22903,7 @@ ul, ol {
 									onClick: resetAppearance
 								}, "恢复默认外观")
 							]),
-							createBaseVNode("details", _hoisted_11$1, [_cache[20] || (_cache[20] = createBaseVNode("summary", null, "排版细节", -1)), createBaseVNode("div", _hoisted_12, [
+							createBaseVNode("details", _hoisted_11, [_cache[20] || (_cache[20] = createBaseVNode("summary", null, "排版细节", -1)), createBaseVNode("div", _hoisted_12, [
 								createVNode(ReadingSlider_default, {
 									id: "mnr-letter-spacing",
 									label: "字间距",
@@ -22904,28 +23083,27 @@ ul, ol {
 	};
 	var _hoisted_3 = ["data-chapter-url", "lang"];
 	var _hoisted_4 = { class: "mnr-chapter-title" };
-	var _hoisted_5 = ["innerHTML"];
-	var _hoisted_6 = {
+	var _hoisted_5 = {
 		key: 0,
 		class: "mnr-section-progress",
 		role: "status",
 		"aria-live": "polite"
 	};
-	var _hoisted_7 = {
+	var _hoisted_6 = {
 		key: 1,
 		class: "mnr-section-progress",
 		role: "status"
 	};
-	var _hoisted_8 = {
+	var _hoisted_7 = {
 		key: 1,
 		class: "mnr-loading-next"
 	};
-	var _hoisted_9 = {
+	var _hoisted_8 = {
 		key: 2,
 		class: "mnr-chapter-end"
 	};
-	var _hoisted_10 = { class: "mnr-chapter-nav" };
-	var _hoisted_11 = ["href"];
+	var _hoisted_9 = { class: "mnr-chapter-nav" };
+	var _hoisted_10 = ["href"];
 	var SCROLL_BOUNDARY_EPSILON_PX = 4;
 	var ReaderView_default = _plugin_vue_export_helper_default(defineComponent({
 		__name: "ReaderView",
@@ -22975,6 +23153,12 @@ ul, ol {
 				configStore,
 				isNavigating
 			});
+			const { restorePosition, cancelRestore, savePosition, flushPosition } = useReaderPosition({
+				mainRef,
+				chapterRefs,
+				readerStore,
+				isNavigating
+			});
 			const { handleScroll } = useReaderScroll({
 				mainRef,
 				chapterRefs,
@@ -22982,7 +23166,8 @@ ul, ol {
 				autoHideHeader,
 				showControls,
 				isNavigating,
-				scheduleAutoLoadNext
+				scheduleAutoLoadNext,
+				savePosition
 			});
 			const { navigateChapter, jumpToCachedChapter, scrollReader, loadBoundaryChapter, turnReaderPage, handleWheel } = useChapterNavigation({
 				mainRef,
@@ -23135,30 +23320,11 @@ ul, ol {
 					allowRepeat: false
 				}
 			], { enabled: readerShortcutsEnabled });
-			async function restoreReadingPosition() {
-				const mainEl = mainRef.value;
-				const currentUrl = readerStore.chapter?.url;
-				if (!mainEl || !currentUrl) return;
-				const percent = await getReadingPosition(currentUrl);
-				if (percent === null || percent < 3 || percent > 98) return;
-				await nextTick();
-				await new Promise((resolve) => globalThis.requestAnimationFrame(() => resolve()));
-				const chapterEl = chapterRefs.get(currentUrl);
-				if (!chapterEl) return;
-				const mainRect = mainEl.getBoundingClientRect();
-				const chapterRect = chapterEl.getBoundingClientRect();
-				const chapterTop = mainEl.scrollTop + chapterRect.top - mainRect.top;
-				const scrollableHeight = Math.max(0, chapterEl.offsetHeight - mainEl.clientHeight * .5);
-				mainEl.scrollTop = chapterTop + percent / 100 * scrollableHeight;
-				readerStore.updateScroll(percent);
-				readerStore.showToast("已回到上次阅读位置", "info", 1800);
-			}
 			watch(() => readerStore.currentChapterIndex, () => {
 				flushReadingPositions();
 			});
 			function flushPersistentState() {
-				if (readerStore.chapter?.url) saveReadingPosition(readerStore.chapter.url, readerStore.scrollPercent);
-				flushReadingPositions();
+				flushPosition();
 				configStore.flushSave();
 			}
 			function handleVisibilityChange() {
@@ -23180,7 +23346,7 @@ ul, ol {
 				window.addEventListener("pagehide", flushPersistentState);
 				observeBottomSentinel(bottomSentinel.value);
 				await nextTick();
-				await restoreReadingPosition();
+				await restorePosition();
 				mainRef.value?.focus();
 				scheduleAutoLoadNext("state");
 			});
@@ -23201,6 +23367,10 @@ ul, ol {
 			return (_ctx, _cache) => {
 				return openBlock(), createElementBlock("div", {
 					class: "mnr-reader",
+					onWheelCapture: _cache[3] || (_cache[3] = (...args) => unref(cancelRestore) && unref(cancelRestore)(...args)),
+					onTouchstartCapture: _cache[4] || (_cache[4] = (...args) => unref(cancelRestore) && unref(cancelRestore)(...args)),
+					onPointerdownCapture: _cache[5] || (_cache[5] = (...args) => unref(cancelRestore) && unref(cancelRestore)(...args)),
+					onKeydownCapture: _cache[6] || (_cache[6] = (...args) => unref(cancelRestore) && unref(cancelRestore)(...args)),
 					onClick: shieldEvent,
 					onMousedown: shieldEvent,
 					onMouseup: shieldEvent,
@@ -23261,7 +23431,7 @@ ul, ol {
 						tabindex: "-1",
 						inert: unref(hasOpenPanel)
 					}, [
-						unref(readerStore).isLoadingPrev ? (openBlock(), createElementBlock("div", _hoisted_2, [createVNode(unref(MnrSpinner_default), { size: "small" }), _cache[3] || (_cache[3] = createBaseVNode("span", null, "加载上一章...", -1))])) : createCommentVNode("", true),
+						unref(readerStore).isLoadingPrev ? (openBlock(), createElementBlock("div", _hoisted_2, [createVNode(unref(MnrSpinner_default), { size: "small" }), _cache[7] || (_cache[7] = createBaseVNode("span", null, "加载上一章...", -1))])) : createCommentVNode("", true),
 						(openBlock(true), createElementBlock(Fragment, null, renderList(displayChapters.value, (entry) => {
 							return openBlock(), createElementBlock("article", {
 								key: entry.id,
@@ -23273,8 +23443,8 @@ ul, ol {
 								onClick: handleContentClick
 							}, [
 								createBaseVNode("h1", _hoisted_4, toDisplayString(entry.chapter.title), 1),
-								createBaseVNode("div", { innerHTML: entry.displayContent }, null, 8, _hoisted_5),
-								entry.sectionProgress ? (openBlock(), createElementBlock("div", _hoisted_6, [createVNode(unref(MnrSpinner_default), { size: "small" }), createBaseVNode("span", null, toDisplayString(sectionProgressLabel(entry.sectionProgress)), 1)])) : entry.sectionsIncomplete ? (openBlock(), createElementBlock("div", _hoisted_7, [..._cache[4] || (_cache[4] = [createBaseVNode("span", null, "— 本章内容不完整 —", -1)])])) : createCommentVNode("", true)
+								withDirectives(createBaseVNode("div", null, null, 512), [[unref(vChapterContent), entry.displayContent]]),
+								entry.sectionProgress ? (openBlock(), createElementBlock("div", _hoisted_5, [createVNode(unref(MnrSpinner_default), { size: "small" }), createBaseVNode("span", null, toDisplayString(sectionProgressLabel(entry.sectionProgress)), 1)])) : entry.sectionsIncomplete ? (openBlock(), createElementBlock("div", _hoisted_6, [..._cache[8] || (_cache[8] = [createBaseVNode("span", null, "— 本章内容不完整 —", -1)])])) : createCommentVNode("", true)
 							], 8, _hoisted_3);
 						}), 128)),
 						createBaseVNode("div", {
@@ -23282,12 +23452,12 @@ ul, ol {
 							ref: bottomSentinel,
 							class: "mnr-sentinel"
 						}, null, 512),
-						unref(readerStore).isLoadingNext ? (openBlock(), createElementBlock("div", _hoisted_8, [createVNode(unref(MnrSpinner_default), { size: "small" }), _cache[5] || (_cache[5] = createBaseVNode("span", null, "加载下一章...", -1))])) : createCommentVNode("", true),
-						unref(readerStore).chapters.length > 0 && !unref(readerStore).hasNext && !unref(readerStore).isLoadingNext && !unref(readerStore).isTailChapterIncomplete ? (openBlock(), createElementBlock("div", _hoisted_9, [_cache[6] || (_cache[6] = createBaseVNode("p", { class: "mnr-chapter-end-text" }, "— 已是最后一章 —", -1)), createBaseVNode("div", _hoisted_10, [unref(readerStore).chapter?.indexUrl ? (openBlock(), createElementBlock("a", {
+						unref(readerStore).isLoadingNext ? (openBlock(), createElementBlock("div", _hoisted_7, [createVNode(unref(MnrSpinner_default), { size: "small" }), _cache[9] || (_cache[9] = createBaseVNode("span", null, "加载下一章...", -1))])) : createCommentVNode("", true),
+						unref(readerStore).chapters.length > 0 && !unref(readerStore).hasNext && !unref(readerStore).isLoadingNext && !unref(readerStore).isTailChapterIncomplete ? (openBlock(), createElementBlock("div", _hoisted_8, [_cache[10] || (_cache[10] = createBaseVNode("p", { class: "mnr-chapter-end-text" }, "— 已是最后一章 —", -1)), createBaseVNode("div", _hoisted_9, [unref(readerStore).chapter?.indexUrl ? (openBlock(), createElementBlock("a", {
 							key: 0,
 							href: unref(readerStore).chapter.indexUrl,
 							class: "mnr-chapter-link index"
-						}, " 返回目录 ", 8, _hoisted_11)) : createCommentVNode("", true)])])) : createCommentVNode("", true)
+						}, " 返回目录 ", 8, _hoisted_10)) : createCommentVNode("", true)])])) : createCommentVNode("", true)
 					], 8, _hoisted_1),
 					createVNode(SettingsPanel_default, {
 						visible: unref(settingsVisible),
@@ -23320,7 +23490,7 @@ ul, ol {
 				], 32);
 			};
 		}
-	}), [["__scopeId", "data-v-c66df2f7"]]);
+	}), [["__scopeId", "data-v-e57f5480"]]);
 	var EXIT_NAVIGATION_KEY = "mnr_exit_navigation";
 	var hasTabStorage = typeof GM_getTab === "function" && typeof GM_saveTab === "function";
 	var appState = {
@@ -23330,8 +23500,7 @@ ul, ol {
 		currentDecision: null,
 		originalHostPage: null,
 		entryPageKind: null,
-		pendingHostOverlayCleanup: false,
-		progressiveEntryId: null
+		pendingHostOverlayCleanup: false
 	};
 	var app = null;
 	var pinia = null;
@@ -23464,29 +23633,6 @@ ul, ol {
 			return;
 		}
 		const readerStore = useReaderStore(pinia);
-		if (event.stage === "append") {
-			if (!appState.isActive || !appState.progressiveEntryId) return;
-			readerStore.appendChapterSection(appState.progressiveEntryId, {
-				...event.delta,
-				loaded: event.progress.loaded,
-				total: event.progress.total
-			});
-			return;
-		}
-		if (event.stage === "cancel") {
-			const mergingEntryId = appState.progressiveEntryId;
-			appState.progressiveEntryId = null;
-			if (!appState.isActive || !mergingEntryId) return;
-			readerStore.cancelChapterSections(mergingEntryId, event.reason);
-			return;
-		}
-		if (event.stage === "complete" && event.progressive) {
-			const mergingEntryId = appState.progressiveEntryId;
-			appState.progressiveEntryId = null;
-			if (!appState.isActive || !mergingEntryId) return;
-			readerStore.completeChapterSections(mergingEntryId, event.chapter, event.rule, { truncated: event.truncated });
-			return;
-		}
 		if (appState.isActive) return;
 		const { chapter, rule } = event;
 		hideReaderEntry();
@@ -23500,12 +23646,18 @@ ul, ol {
 		appState.entryPageKind = pageKind === "chapter" || rule || chapter.rule ? "chapter" : pageKind;
 		readerStore.activate();
 		const entryId = readerStore.setChapter(chapter, rule);
-		if (event.stage === "initial") {
-			appState.progressiveEntryId = entryId;
-			readerStore.beginChapterSections(entryId, event.progress, event.abort);
-		}
+		if (event.stage === "initial") readerStore.beginChapterSections(entryId, event.progress, event.abort);
 		appState.isActive = true;
 		mountReaderUI();
+		if (event.stage === "initial") return async (update) => {
+			if (update.stage === "append") await readerStore.appendChapterSection(entryId, {
+				...update.delta,
+				loaded: update.progress.loaded,
+				total: update.progress.total
+			});
+			else if (update.stage === "complete") await readerStore.completeChapterSections(entryId, update.chapter, update.rule, { truncated: update.truncated });
+			else readerStore.cancelChapterSections(entryId, update.reason);
+		};
 	}
 	function mountReaderUI() {
 		if (document.getElementById("mnr-reader-root")) return;
@@ -23625,7 +23777,6 @@ ul, ol {
 		appState.isActive = false;
 		appState.originalHostPage = null;
 		appState.entryPageKind = null;
-		appState.progressiveEntryId = null;
 		if (navigationTarget) {
 			persistExitNavigation({
 				targetUrl: normalizeExitDestination(navigationTarget),
@@ -23819,6 +23970,6 @@ ul, ol {
 			} catch (e) {
 				console.error("[MNR] CSS injection error:", e);
 			}
-		})(".mnr-reader-entry[data-v-e6dad6e3]{right:max(20px, env(safe-area-inset-right));bottom:max(20px, env(safe-area-inset-bottom));z-index:2147483646;background:var(--mnr-link,#1976d2);min-width:48px;height:48px;color:var(--mnr-on-link,#fff);cursor:pointer;-webkit-tap-highlight-color:transparent;border:0;border-radius:24px;justify-content:center;align-items:center;gap:8px;margin:0;padding:0 16px;font-size:14px;font-weight:600;line-height:1;transition:transform .18s,filter .18s,box-shadow .18s;animation:.2s ease-out mnr-entry-in-e6dad6e3;display:flex;position:fixed;box-shadow:0 6px 18px #0003}.mnr-reader-entry svg[data-v-e6dad6e3]{fill:none;stroke:currentColor;stroke-width:1.8px;stroke-linecap:round;stroke-linejoin:round;flex:0 0 24px;width:24px;height:24px}.mnr-reader-entry span[data-v-e6dad6e3]{white-space:nowrap}.mnr-reader-entry[data-v-e6dad6e3]:active{transform:scale(.96)}.mnr-reader-entry[data-v-e6dad6e3]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 48%, #fff);outline-offset:3px}@media (hover:hover){.mnr-reader-entry[data-v-e6dad6e3]:hover{filter:brightness(.94);transform:translateY(-2px);box-shadow:0 8px 22px #0000003d}}@media (width<=480px){.mnr-reader-entry[data-v-e6dad6e3]{width:48px;padding:0}.mnr-reader-entry span[data-v-e6dad6e3]{display:none}}@keyframes mnr-entry-in-e6dad6e3{0%{opacity:0;transform:translateY(8px)scale(.96)}}@media (prefers-reduced-motion:reduce){.mnr-reader-entry[data-v-e6dad6e3]{transition:none;animation:none}}.mnr-entry-prompt-overlay[data-v-2c14cbfa]{z-index:2147483647;padding:max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));background:#00000085;justify-content:center;align-items:center;display:flex;position:fixed;inset:0}.mnr-entry-prompt-card[data-v-2c14cbfa]{border:1px solid var(--mnr-border,#e0e0e0);background:var(--mnr-bg,#fff);width:min(100%,400px);max-height:calc(100dvh - 32px);color:var(--mnr-text,#333);border-radius:14px;padding:24px;animation:.24s ease-out mnr-entry-prompt-in-2c14cbfa;overflow:auto;box-shadow:0 18px 50px #00000047}.mnr-entry-prompt-header[data-v-2c14cbfa]{align-items:flex-start;gap:14px;display:flex}.mnr-entry-prompt-icon[data-v-2c14cbfa]{background:color-mix(in srgb, var(--mnr-link,#1976d2) 12%, transparent);width:44px;height:44px;color:var(--mnr-link,#1976d2);border-radius:12px;flex:0 0 44px;place-items:center;display:grid}.mnr-entry-prompt-icon svg[data-v-2c14cbfa]{fill:none;stroke:currentColor;stroke-width:1.8px;stroke-linecap:round;stroke-linejoin:round;width:26px;height:26px}.mnr-entry-prompt-header h3[data-v-2c14cbfa]{margin:1px 0 6px;font-size:18px;font-weight:700;line-height:1.4}.mnr-entry-prompt-header p[data-v-2c14cbfa]{opacity:.76;margin:0;font-size:14px;line-height:1.65}.mnr-entry-preference[data-v-2c14cbfa]{border:1px solid var(--mnr-border,#e0e0e0);background:color-mix(in srgb, var(--mnr-border,#e0e0e0) 34%, transparent);cursor:pointer;border-radius:10px;align-items:flex-start;gap:10px;margin:22px 0;padding:13px 14px;display:flex}.mnr-entry-preference input[data-v-2c14cbfa]{width:20px;height:20px;accent-color:var(--mnr-link,#1976d2);flex:0 0 20px;margin:1px 0 0}.mnr-entry-preference span[data-v-2c14cbfa],.mnr-entry-preference strong[data-v-2c14cbfa],.mnr-entry-preference small[data-v-2c14cbfa]{display:block}.mnr-entry-preference strong[data-v-2c14cbfa]{font-size:14px;font-weight:600}.mnr-entry-preference small[data-v-2c14cbfa]{opacity:.68;margin-top:3px;font-size:12px;line-height:1.5}.mnr-entry-prompt-actions[data-v-2c14cbfa]{grid-template-columns:1fr 1.25fr;gap:10px;display:grid}.mnr-entry-button[data-v-2c14cbfa]{cursor:pointer;border:1px solid #0000;border-radius:9px;min-height:44px;padding:10px 14px;font-size:14px;font-weight:600;transition:filter .18s,background .18s}.mnr-entry-button.secondary[data-v-2c14cbfa]{border-color:var(--mnr-border,#ddd);color:var(--mnr-text,#555);background:0 0}.mnr-entry-button.primary[data-v-2c14cbfa]{background:var(--mnr-link,#1976d2);color:var(--mnr-on-link,#fff)}.mnr-entry-button[data-v-2c14cbfa]:focus-visible,.mnr-entry-preference input[data-v-2c14cbfa]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}@media (hover:hover){.mnr-entry-button[data-v-2c14cbfa]:hover{filter:brightness(.94)}.mnr-entry-button.secondary[data-v-2c14cbfa]:hover{background:var(--mnr-border,#f0f0f0)}}.mnr-entry-prompt-fade-enter-active[data-v-2c14cbfa],.mnr-entry-prompt-fade-leave-active[data-v-2c14cbfa]{transition:opacity .24s}.mnr-entry-prompt-fade-enter-from[data-v-2c14cbfa],.mnr-entry-prompt-fade-leave-to[data-v-2c14cbfa]{opacity:0}@keyframes mnr-entry-prompt-in-2c14cbfa{0%{opacity:0;transform:translateY(12px)scale(.98)}}@media (width<=480px){.mnr-entry-prompt-card[data-v-2c14cbfa]{padding:20px}.mnr-entry-prompt-header[data-v-2c14cbfa]{gap:12px}.mnr-entry-prompt-icon[data-v-2c14cbfa]{flex-basis:40px;width:40px;height:40px}}@media (prefers-reduced-motion:reduce){.mnr-entry-prompt-card[data-v-2c14cbfa],.mnr-entry-button[data-v-2c14cbfa],.mnr-entry-prompt-fade-enter-active[data-v-2c14cbfa],.mnr-entry-prompt-fade-leave-active[data-v-2c14cbfa]{transition:none;animation:none}}.mnr-progress[data-v-fb6f172c]{z-index:1000;height:3px;transition:opacity .3s;position:fixed;top:0;left:0;right:0}.mnr-progress.hidden[data-v-fb6f172c]{opacity:0}.mnr-progress-bar[data-v-fb6f172c]{background:var(--mnr-link,#1976d2);height:100%;transition:width .1s ease-out}.mnr-progress-text[data-v-fb6f172c]{color:#fff;background:#000000b3;border-radius:4px;padding:4px 8px;font-size:12px;position:absolute;top:8px;right:8px}@media (prefers-reduced-motion:reduce){.mnr-progress[data-v-fb6f172c],.mnr-progress-bar[data-v-fb6f172c]{transition:none}}.mnr-floating-toolbar[data-v-99e4013e]{top:max(12px, env(safe-area-inset-top));left:max(12px, env(safe-area-inset-left));right:max(12px, env(safe-area-inset-right));pointer-events:none;z-index:100;justify-content:space-between;display:flex;position:fixed}.mnr-fab[data-v-99e4013e]{pointer-events:auto;background:var(--mnr-bg,#fff);width:44px;height:44px;color:var(--mnr-text,#333);border:1px solid var(--mnr-border,#e5e5e5);cursor:pointer;-webkit-tap-highlight-color:transparent;border-radius:50%;justify-content:center;align-items:center;padding:0;font-size:18px;transition:all .2s cubic-bezier(.25,.8,.25,1);display:flex;position:relative;box-shadow:0 4px 12px #00000026}.mnr-fab[data-v-99e4013e]:hover{background:var(--mnr-border,#f0f0f0);transform:translateY(-2px);box-shadow:0 6px 16px #0003}.mnr-fab[data-v-99e4013e]:active{transform:scale(.95)}.mnr-fab[data-v-99e4013e]:disabled{opacity:.6;cursor:not-allowed;box-shadow:none;transform:none}.mnr-icon[data-v-99e4013e]{fill:none;stroke:currentColor;stroke-width:1.8px;stroke-linecap:round;stroke-linejoin:round;flex:none;width:22px;height:22px;display:block}.mnr-fab[data-v-99e4013e]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}.mnr-fade-slide-enter-active[data-v-99e4013e],.mnr-fade-slide-leave-active[data-v-99e4013e]{transition:opacity .3s,transform .3s}.mnr-fade-slide-enter-from[data-v-99e4013e],.mnr-fade-slide-leave-to[data-v-99e4013e]{opacity:0;transform:translateY(-20px)}@media (prefers-reduced-motion:reduce){.mnr-fab[data-v-99e4013e],.mnr-fade-slide-enter-active[data-v-99e4013e],.mnr-fade-slide-leave-active[data-v-99e4013e]{transition:none}}.mnr-spinner[data-v-c925c262]{border-radius:50%;animation:.8s cubic-bezier(.4,0,.2,1) infinite mnr-spin-c925c262}.mnr-spinner.small[data-v-c925c262]{border:2px solid var(--mnr-border,#e0e0e0);border-top-color:var(--mnr-link,#1976d2);width:24px;height:24px;animation-duration:1s;animation-timing-function:linear}.mnr-spinner.medium[data-v-c925c262]{border:4px solid var(--mnr-border,#e0e0e0);border-top-color:var(--mnr-link,#1976d2);width:48px;height:48px}.mnr-spinner.large[data-v-c925c262]{border:4px solid var(--mnr-border,#e0e0e0);border-top-color:var(--mnr-link,#1976d2);width:64px;height:64px}@keyframes mnr-spin-c925c262{to{transform:rotate(360deg)}}.mnr-toast[data-v-baea3e69]{bottom:max(32px, env(safe-area-inset-bottom));-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);color:#fff;cursor:pointer;z-index:1001;white-space:nowrap;text-overflow:ellipsis;background:#1e1e1ee6;border-radius:50px;align-items:center;gap:8px;max-width:90vw;padding:14px 28px;font-size:15px;font-weight:500;display:flex;position:fixed;left:50%;overflow:hidden;transform:translate(-50%);box-shadow:0 8px 24px #0003}.mnr-toast--error[data-v-baea3e69]{background:#d32f2ff2}.mnr-toast-enter-active[data-v-baea3e69],.mnr-toast-leave-active[data-v-baea3e69]{transition:all .4s cubic-bezier(.175,.885,.32,1.275)}.mnr-toast-enter-from[data-v-baea3e69],.mnr-toast-leave-to[data-v-baea3e69]{opacity:0;transform:translate(-50%)translateY(40px)scale(.9)}@media (prefers-reduced-motion:reduce){.mnr-toast-enter-active[data-v-baea3e69],.mnr-toast-leave-active[data-v-baea3e69]{transition:none}}.mnr-drawer[data-v-9f97c115]{z-index:1001;width:min(88%,340px);padding-left:env(safe-area-inset-left);background:var(--mnr-bg,#fff);color:var(--mnr-text,#333);flex-direction:column;transition:transform .24s;display:flex;position:fixed;inset:0 auto 0 0;transform:translate(-105%);box-shadow:4px 0 20px #00000026}.mnr-drawer.open[data-v-9f97c115]{transform:translate(0)}.mnr-drawer-overlay[data-v-9f97c115]{z-index:1000;background:#00000080;position:fixed;inset:0}.mnr-drawer-header[data-v-9f97c115]{padding:max(16px, env(safe-area-inset-top)) 16px 14px;border-bottom:1px solid var(--mnr-border,#e5e5e5);flex-shrink:0;justify-content:space-between;align-items:center;gap:12px;display:flex}.mnr-drawer-heading[data-v-9f97c115]{min-width:0}.mnr-drawer-title[data-v-9f97c115]{overflow-wrap:anywhere;-webkit-line-clamp:2;-webkit-box-orient:vertical;margin:0;font-size:16px;font-weight:600;line-height:1.5;display:-webkit-box;overflow:hidden}.mnr-drawer-position[data-v-9f97c115]{color:var(--mnr-text,#666);opacity:.72;margin-top:3px;font-size:12px;display:block}.mnr-drawer-close[data-v-9f97c115]{width:36px;height:36px;color:inherit;cursor:pointer;background:0 0;border:0;border-radius:50%;flex:0 0 36px;place-items:center;padding:0;display:grid}.mnr-drawer-close svg[data-v-9f97c115]{fill:none;stroke:currentColor;stroke-width:2px;stroke-linecap:round;width:20px;height:20px}.mnr-drawer-search[data-v-9f97c115]{flex-shrink:0;padding:10px 12px 6px}.mnr-drawer-search input[data-v-9f97c115]{border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);width:100%;color:var(--mnr-text,#333);border-radius:8px;padding:9px 12px;font-size:14px}.mnr-offline-section[data-v-9f97c115]{border-bottom:1px solid var(--mnr-border,#e5e5e5);flex-shrink:0;padding:10px 12px 12px}.mnr-offline-main[data-v-9f97c115]{justify-content:space-between;align-items:center;gap:12px;display:flex}.mnr-offline-copy[data-v-9f97c115]{min-width:0}.mnr-offline-copy strong[data-v-9f97c115],.mnr-offline-copy span[data-v-9f97c115]{display:block}.mnr-offline-copy strong[data-v-9f97c115]{font-size:13px;font-weight:600}.mnr-offline-copy span[data-v-9f97c115]{color:var(--mnr-text,#666);opacity:.7;margin-top:2px;font-size:12px}.mnr-offline-action[data-v-9f97c115]{border:1px solid var(--mnr-border,#ddd);min-height:36px;color:var(--mnr-link,#1976d2);cursor:pointer;background:0 0;border-radius:8px;padding:6px 11px;font-size:12px;font-weight:600}.mnr-offline-action[data-v-9f97c115]:disabled{cursor:wait;opacity:.6}.mnr-offline-action.primary[data-v-9f97c115]{border-color:var(--mnr-link,#1976d2);background:var(--mnr-link,#1976d2);color:var(--mnr-on-link,#fff);flex:none}.mnr-offline-action.danger[data-v-9f97c115]{color:var(--mnr-text,#555)}.mnr-offline-secondary[data-v-9f97c115]{flex-wrap:wrap;gap:6px;margin-top:8px;display:flex}.mnr-drawer-state[data-v-9f97c115]{color:var(--mnr-text,#666);text-align:center;opacity:.78;flex:1;justify-content:center;align-items:center;gap:10px;padding:40px 20px;display:flex}.mnr-drawer-content[data-v-9f97c115]{overscroll-behavior:contain;-webkit-overflow-scrolling:touch;flex:1;position:relative;overflow-y:auto}.mnr-cache-progress-track[data-v-9f97c115]{background:var(--mnr-border,#e0e0e0);border-radius:2px;height:4px;margin-top:10px;overflow:hidden}.mnr-cache-progress-fill[data-v-9f97c115]{background:var(--mnr-link,#1976d2);height:100%;transition:width .2s}.mnr-chapter-list[data-v-9f97c115]{margin:0;padding-left:0;padding-right:0;list-style:none}.mnr-chapter-list li[data-v-9f97c115]{height:44px}.mnr-chapter-button[data-v-9f97c115]{width:100%;height:44px;color:inherit;text-align:left;cursor:pointer;background:0 0;border:0;border-left:3px solid #0000;align-items:center;gap:6px;padding:0 14px;font-size:14px;display:flex;overflow:hidden}.mnr-chapter-title-text[data-v-9f97c115]{text-overflow:ellipsis;white-space:nowrap;overflow:hidden}.mnr-chapter-button.active[data-v-9f97c115]{border-left-color:var(--mnr-link,#1976d2);background:color-mix(in srgb, var(--mnr-link,#1976d2) 10%, transparent);color:var(--mnr-link,#1976d2);font-weight:600}.mnr-chapter-button.persisted[data-v-9f97c115],.mnr-cache-mark[data-v-9f97c115]{color:#388e3c}.mnr-cache-mark[data-v-9f97c115]{flex:none;width:14px;height:14px}.mnr-cache-mark svg[data-v-9f97c115]{fill:none;stroke:currentColor;stroke-width:2px;stroke-linecap:round;stroke-linejoin:round;width:100%;height:100%;display:block}.mnr-drawer-close[data-v-9f97c115]:hover,.mnr-chapter-button[data-v-9f97c115]:hover,.mnr-offline-action[data-v-9f97c115]:hover{background:var(--mnr-border,#f0f0f0)}.mnr-offline-action.primary[data-v-9f97c115]:hover{background:var(--mnr-link,#1976d2);filter:brightness(.94)}.mnr-drawer-close[data-v-9f97c115]:focus-visible,.mnr-drawer-search input[data-v-9f97c115]:focus-visible,.mnr-offline-action[data-v-9f97c115]:focus-visible,.mnr-chapter-button[data-v-9f97c115]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:-3px}.mnr-visually-hidden[data-v-9f97c115]{clip:rect(0 0 0 0);white-space:nowrap;clip-path:inset(50%);width:1px;height:1px;position:absolute;overflow:hidden}.mnr-fade-enter-active[data-v-9f97c115],.mnr-fade-leave-active[data-v-9f97c115]{transition:opacity .24s}.mnr-fade-enter-from[data-v-9f97c115],.mnr-fade-leave-to[data-v-9f97c115]{opacity:0}@media (prefers-reduced-motion:reduce){.mnr-drawer[data-v-9f97c115],.mnr-fade-enter-active[data-v-9f97c115],.mnr-fade-leave-active[data-v-9f97c115],.mnr-cache-progress-fill[data-v-9f97c115]{transition:none}}.mnr-reading-control[data-v-e6745e69]{margin-top:18px}.mnr-reading-control-header[data-v-e6745e69]{justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:4px;display:flex}.mnr-reading-control-header label[data-v-e6745e69]{color:var(--mnr-text,#333);font-size:14px;font-weight:600}.mnr-reading-control-header output[data-v-e6745e69]{color:var(--mnr-text,#666);opacity:.78;font-size:13px}.mnr-reading-slider-row[data-v-e6745e69]{align-items:center;gap:10px;display:flex}.mnr-reading-slider-row span[data-v-e6745e69]{color:var(--mnr-text,#666);text-align:center;flex:0 0 24px;font-size:13px}.mnr-reading-slider-row input[data-v-e6745e69]{appearance:none;cursor:pointer;touch-action:pan-y;background:0 0;flex:1;min-width:0;height:32px;margin:0}.mnr-reading-slider-row input[data-v-e6745e69]::-webkit-slider-runnable-track{background:var(--mnr-border,#e0e0e0);border-radius:2px;height:4px}.mnr-reading-slider-row input[data-v-e6745e69]::-webkit-slider-thumb{appearance:none;background:var(--mnr-link,#1976d2);border:0;border-radius:50%;width:24px;height:24px;margin-top:-10px}.mnr-reading-slider-row input[data-v-e6745e69]::-moz-range-track{background:var(--mnr-border,#e0e0e0);border-radius:2px;height:4px}.mnr-reading-slider-row input[data-v-e6745e69]::-moz-range-thumb{background:var(--mnr-link,#1976d2);border:0;border-radius:50%;width:24px;height:24px}.mnr-reading-slider-row input[data-v-e6745e69]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}.mnr-settings-overlay[data-v-2853a120]{z-index:1000;background:#00000080;justify-content:flex-end;display:flex;position:fixed;inset:0}.mnr-settings-panel[data-v-2853a120]{width:min(100%,380px);height:100%;padding-right:env(safe-area-inset-right);background:var(--mnr-bg,#fff);color:var(--mnr-text,#333);flex-direction:column;display:flex;box-shadow:-4px 0 20px #00000026}.mnr-settings-header[data-v-2853a120]{padding:max(16px, env(safe-area-inset-top)) 16px 16px;border-bottom:1px solid var(--mnr-border,#e0e0e0);flex-shrink:0;justify-content:space-between;align-items:center;display:flex}.mnr-settings-header h3[data-v-2853a120],.mnr-settings-section h4[data-v-2853a120],.mnr-field-label[data-v-2853a120]{color:var(--mnr-text,#333);margin:0}.mnr-settings-header h3[data-v-2853a120]{border-radius:4px;font-size:18px}.mnr-close-btn[data-v-2853a120]{width:36px;height:36px;color:inherit;cursor:pointer;background:0 0;border:0;border-radius:50%;place-items:center;padding:0;display:grid}.mnr-close-btn svg[data-v-2853a120]{fill:none;stroke:currentColor;stroke-width:2px;stroke-linecap:round;width:20px;height:20px}.mnr-settings-content[data-v-2853a120]{overscroll-behavior:contain;flex:1;padding:18px 16px 24px;overflow:auto}.mnr-settings-section h4[data-v-2853a120],.mnr-field-label[data-v-2853a120],.mnr-settings-fieldset legend[data-v-2853a120]{margin-bottom:10px;font-size:14px;font-weight:600;display:block}.mnr-theme-grid[data-v-2853a120]{grid-template-columns:repeat(3,1fr);gap:8px;display:grid}.mnr-theme-btn[data-v-2853a120]{cursor:pointer;border:2px solid #0000;border-radius:8px;min-width:0;min-height:42px;padding:8px 4px;font-size:12px}.mnr-reading-preview[data-v-2853a120]{border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);color:var(--mnr-text,#333);border-radius:8px;margin-top:16px;padding:12px 14px;display:none}.mnr-reading-preview span[data-v-2853a120]{opacity:.65;margin-bottom:4px;font-size:12px;display:block}.mnr-reading-preview p[data-v-2853a120]{font-family:var(--mnr-font-family,system-ui, sans-serif);font-size:var(--mnr-font-size,18px);line-height:var(--mnr-line-height,1.8);letter-spacing:var(--mnr-letter-spacing,0);text-indent:var(--mnr-paragraph-indent,2em);margin:0}.mnr-field-label[data-v-2853a120]{margin-top:18px}.mnr-select[data-v-2853a120]{border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);width:100%;min-height:42px;color:var(--mnr-text,#333);border-radius:8px;padding:9px 12px;font-size:14px}.mnr-settings-fieldset[data-v-2853a120]{border:0;min-width:0;margin:18px 0 0;padding:0}.mnr-segmented-control[data-v-2853a120]{border:1px solid var(--mnr-border,#ddd);border-radius:8px;display:flex;overflow:hidden}.mnr-segment[data-v-2853a120]{border:0;border-right:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);min-height:42px;color:var(--mnr-text,#666);cursor:pointer;flex:1;padding:9px 12px;font-size:14px}.mnr-segment[data-v-2853a120]:last-child{border-right:0}.mnr-segment.active[data-v-2853a120]{background:var(--mnr-link,#1976d2);color:var(--mnr-on-link,#fff)}.mnr-secondary-action[data-v-2853a120]{border:1px solid var(--mnr-border,#ddd);width:100%;min-height:42px;color:var(--mnr-text,#333);cursor:pointer;background:0 0;border-radius:8px;margin-top:16px;padding:9px 12px;font-size:14px}.mnr-settings-group[data-v-2853a120]{border-top:1px solid var(--mnr-border,#ddd);margin-top:18px}.mnr-settings-group summary[data-v-2853a120]{min-height:48px;color:var(--mnr-text,#333);cursor:pointer;padding:14px 0;font-size:14px;font-weight:600}.mnr-settings-group-content[data-v-2853a120]{padding-bottom:4px}.mnr-settings-group-content[data-v-2853a120]>:first-child{margin-top:0}.mnr-switch-row[data-v-2853a120]{min-height:44px;color:var(--mnr-text,#333);cursor:pointer;justify-content:space-between;align-items:center;gap:16px;display:flex}.mnr-switch-row input[data-v-2853a120]{width:22px;height:22px;accent-color:var(--mnr-link,#1976d2);flex:none}.mnr-custom-css[data-v-2853a120]{box-sizing:border-box;resize:vertical;border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);width:100%;min-height:110px;color:var(--mnr-text,#333);border-radius:8px;padding:10px 12px;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}.mnr-cleanup-fields[data-v-2853a120]{gap:10px;margin-top:8px;display:grid}.mnr-cleanup-fields .mnr-field-label[data-v-2853a120],.mnr-cleanup-fields .mnr-field-help[data-v-2853a120],.mnr-cleanup-fields .mnr-field-error[data-v-2853a120]{margin:0}.mnr-cleanup-editor-label[data-v-2853a120],.mnr-cleanup-guide[data-v-2853a120]{font-size:12px;line-height:1.6}.mnr-cleanup-guide[data-v-2853a120]{color:var(--mnr-text,#333)}.mnr-cleanup-guide summary[data-v-2853a120]{cursor:pointer;opacity:.72}.mnr-cleanup-guide p[data-v-2853a120]{margin:8px 0 0}.mnr-cleanup-guide code[data-v-2853a120]{overflow-wrap:anywhere}.mnr-cleanup-add[data-v-2853a120]{grid-template-columns:minmax(0,1fr) auto;gap:8px;display:grid}.mnr-cleanup-input[data-v-2853a120]{box-sizing:border-box;border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);min-width:0;min-height:42px;color:var(--mnr-text,#333);border-radius:8px;padding:9px 12px;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}.mnr-cleanup-add-button[data-v-2853a120]{white-space:nowrap;width:auto;margin-top:0}.mnr-cleanup-add-button[data-v-2853a120]:disabled{cursor:not-allowed;opacity:.55}.mnr-cleanup-site[data-v-2853a120]{overflow-wrap:anywhere}.mnr-field-help[data-v-2853a120],.mnr-field-error[data-v-2853a120]{margin:-4px 0 8px;font-size:12px;line-height:1.5}.mnr-field-help[data-v-2853a120]{opacity:.72}.mnr-field-error[data-v-2853a120]{color:#c93f49;margin-top:6px}.mnr-settings-footer[data-v-2853a120]{padding:10px 16px max(12px, env(safe-area-inset-bottom));border-top:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);flex-shrink:0}.mnr-exit-btn[data-v-2853a120]{color:#c93f49;cursor:pointer;background:0 0;border:1px solid #c93f49;border-radius:8px;width:100%;min-height:42px;padding:9px 12px;font-size:14px}.mnr-close-btn[data-v-2853a120]:hover,.mnr-secondary-action[data-v-2853a120]:hover,.mnr-segment[data-v-2853a120]:hover,.mnr-exit-btn[data-v-2853a120]:hover{background:var(--mnr-border,#f0f0f0)}.mnr-settings-header h3[data-v-2853a120]:focus-visible,.mnr-close-btn[data-v-2853a120]:focus-visible,.mnr-theme-btn[data-v-2853a120]:focus-visible,.mnr-select[data-v-2853a120]:focus-visible,.mnr-segment[data-v-2853a120]:focus-visible,.mnr-secondary-action[data-v-2853a120]:focus-visible,.mnr-settings-group summary[data-v-2853a120]:focus-visible,.mnr-cleanup-guide summary[data-v-2853a120]:focus-visible,.mnr-switch-row input[data-v-2853a120]:focus-visible,.mnr-cleanup-input[data-v-2853a120]:focus-visible,.mnr-custom-css[data-v-2853a120]:focus-visible,.mnr-exit-btn[data-v-2853a120]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}.mnr-slide-enter-active[data-v-2853a120],.mnr-slide-leave-active[data-v-2853a120],.mnr-settings-panel[data-v-2853a120]{transition:opacity .22s,transform .22s}.mnr-slide-enter-from[data-v-2853a120],.mnr-slide-leave-to[data-v-2853a120]{opacity:0}.mnr-slide-enter-from .mnr-settings-panel[data-v-2853a120],.mnr-slide-leave-to .mnr-settings-panel[data-v-2853a120]{transform:translate(100%)}@media (width<=600px){.mnr-settings-panel[data-v-2853a120]{width:100%}.mnr-reading-preview[data-v-2853a120]{display:block}.mnr-desktop-width[data-v-2853a120]{display:none}}@media (prefers-reduced-motion:reduce){.mnr-slide-enter-active[data-v-2853a120],.mnr-slide-leave-active[data-v-2853a120],.mnr-settings-panel[data-v-2853a120]{transition:none}}.mnr-reader[data-v-c66df2f7]{z-index:2147483647;background:var(--mnr-bg,#fff);color:var(--mnr-text,#1a1a1a);overscroll-behavior:none;flex-direction:column;display:flex;position:fixed;inset:0;overflow:hidden}.mnr-reader-main[data-v-c66df2f7]{padding-top:68px;padding-bottom:max(40px, env(safe-area-inset-bottom));overscroll-behavior:none;-webkit-overflow-scrolling:touch;touch-action:pan-y pinch-zoom;flex:1;overflow:auto}.mnr-boundary-gesture-hint[data-v-c66df2f7]{z-index:4;background:color-mix(in srgb, var(--mnr-text,#1a1a1a) 86%, transparent);max-width:calc(100vw - 32px);color:var(--mnr-bg,#fff);white-space:nowrap;pointer-events:none;border-radius:999px;padding:8px 14px;font-size:14px;line-height:1.4;position:fixed;left:50%;transform:translate(-50%)}.mnr-boundary-gesture-hint.is-prev[data-v-c66df2f7]{top:max(16px, env(safe-area-inset-top))}.mnr-boundary-gesture-hint.is-next[data-v-c66df2f7]{bottom:max(16px, env(safe-area-inset-bottom))}.mnr-reader-content[data-v-c66df2f7]{max-width:var(--mnr-max-width,800px);padding:var(--mnr-padding,20px);font-family:var(--mnr-font-family,\"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif);font-size:var(--mnr-font-size,18px);line-height:var(--mnr-line-height,1.8);letter-spacing:var(--mnr-letter-spacing,0em);margin:0 auto}.mnr-reader-content[data-v-c66df2f7] p{text-indent:var(--mnr-paragraph-indent,2em);margin:0 0 1em}.mnr-reader-content[data-v-c66df2f7] img{max-width:100%;height:auto;margin:1em auto;display:block}.mnr-reader-content[data-v-c66df2f7] a{color:var(--mnr-link,#1976d2)}.mnr-reader-main[data-v-c66df2f7]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}.mnr-chapter-title[data-v-c66df2f7]{color:var(--mnr-text,#1a1a1a);text-align:center;margin:0 0 1em;font-size:1.5em;font-weight:700;line-height:1.4}.mnr-chapter-end[data-v-c66df2f7]{max-width:var(--mnr-max-width,800px);text-align:center;margin:0 auto;padding:40px 20px}.mnr-chapter-end-text[data-v-c66df2f7]{color:var(--mnr-text,#666);opacity:.7;margin-bottom:16px}.mnr-chapter-nav[data-v-c66df2f7]{flex-wrap:wrap;justify-content:center;gap:24px;display:flex}.mnr-chapter-link[data-v-c66df2f7]{color:var(--mnr-link,#1976d2);border:1px solid var(--mnr-border,#e0e0e0);border-radius:8px;padding:12px 24px;text-decoration:none;transition:all .2s}.mnr-chapter-link[data-v-c66df2f7]:hover{background:var(--mnr-border,#f0f0f0)}.mnr-sentinel[data-v-c66df2f7]{visibility:hidden;width:100%;height:1px}.mnr-loading-prev[data-v-c66df2f7],.mnr-loading-next[data-v-c66df2f7],.mnr-section-progress[data-v-c66df2f7]{color:var(--mnr-text,#666);justify-content:center;align-items:center;gap:12px;padding:24px;display:flex}@media (width>=768px){.mnr-reader-content[data-v-c66df2f7]{padding:var(--mnr-padding,30px)}}@media (width>=1024px){.mnr-reader-content[data-v-c66df2f7]{padding:var(--mnr-padding,40px)}}@media (prefers-reduced-motion:reduce){.mnr-chapter-link[data-v-c66df2f7]{transition:none}}\n/*$vite$:1*/", {});
+		})(".mnr-reader-entry[data-v-e6dad6e3]{right:max(20px, env(safe-area-inset-right));bottom:max(20px, env(safe-area-inset-bottom));z-index:2147483646;background:var(--mnr-link,#1976d2);min-width:48px;height:48px;color:var(--mnr-on-link,#fff);cursor:pointer;-webkit-tap-highlight-color:transparent;border:0;border-radius:24px;justify-content:center;align-items:center;gap:8px;margin:0;padding:0 16px;font-size:14px;font-weight:600;line-height:1;transition:transform .18s,filter .18s,box-shadow .18s;animation:.2s ease-out mnr-entry-in-e6dad6e3;display:flex;position:fixed;box-shadow:0 6px 18px #0003}.mnr-reader-entry svg[data-v-e6dad6e3]{fill:none;stroke:currentColor;stroke-width:1.8px;stroke-linecap:round;stroke-linejoin:round;flex:0 0 24px;width:24px;height:24px}.mnr-reader-entry span[data-v-e6dad6e3]{white-space:nowrap}.mnr-reader-entry[data-v-e6dad6e3]:active{transform:scale(.96)}.mnr-reader-entry[data-v-e6dad6e3]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 48%, #fff);outline-offset:3px}@media (hover:hover){.mnr-reader-entry[data-v-e6dad6e3]:hover{filter:brightness(.94);transform:translateY(-2px);box-shadow:0 8px 22px #0000003d}}@media (width<=480px){.mnr-reader-entry[data-v-e6dad6e3]{width:48px;padding:0}.mnr-reader-entry span[data-v-e6dad6e3]{display:none}}@keyframes mnr-entry-in-e6dad6e3{0%{opacity:0;transform:translateY(8px)scale(.96)}}@media (prefers-reduced-motion:reduce){.mnr-reader-entry[data-v-e6dad6e3]{transition:none;animation:none}}.mnr-entry-prompt-overlay[data-v-2c14cbfa]{z-index:2147483647;padding:max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));background:#00000085;justify-content:center;align-items:center;display:flex;position:fixed;inset:0}.mnr-entry-prompt-card[data-v-2c14cbfa]{border:1px solid var(--mnr-border,#e0e0e0);background:var(--mnr-bg,#fff);width:min(100%,400px);max-height:calc(100dvh - 32px);color:var(--mnr-text,#333);border-radius:14px;padding:24px;animation:.24s ease-out mnr-entry-prompt-in-2c14cbfa;overflow:auto;box-shadow:0 18px 50px #00000047}.mnr-entry-prompt-header[data-v-2c14cbfa]{align-items:flex-start;gap:14px;display:flex}.mnr-entry-prompt-icon[data-v-2c14cbfa]{background:color-mix(in srgb, var(--mnr-link,#1976d2) 12%, transparent);width:44px;height:44px;color:var(--mnr-link,#1976d2);border-radius:12px;flex:0 0 44px;place-items:center;display:grid}.mnr-entry-prompt-icon svg[data-v-2c14cbfa]{fill:none;stroke:currentColor;stroke-width:1.8px;stroke-linecap:round;stroke-linejoin:round;width:26px;height:26px}.mnr-entry-prompt-header h3[data-v-2c14cbfa]{margin:1px 0 6px;font-size:18px;font-weight:700;line-height:1.4}.mnr-entry-prompt-header p[data-v-2c14cbfa]{opacity:.76;margin:0;font-size:14px;line-height:1.65}.mnr-entry-preference[data-v-2c14cbfa]{border:1px solid var(--mnr-border,#e0e0e0);background:color-mix(in srgb, var(--mnr-border,#e0e0e0) 34%, transparent);cursor:pointer;border-radius:10px;align-items:flex-start;gap:10px;margin:22px 0;padding:13px 14px;display:flex}.mnr-entry-preference input[data-v-2c14cbfa]{width:20px;height:20px;accent-color:var(--mnr-link,#1976d2);flex:0 0 20px;margin:1px 0 0}.mnr-entry-preference span[data-v-2c14cbfa],.mnr-entry-preference strong[data-v-2c14cbfa],.mnr-entry-preference small[data-v-2c14cbfa]{display:block}.mnr-entry-preference strong[data-v-2c14cbfa]{font-size:14px;font-weight:600}.mnr-entry-preference small[data-v-2c14cbfa]{opacity:.68;margin-top:3px;font-size:12px;line-height:1.5}.mnr-entry-prompt-actions[data-v-2c14cbfa]{grid-template-columns:1fr 1.25fr;gap:10px;display:grid}.mnr-entry-button[data-v-2c14cbfa]{cursor:pointer;border:1px solid #0000;border-radius:9px;min-height:44px;padding:10px 14px;font-size:14px;font-weight:600;transition:filter .18s,background .18s}.mnr-entry-button.secondary[data-v-2c14cbfa]{border-color:var(--mnr-border,#ddd);color:var(--mnr-text,#555);background:0 0}.mnr-entry-button.primary[data-v-2c14cbfa]{background:var(--mnr-link,#1976d2);color:var(--mnr-on-link,#fff)}.mnr-entry-button[data-v-2c14cbfa]:focus-visible,.mnr-entry-preference input[data-v-2c14cbfa]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}@media (hover:hover){.mnr-entry-button[data-v-2c14cbfa]:hover{filter:brightness(.94)}.mnr-entry-button.secondary[data-v-2c14cbfa]:hover{background:var(--mnr-border,#f0f0f0)}}.mnr-entry-prompt-fade-enter-active[data-v-2c14cbfa],.mnr-entry-prompt-fade-leave-active[data-v-2c14cbfa]{transition:opacity .24s}.mnr-entry-prompt-fade-enter-from[data-v-2c14cbfa],.mnr-entry-prompt-fade-leave-to[data-v-2c14cbfa]{opacity:0}@keyframes mnr-entry-prompt-in-2c14cbfa{0%{opacity:0;transform:translateY(12px)scale(.98)}}@media (width<=480px){.mnr-entry-prompt-card[data-v-2c14cbfa]{padding:20px}.mnr-entry-prompt-header[data-v-2c14cbfa]{gap:12px}.mnr-entry-prompt-icon[data-v-2c14cbfa]{flex-basis:40px;width:40px;height:40px}}@media (prefers-reduced-motion:reduce){.mnr-entry-prompt-card[data-v-2c14cbfa],.mnr-entry-button[data-v-2c14cbfa],.mnr-entry-prompt-fade-enter-active[data-v-2c14cbfa],.mnr-entry-prompt-fade-leave-active[data-v-2c14cbfa]{transition:none;animation:none}}.mnr-progress[data-v-fb6f172c]{z-index:1000;height:3px;transition:opacity .3s;position:fixed;top:0;left:0;right:0}.mnr-progress.hidden[data-v-fb6f172c]{opacity:0}.mnr-progress-bar[data-v-fb6f172c]{background:var(--mnr-link,#1976d2);height:100%;transition:width .1s ease-out}.mnr-progress-text[data-v-fb6f172c]{color:#fff;background:#000000b3;border-radius:4px;padding:4px 8px;font-size:12px;position:absolute;top:8px;right:8px}@media (prefers-reduced-motion:reduce){.mnr-progress[data-v-fb6f172c],.mnr-progress-bar[data-v-fb6f172c]{transition:none}}.mnr-floating-toolbar[data-v-99e4013e]{top:max(12px, env(safe-area-inset-top));left:max(12px, env(safe-area-inset-left));right:max(12px, env(safe-area-inset-right));pointer-events:none;z-index:100;justify-content:space-between;display:flex;position:fixed}.mnr-fab[data-v-99e4013e]{pointer-events:auto;background:var(--mnr-bg,#fff);width:44px;height:44px;color:var(--mnr-text,#333);border:1px solid var(--mnr-border,#e5e5e5);cursor:pointer;-webkit-tap-highlight-color:transparent;border-radius:50%;justify-content:center;align-items:center;padding:0;font-size:18px;transition:all .2s cubic-bezier(.25,.8,.25,1);display:flex;position:relative;box-shadow:0 4px 12px #00000026}.mnr-fab[data-v-99e4013e]:hover{background:var(--mnr-border,#f0f0f0);transform:translateY(-2px);box-shadow:0 6px 16px #0003}.mnr-fab[data-v-99e4013e]:active{transform:scale(.95)}.mnr-fab[data-v-99e4013e]:disabled{opacity:.6;cursor:not-allowed;box-shadow:none;transform:none}.mnr-icon[data-v-99e4013e]{fill:none;stroke:currentColor;stroke-width:1.8px;stroke-linecap:round;stroke-linejoin:round;flex:none;width:22px;height:22px;display:block}.mnr-fab[data-v-99e4013e]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}.mnr-fade-slide-enter-active[data-v-99e4013e],.mnr-fade-slide-leave-active[data-v-99e4013e]{transition:opacity .3s,transform .3s}.mnr-fade-slide-enter-from[data-v-99e4013e],.mnr-fade-slide-leave-to[data-v-99e4013e]{opacity:0;transform:translateY(-20px)}@media (prefers-reduced-motion:reduce){.mnr-fab[data-v-99e4013e],.mnr-fade-slide-enter-active[data-v-99e4013e],.mnr-fade-slide-leave-active[data-v-99e4013e]{transition:none}}.mnr-spinner[data-v-c925c262]{border-radius:50%;animation:.8s cubic-bezier(.4,0,.2,1) infinite mnr-spin-c925c262}.mnr-spinner.small[data-v-c925c262]{border:2px solid var(--mnr-border,#e0e0e0);border-top-color:var(--mnr-link,#1976d2);width:24px;height:24px;animation-duration:1s;animation-timing-function:linear}.mnr-spinner.medium[data-v-c925c262]{border:4px solid var(--mnr-border,#e0e0e0);border-top-color:var(--mnr-link,#1976d2);width:48px;height:48px}.mnr-spinner.large[data-v-c925c262]{border:4px solid var(--mnr-border,#e0e0e0);border-top-color:var(--mnr-link,#1976d2);width:64px;height:64px}@keyframes mnr-spin-c925c262{to{transform:rotate(360deg)}}.mnr-toast[data-v-baea3e69]{bottom:max(32px, env(safe-area-inset-bottom));-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);color:#fff;cursor:pointer;z-index:1001;white-space:nowrap;text-overflow:ellipsis;background:#1e1e1ee6;border-radius:50px;align-items:center;gap:8px;max-width:90vw;padding:14px 28px;font-size:15px;font-weight:500;display:flex;position:fixed;left:50%;overflow:hidden;transform:translate(-50%);box-shadow:0 8px 24px #0003}.mnr-toast--error[data-v-baea3e69]{background:#d32f2ff2}.mnr-toast-enter-active[data-v-baea3e69],.mnr-toast-leave-active[data-v-baea3e69]{transition:all .4s cubic-bezier(.175,.885,.32,1.275)}.mnr-toast-enter-from[data-v-baea3e69],.mnr-toast-leave-to[data-v-baea3e69]{opacity:0;transform:translate(-50%)translateY(40px)scale(.9)}@media (prefers-reduced-motion:reduce){.mnr-toast-enter-active[data-v-baea3e69],.mnr-toast-leave-active[data-v-baea3e69]{transition:none}}.mnr-drawer[data-v-9f97c115]{z-index:1001;width:min(88%,340px);padding-left:env(safe-area-inset-left);background:var(--mnr-bg,#fff);color:var(--mnr-text,#333);flex-direction:column;transition:transform .24s;display:flex;position:fixed;inset:0 auto 0 0;transform:translate(-105%);box-shadow:4px 0 20px #00000026}.mnr-drawer.open[data-v-9f97c115]{transform:translate(0)}.mnr-drawer-overlay[data-v-9f97c115]{z-index:1000;background:#00000080;position:fixed;inset:0}.mnr-drawer-header[data-v-9f97c115]{padding:max(16px, env(safe-area-inset-top)) 16px 14px;border-bottom:1px solid var(--mnr-border,#e5e5e5);flex-shrink:0;justify-content:space-between;align-items:center;gap:12px;display:flex}.mnr-drawer-heading[data-v-9f97c115]{min-width:0}.mnr-drawer-title[data-v-9f97c115]{overflow-wrap:anywhere;-webkit-line-clamp:2;-webkit-box-orient:vertical;margin:0;font-size:16px;font-weight:600;line-height:1.5;display:-webkit-box;overflow:hidden}.mnr-drawer-position[data-v-9f97c115]{color:var(--mnr-text,#666);opacity:.72;margin-top:3px;font-size:12px;display:block}.mnr-drawer-close[data-v-9f97c115]{width:36px;height:36px;color:inherit;cursor:pointer;background:0 0;border:0;border-radius:50%;flex:0 0 36px;place-items:center;padding:0;display:grid}.mnr-drawer-close svg[data-v-9f97c115]{fill:none;stroke:currentColor;stroke-width:2px;stroke-linecap:round;width:20px;height:20px}.mnr-drawer-search[data-v-9f97c115]{flex-shrink:0;padding:10px 12px 6px}.mnr-drawer-search input[data-v-9f97c115]{border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);width:100%;color:var(--mnr-text,#333);border-radius:8px;padding:9px 12px;font-size:14px}.mnr-offline-section[data-v-9f97c115]{border-bottom:1px solid var(--mnr-border,#e5e5e5);flex-shrink:0;padding:10px 12px 12px}.mnr-offline-main[data-v-9f97c115]{justify-content:space-between;align-items:center;gap:12px;display:flex}.mnr-offline-copy[data-v-9f97c115]{min-width:0}.mnr-offline-copy strong[data-v-9f97c115],.mnr-offline-copy span[data-v-9f97c115]{display:block}.mnr-offline-copy strong[data-v-9f97c115]{font-size:13px;font-weight:600}.mnr-offline-copy span[data-v-9f97c115]{color:var(--mnr-text,#666);opacity:.7;margin-top:2px;font-size:12px}.mnr-offline-action[data-v-9f97c115]{border:1px solid var(--mnr-border,#ddd);min-height:36px;color:var(--mnr-link,#1976d2);cursor:pointer;background:0 0;border-radius:8px;padding:6px 11px;font-size:12px;font-weight:600}.mnr-offline-action[data-v-9f97c115]:disabled{cursor:wait;opacity:.6}.mnr-offline-action.primary[data-v-9f97c115]{border-color:var(--mnr-link,#1976d2);background:var(--mnr-link,#1976d2);color:var(--mnr-on-link,#fff);flex:none}.mnr-offline-action.danger[data-v-9f97c115]{color:var(--mnr-text,#555)}.mnr-offline-secondary[data-v-9f97c115]{flex-wrap:wrap;gap:6px;margin-top:8px;display:flex}.mnr-drawer-state[data-v-9f97c115]{color:var(--mnr-text,#666);text-align:center;opacity:.78;flex:1;justify-content:center;align-items:center;gap:10px;padding:40px 20px;display:flex}.mnr-drawer-content[data-v-9f97c115]{overscroll-behavior:contain;-webkit-overflow-scrolling:touch;flex:1;position:relative;overflow-y:auto}.mnr-cache-progress-track[data-v-9f97c115]{background:var(--mnr-border,#e0e0e0);border-radius:2px;height:4px;margin-top:10px;overflow:hidden}.mnr-cache-progress-fill[data-v-9f97c115]{background:var(--mnr-link,#1976d2);height:100%;transition:width .2s}.mnr-chapter-list[data-v-9f97c115]{margin:0;padding-left:0;padding-right:0;list-style:none}.mnr-chapter-list li[data-v-9f97c115]{height:44px}.mnr-chapter-button[data-v-9f97c115]{width:100%;height:44px;color:inherit;text-align:left;cursor:pointer;background:0 0;border:0;border-left:3px solid #0000;align-items:center;gap:6px;padding:0 14px;font-size:14px;display:flex;overflow:hidden}.mnr-chapter-title-text[data-v-9f97c115]{text-overflow:ellipsis;white-space:nowrap;overflow:hidden}.mnr-chapter-button.active[data-v-9f97c115]{border-left-color:var(--mnr-link,#1976d2);background:color-mix(in srgb, var(--mnr-link,#1976d2) 10%, transparent);color:var(--mnr-link,#1976d2);font-weight:600}.mnr-chapter-button.persisted[data-v-9f97c115],.mnr-cache-mark[data-v-9f97c115]{color:#388e3c}.mnr-cache-mark[data-v-9f97c115]{flex:none;width:14px;height:14px}.mnr-cache-mark svg[data-v-9f97c115]{fill:none;stroke:currentColor;stroke-width:2px;stroke-linecap:round;stroke-linejoin:round;width:100%;height:100%;display:block}.mnr-drawer-close[data-v-9f97c115]:hover,.mnr-chapter-button[data-v-9f97c115]:hover,.mnr-offline-action[data-v-9f97c115]:hover{background:var(--mnr-border,#f0f0f0)}.mnr-offline-action.primary[data-v-9f97c115]:hover{background:var(--mnr-link,#1976d2);filter:brightness(.94)}.mnr-drawer-close[data-v-9f97c115]:focus-visible,.mnr-drawer-search input[data-v-9f97c115]:focus-visible,.mnr-offline-action[data-v-9f97c115]:focus-visible,.mnr-chapter-button[data-v-9f97c115]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:-3px}.mnr-visually-hidden[data-v-9f97c115]{clip:rect(0 0 0 0);white-space:nowrap;clip-path:inset(50%);width:1px;height:1px;position:absolute;overflow:hidden}.mnr-fade-enter-active[data-v-9f97c115],.mnr-fade-leave-active[data-v-9f97c115]{transition:opacity .24s}.mnr-fade-enter-from[data-v-9f97c115],.mnr-fade-leave-to[data-v-9f97c115]{opacity:0}@media (prefers-reduced-motion:reduce){.mnr-drawer[data-v-9f97c115],.mnr-fade-enter-active[data-v-9f97c115],.mnr-fade-leave-active[data-v-9f97c115],.mnr-cache-progress-fill[data-v-9f97c115]{transition:none}}.mnr-reading-control[data-v-e6745e69]{margin-top:18px}.mnr-reading-control-header[data-v-e6745e69]{justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:4px;display:flex}.mnr-reading-control-header label[data-v-e6745e69]{color:var(--mnr-text,#333);font-size:14px;font-weight:600}.mnr-reading-control-header output[data-v-e6745e69]{color:var(--mnr-text,#666);opacity:.78;font-size:13px}.mnr-reading-slider-row[data-v-e6745e69]{align-items:center;gap:10px;display:flex}.mnr-reading-slider-row span[data-v-e6745e69]{color:var(--mnr-text,#666);text-align:center;flex:0 0 24px;font-size:13px}.mnr-reading-slider-row input[data-v-e6745e69]{appearance:none;cursor:pointer;touch-action:pan-y;background:0 0;flex:1;min-width:0;height:32px;margin:0}.mnr-reading-slider-row input[data-v-e6745e69]::-webkit-slider-runnable-track{background:var(--mnr-border,#e0e0e0);border-radius:2px;height:4px}.mnr-reading-slider-row input[data-v-e6745e69]::-webkit-slider-thumb{appearance:none;background:var(--mnr-link,#1976d2);border:0;border-radius:50%;width:24px;height:24px;margin-top:-10px}.mnr-reading-slider-row input[data-v-e6745e69]::-moz-range-track{background:var(--mnr-border,#e0e0e0);border-radius:2px;height:4px}.mnr-reading-slider-row input[data-v-e6745e69]::-moz-range-thumb{background:var(--mnr-link,#1976d2);border:0;border-radius:50%;width:24px;height:24px}.mnr-reading-slider-row input[data-v-e6745e69]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}.mnr-settings-overlay[data-v-2853a120]{z-index:1000;background:#00000080;justify-content:flex-end;display:flex;position:fixed;inset:0}.mnr-settings-panel[data-v-2853a120]{width:min(100%,380px);height:100%;padding-right:env(safe-area-inset-right);background:var(--mnr-bg,#fff);color:var(--mnr-text,#333);flex-direction:column;display:flex;box-shadow:-4px 0 20px #00000026}.mnr-settings-header[data-v-2853a120]{padding:max(16px, env(safe-area-inset-top)) 16px 16px;border-bottom:1px solid var(--mnr-border,#e0e0e0);flex-shrink:0;justify-content:space-between;align-items:center;display:flex}.mnr-settings-header h3[data-v-2853a120],.mnr-settings-section h4[data-v-2853a120],.mnr-field-label[data-v-2853a120]{color:var(--mnr-text,#333);margin:0}.mnr-settings-header h3[data-v-2853a120]{border-radius:4px;font-size:18px}.mnr-close-btn[data-v-2853a120]{width:36px;height:36px;color:inherit;cursor:pointer;background:0 0;border:0;border-radius:50%;place-items:center;padding:0;display:grid}.mnr-close-btn svg[data-v-2853a120]{fill:none;stroke:currentColor;stroke-width:2px;stroke-linecap:round;width:20px;height:20px}.mnr-settings-content[data-v-2853a120]{overscroll-behavior:contain;flex:1;padding:18px 16px 24px;overflow:auto}.mnr-settings-section h4[data-v-2853a120],.mnr-field-label[data-v-2853a120],.mnr-settings-fieldset legend[data-v-2853a120]{margin-bottom:10px;font-size:14px;font-weight:600;display:block}.mnr-theme-grid[data-v-2853a120]{grid-template-columns:repeat(3,1fr);gap:8px;display:grid}.mnr-theme-btn[data-v-2853a120]{cursor:pointer;border:2px solid #0000;border-radius:8px;min-width:0;min-height:42px;padding:8px 4px;font-size:12px}.mnr-reading-preview[data-v-2853a120]{border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);color:var(--mnr-text,#333);border-radius:8px;margin-top:16px;padding:12px 14px;display:none}.mnr-reading-preview span[data-v-2853a120]{opacity:.65;margin-bottom:4px;font-size:12px;display:block}.mnr-reading-preview p[data-v-2853a120]{font-family:var(--mnr-font-family,system-ui, sans-serif);font-size:var(--mnr-font-size,18px);line-height:var(--mnr-line-height,1.8);letter-spacing:var(--mnr-letter-spacing,0);text-indent:var(--mnr-paragraph-indent,2em);margin:0}.mnr-field-label[data-v-2853a120]{margin-top:18px}.mnr-select[data-v-2853a120]{border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);width:100%;min-height:42px;color:var(--mnr-text,#333);border-radius:8px;padding:9px 12px;font-size:14px}.mnr-settings-fieldset[data-v-2853a120]{border:0;min-width:0;margin:18px 0 0;padding:0}.mnr-segmented-control[data-v-2853a120]{border:1px solid var(--mnr-border,#ddd);border-radius:8px;display:flex;overflow:hidden}.mnr-segment[data-v-2853a120]{border:0;border-right:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);min-height:42px;color:var(--mnr-text,#666);cursor:pointer;flex:1;padding:9px 12px;font-size:14px}.mnr-segment[data-v-2853a120]:last-child{border-right:0}.mnr-segment.active[data-v-2853a120]{background:var(--mnr-link,#1976d2);color:var(--mnr-on-link,#fff)}.mnr-secondary-action[data-v-2853a120]{border:1px solid var(--mnr-border,#ddd);width:100%;min-height:42px;color:var(--mnr-text,#333);cursor:pointer;background:0 0;border-radius:8px;margin-top:16px;padding:9px 12px;font-size:14px}.mnr-settings-group[data-v-2853a120]{border-top:1px solid var(--mnr-border,#ddd);margin-top:18px}.mnr-settings-group summary[data-v-2853a120]{min-height:48px;color:var(--mnr-text,#333);cursor:pointer;padding:14px 0;font-size:14px;font-weight:600}.mnr-settings-group-content[data-v-2853a120]{padding-bottom:4px}.mnr-settings-group-content[data-v-2853a120]>:first-child{margin-top:0}.mnr-switch-row[data-v-2853a120]{min-height:44px;color:var(--mnr-text,#333);cursor:pointer;justify-content:space-between;align-items:center;gap:16px;display:flex}.mnr-switch-row input[data-v-2853a120]{width:22px;height:22px;accent-color:var(--mnr-link,#1976d2);flex:none}.mnr-custom-css[data-v-2853a120]{box-sizing:border-box;resize:vertical;border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);width:100%;min-height:110px;color:var(--mnr-text,#333);border-radius:8px;padding:10px 12px;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}.mnr-cleanup-fields[data-v-2853a120]{gap:10px;margin-top:8px;display:grid}.mnr-cleanup-fields .mnr-field-label[data-v-2853a120],.mnr-cleanup-fields .mnr-field-help[data-v-2853a120],.mnr-cleanup-fields .mnr-field-error[data-v-2853a120]{margin:0}.mnr-cleanup-editor-label[data-v-2853a120],.mnr-cleanup-guide[data-v-2853a120]{font-size:12px;line-height:1.6}.mnr-cleanup-guide[data-v-2853a120]{color:var(--mnr-text,#333)}.mnr-cleanup-guide summary[data-v-2853a120]{cursor:pointer;opacity:.72}.mnr-cleanup-guide p[data-v-2853a120]{margin:8px 0 0}.mnr-cleanup-guide code[data-v-2853a120]{overflow-wrap:anywhere}.mnr-cleanup-add[data-v-2853a120]{grid-template-columns:minmax(0,1fr) auto;gap:8px;display:grid}.mnr-cleanup-input[data-v-2853a120]{box-sizing:border-box;border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);min-width:0;min-height:42px;color:var(--mnr-text,#333);border-radius:8px;padding:9px 12px;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}.mnr-cleanup-add-button[data-v-2853a120]{white-space:nowrap;width:auto;margin-top:0}.mnr-cleanup-add-button[data-v-2853a120]:disabled{cursor:not-allowed;opacity:.55}.mnr-cleanup-site[data-v-2853a120]{overflow-wrap:anywhere}.mnr-field-help[data-v-2853a120],.mnr-field-error[data-v-2853a120]{margin:-4px 0 8px;font-size:12px;line-height:1.5}.mnr-field-help[data-v-2853a120]{opacity:.72}.mnr-field-error[data-v-2853a120]{color:#c93f49;margin-top:6px}.mnr-settings-footer[data-v-2853a120]{padding:10px 16px max(12px, env(safe-area-inset-bottom));border-top:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);flex-shrink:0}.mnr-exit-btn[data-v-2853a120]{color:#c93f49;cursor:pointer;background:0 0;border:1px solid #c93f49;border-radius:8px;width:100%;min-height:42px;padding:9px 12px;font-size:14px}.mnr-close-btn[data-v-2853a120]:hover,.mnr-secondary-action[data-v-2853a120]:hover,.mnr-segment[data-v-2853a120]:hover,.mnr-exit-btn[data-v-2853a120]:hover{background:var(--mnr-border,#f0f0f0)}.mnr-settings-header h3[data-v-2853a120]:focus-visible,.mnr-close-btn[data-v-2853a120]:focus-visible,.mnr-theme-btn[data-v-2853a120]:focus-visible,.mnr-select[data-v-2853a120]:focus-visible,.mnr-segment[data-v-2853a120]:focus-visible,.mnr-secondary-action[data-v-2853a120]:focus-visible,.mnr-settings-group summary[data-v-2853a120]:focus-visible,.mnr-cleanup-guide summary[data-v-2853a120]:focus-visible,.mnr-switch-row input[data-v-2853a120]:focus-visible,.mnr-cleanup-input[data-v-2853a120]:focus-visible,.mnr-custom-css[data-v-2853a120]:focus-visible,.mnr-exit-btn[data-v-2853a120]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}.mnr-slide-enter-active[data-v-2853a120],.mnr-slide-leave-active[data-v-2853a120],.mnr-settings-panel[data-v-2853a120]{transition:opacity .22s,transform .22s}.mnr-slide-enter-from[data-v-2853a120],.mnr-slide-leave-to[data-v-2853a120]{opacity:0}.mnr-slide-enter-from .mnr-settings-panel[data-v-2853a120],.mnr-slide-leave-to .mnr-settings-panel[data-v-2853a120]{transform:translate(100%)}@media (width<=600px){.mnr-settings-panel[data-v-2853a120]{width:100%}.mnr-reading-preview[data-v-2853a120]{display:block}.mnr-desktop-width[data-v-2853a120]{display:none}}@media (prefers-reduced-motion:reduce){.mnr-slide-enter-active[data-v-2853a120],.mnr-slide-leave-active[data-v-2853a120],.mnr-settings-panel[data-v-2853a120]{transition:none}}.mnr-reader[data-v-e57f5480]{z-index:2147483647;background:var(--mnr-bg,#fff);color:var(--mnr-text,#1a1a1a);overscroll-behavior:none;flex-direction:column;display:flex;position:fixed;inset:0;overflow:hidden}.mnr-reader-main[data-v-e57f5480]{padding-top:68px;padding-bottom:max(40px, env(safe-area-inset-bottom));overscroll-behavior:none;-webkit-overflow-scrolling:touch;touch-action:pan-y pinch-zoom;flex:1;overflow:auto}.mnr-boundary-gesture-hint[data-v-e57f5480]{z-index:4;background:color-mix(in srgb, var(--mnr-text,#1a1a1a) 86%, transparent);max-width:calc(100vw - 32px);color:var(--mnr-bg,#fff);white-space:nowrap;pointer-events:none;border-radius:999px;padding:8px 14px;font-size:14px;line-height:1.4;position:fixed;left:50%;transform:translate(-50%)}.mnr-boundary-gesture-hint.is-prev[data-v-e57f5480]{top:max(16px, env(safe-area-inset-top))}.mnr-boundary-gesture-hint.is-next[data-v-e57f5480]{bottom:max(16px, env(safe-area-inset-bottom))}.mnr-reader-content[data-v-e57f5480]{max-width:var(--mnr-max-width,800px);padding:var(--mnr-padding,20px);font-family:var(--mnr-font-family,\"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif);font-size:var(--mnr-font-size,18px);line-height:var(--mnr-line-height,1.8);letter-spacing:var(--mnr-letter-spacing,0em);margin:0 auto}.mnr-reader-content[data-v-e57f5480] p{text-indent:var(--mnr-paragraph-indent,2em);margin:0 0 1em}.mnr-reader-content[data-v-e57f5480] img{max-width:100%;height:auto;margin:1em auto;display:block}.mnr-reader-content[data-v-e57f5480] a{color:var(--mnr-link,#1976d2)}.mnr-reader-main[data-v-e57f5480]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}.mnr-chapter-title[data-v-e57f5480]{color:var(--mnr-text,#1a1a1a);text-align:center;margin:0 0 1em;font-size:1.5em;font-weight:700;line-height:1.4}.mnr-chapter-end[data-v-e57f5480]{max-width:var(--mnr-max-width,800px);text-align:center;margin:0 auto;padding:40px 20px}.mnr-chapter-end-text[data-v-e57f5480]{color:var(--mnr-text,#666);opacity:.7;margin-bottom:16px}.mnr-chapter-nav[data-v-e57f5480]{flex-wrap:wrap;justify-content:center;gap:24px;display:flex}.mnr-chapter-link[data-v-e57f5480]{color:var(--mnr-link,#1976d2);border:1px solid var(--mnr-border,#e0e0e0);border-radius:8px;padding:12px 24px;text-decoration:none;transition:all .2s}.mnr-chapter-link[data-v-e57f5480]:hover{background:var(--mnr-border,#f0f0f0)}.mnr-sentinel[data-v-e57f5480]{visibility:hidden;width:100%;height:1px}.mnr-loading-prev[data-v-e57f5480],.mnr-loading-next[data-v-e57f5480],.mnr-section-progress[data-v-e57f5480]{color:var(--mnr-text,#666);justify-content:center;align-items:center;gap:12px;padding:24px;display:flex}@media (width>=768px){.mnr-reader-content[data-v-e57f5480]{padding:var(--mnr-padding,30px)}}@media (width>=1024px){.mnr-reader-content[data-v-e57f5480]{padding:var(--mnr-padding,40px)}}@media (prefers-reduced-motion:reduce){.mnr-chapter-link[data-v-e57f5480]{transition:none}}\n/*$vite$:1*/", {});
 	})();
 })();

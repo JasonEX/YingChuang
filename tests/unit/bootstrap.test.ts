@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 
-import type { LaunchEvent } from '@/core/AutoEnableManager';
+import type { LaunchCallback, LaunchEvent } from '@/core/AutoEnableManager';
 
 /** A non-progressive launch: one chapter, already complete. */
 function completeEvent(chapter: unknown, rule?: unknown): LaunchEvent {
@@ -9,8 +9,6 @@ function completeEvent(chapter: unknown, rule?: unknown): LaunchEvent {
     stage: 'complete',
     chapter,
     rule,
-    progressive: false,
-    truncated: false,
   } as unknown as LaunchEvent;
 }
 
@@ -579,32 +577,31 @@ describe('bootstrap', () => {
       url: dom.window.location.href,
     };
     const merged = { ...first, content: '<p>第一页</p><p>第二页</p>' };
-    let launchCb: ((event: LaunchEvent) => void) | null = null;
+    let launchCb: LaunchCallback | null = null;
     const abort = vi.fn();
     const manager = {
       check: vi.fn(() => ({ shouldEnable: true, method: 'builtin-rule' })),
       setPromptCallback: vi.fn(),
-      setLaunchCallback: vi.fn((callback: (event: LaunchEvent) => void) => {
+      setLaunchCallback: vi.fn((callback: LaunchCallback) => {
         launchCb = callback;
       }),
       execute: vi.fn(async () => {
-        launchCb?.({
+        const update = launchCb?.({
           stage: 'initial',
           chapter: first,
           progress: { url: first.url, loaded: 1, total: 2 },
           abort,
         } as unknown as LaunchEvent);
-        launchCb?.({
+        await update?.({
           stage: 'append',
           delta: { content: '<p>第二页</p>', rawContent: '<p>第二页</p>' },
           progress: { url: first.url, loaded: 2, total: 2 },
-        } as unknown as LaunchEvent);
-        launchCb?.({
+        });
+        await update?.({
           stage: 'complete',
-          chapter: merged,
-          progressive: true,
+          chapter: merged as never,
           truncated: false,
-        } as unknown as LaunchEvent);
+        });
       }),
       manualEnable: vi.fn(async () => {}),
     };
@@ -637,6 +634,74 @@ describe('bootstrap', () => {
     expect(document.querySelectorAll('#mnr-reader-root')).toHaveLength(1);
   });
 
+  it('binds late launch updates to their original entry after reopening', async () => {
+    dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
+      url: 'https://example.com/chapter/1',
+      pretendToBeVisual: true,
+    });
+    vi.stubGlobal('window', dom.window);
+    vi.stubGlobal('document', dom.window.document);
+    vi.stubGlobal('sessionStorage', dom.window.sessionStorage);
+
+    const first = {
+      title: '第1章',
+      content: '<p>第一页</p>',
+      rawContent: '<p>第一页</p>',
+      url: dom.window.location.href,
+    };
+    const merged = { ...first, content: '<p>第一页</p><p>第二页</p>' };
+    let launchCb: LaunchCallback | null = null;
+    const abort = vi.fn();
+    const delivery: { update?: import('@/core/AutoEnableManager').LaunchContinuation } = {};
+    const manager = {
+      check: vi.fn(() => ({ shouldEnable: true, method: 'builtin-rule' })),
+      setPromptCallback: vi.fn(),
+      setLaunchCallback: vi.fn((callback: LaunchCallback) => {
+        launchCb = callback;
+      }),
+      execute: vi.fn(async () => {
+        delivery.update =
+          launchCb?.({
+            stage: 'initial',
+            chapter: first,
+            progress: { url: first.url, loaded: 1, total: 2 },
+            abort,
+          } as unknown as LaunchEvent) || undefined;
+      }),
+      manualEnable: vi.fn(async () => {}),
+    };
+    mockGetAutoEnableManager.mockReturnValue(manager);
+
+    const bootstrap = await import('@/bootstrap');
+    await bootstrap.initialize();
+
+    bootstrap.closeReader();
+    vi.mocked(readerStore.setChapter).mockReturnValue('chapter-new');
+    const send = launchCb as unknown as LaunchCallback;
+    send({
+      stage: 'initial',
+      chapter: first,
+      progress: { url: first.url, loaded: 1 },
+      abort,
+    } as unknown as LaunchEvent);
+    vi.mocked(readerStore.appendChapterSection).mockClear();
+    await delivery.update?.({
+      stage: 'append',
+      delta: { content: 'OLD', rawContent: 'OLD' },
+      progress: { url: first.url, loaded: 2 },
+    });
+    await delivery.update?.({ stage: 'complete', chapter: merged as never, truncated: false });
+    await delivery.update?.({ stage: 'cancel', reason: 'aborted' });
+    expect(readerStore.appendChapterSection).toHaveBeenCalledWith('chapter-1', expect.anything());
+    expect(readerStore.completeChapterSections).toHaveBeenCalledWith(
+      'chapter-1',
+      merged,
+      undefined,
+      { truncated: false }
+    );
+    expect(readerStore.cancelChapterSections).toHaveBeenCalledWith('chapter-1', 'aborted');
+  });
+
   it('drops progressive state when background merging fails after launch', async () => {
     dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
       url: 'https://example.com/chapter/1',
@@ -652,22 +717,22 @@ describe('bootstrap', () => {
       rawContent: '<p>第一页</p>',
       url: dom.window.location.href,
     };
-    let launchCb: ((event: LaunchEvent) => void) | null = null;
+    let launchCb: LaunchCallback | null = null;
     const manager = {
       check: vi.fn(() => ({ shouldEnable: true, method: 'builtin-rule' })),
       setPromptCallback: vi.fn(),
-      setLaunchCallback: vi.fn((callback: (event: LaunchEvent) => void) => {
+      setLaunchCallback: vi.fn((callback: LaunchCallback) => {
         launchCb = callback;
       }),
       execute: vi.fn(async () => {
-        launchCb?.({
+        const update = launchCb?.({
           stage: 'initial',
           chapter: first,
           progress: { url: first.url, loaded: 1 },
           abort: vi.fn(),
         } as unknown as LaunchEvent);
         // A site hook or the parser threw while fetching a later section page.
-        launchCb?.({ stage: 'cancel', reason: 'failed' } as unknown as LaunchEvent);
+        await update?.({ stage: 'cancel', reason: 'failed' });
       }),
       manualEnable: vi.fn(async () => {}),
     };

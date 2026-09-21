@@ -3,7 +3,7 @@ import type { NavigationContext } from './navigationContext';
 import type { ParsedChapter } from '@/core/parser';
 import type { PreparedChapterLoad } from './chapterLoadGuards';
 
-import { MAX_CACHED_CHAPTERS, MAX_SESSION_CACHE } from './types';
+import { createChapterEntryId, MAX_CACHED_CHAPTERS, MAX_SESSION_CACHE } from './types';
 import { trimCachedContents } from './trim';
 
 export async function insertCachedChapter(
@@ -12,8 +12,7 @@ export async function insertCachedChapter(
   position: 'append' | 'prepend'
 ): Promise<boolean> {
   const runId = ctx.runtime.viewId();
-  const suffix = position === 'append' ? 'cached' : 'cached-prev';
-  const id = `chapter-${Date.now()}-${suffix}-${ctx.chapters.value.length}`;
+  const id = createChapterEntryId();
   const entry = {
     chapter: { ...cached.chapter },
     rule: cached.rule,
@@ -49,12 +48,12 @@ export async function insertParsedChapter(
   parsed: ParsedChapter
 ): Promise<string | null> {
   const runId = ctx.runtime.viewId();
-  const suffix = load.isNext ? '' : 'prev-';
-  const id = `chapter-${Date.now()}-${suffix}${ctx.chapters.value.length}`;
+  const id = createChapterEntryId();
   const entry = {
     chapter: parsed,
     rule: parsed.rule,
     id,
+    sectionProgress: load.sectionMerge?.progress,
   };
 
   if (load.isNext) {
@@ -67,26 +66,19 @@ export async function insertParsedChapter(
   ctx.originalContents.value.set(id, parsed.content);
   ctx.originalTitles.value.set(id, { title: parsed.title, bookTitle: parsed.bookTitle });
 
-  ctx.cachedContents.value.set(parsed.url, {
-    chapter: parsed,
-    rule: parsed.rule,
-    cachedAt: Date.now(),
-  });
-
-  trimCachedContents(ctx.cachedContents.value, MAX_SESSION_CACHE);
+  if (!load.sectionMerge) {
+    ctx.cachedContents.value.set(parsed.url, {
+      chapter: parsed,
+      rule: parsed.rule,
+      cachedAt: Date.now(),
+    });
+    trimCachedContents(ctx.cachedContents.value, MAX_SESSION_CACHE);
+  }
 
   if (ctx.currentConversionMode.value !== 'none') {
     await ctx.applyConversionToChapterEntry(id, ctx.currentConversionMode.value);
   }
   if (ctx.runtime.isViewStale(runId)) return null;
-
-  if (!ctx.history.value.includes(parsed.url)) {
-    if (load.isNext) {
-      ctx.history.value.push(parsed.url);
-    } else {
-      ctx.history.value.unshift(parsed.url);
-    }
-  }
 
   trimDisplayChapters(ctx, load.isNext);
 
@@ -103,7 +95,7 @@ export async function rebuildChaptersFromCache(
   ctx.originalContents.value.clear();
   ctx.originalTitles.value.clear();
 
-  const id = `chapter-${Date.now()}-jump-0`;
+  const id = createChapterEntryId();
   ctx.chapters.value.push({
     chapter: { ...cached.chapter },
     rule: cached.rule,

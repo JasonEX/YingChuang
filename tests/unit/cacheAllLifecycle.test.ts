@@ -37,7 +37,6 @@ const chapter: ParsedChapter = {
 function makeContext(): CacheAllContext {
   return {
     cacheProgress: ref({ running: false, done: 0, total: 0, failed: 0 }),
-    cacheQueue: ref([]),
     cacheFailedUrls: ref([]),
     cacheAbort: ref(null),
     cachedContents: ref(new Map()),
@@ -358,4 +357,19 @@ it('falls back to fetching when the iframe cannot load', async () => {
   await createCacheAll(ctx).startCacheAll([target]);
   expect(mocks.fetch).toHaveBeenCalledTimes(1);
   expect(ctx.cachedContents.value.has(target)).toBe(true);
+});
+
+it('keeps only a bounded task sample for diagnostics and follows the active target', async () => {
+  const ctx = makeContext();
+  const urls = Array.from({ length: 200 }, (_, i) => `https://example.com/chapter/${i + 1}`);
+  ctx.persistedUrls.value = new Set(urls);
+  const actions = createCacheAll(ctx);
+  await actions.startCacheAll(urls);
+  expect(actions.getCacheDebugSnapshot()).toMatchObject({
+    requested: 200,
+    firstUrls: urls.slice(0, 4),
+    lastUrls: urls.slice(-4),
+    currentUrl: urls.at(-1),
+  });
+  expect(ctx.cacheProgress.value.done).toBe(200);
 });

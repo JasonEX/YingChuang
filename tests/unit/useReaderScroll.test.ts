@@ -60,6 +60,7 @@ describe('useReaderScroll', () => {
       showControls: ref(overrides.showControls ?? true),
       isNavigating: ref(overrides.isNavigating ?? false),
       scheduleAutoLoadNext: vi.fn(),
+      savePosition: saveReadingPosition,
     };
   }
 

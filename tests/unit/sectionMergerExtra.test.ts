@@ -545,6 +545,7 @@ describe('SectionMerger (progressive section streaming)', () => {
 
     return {
       deltas,
+      parser,
       ends,
       fetcher,
       firstPages,
@@ -568,6 +569,44 @@ describe('SectionMerger (progressive section streaming)', () => {
       },
     };
   }
+
+  it('does not emit a page whose asynchronous parse finished after cancellation', async () => {
+    const s = setup();
+    const controller = new AbortController();
+    const parse = s.parser.parse.getMockImplementation()!;
+    let finish!: () => void;
+    s.parser.parse.mockImplementation(async (doc, url) => {
+      const chapter = await parse(doc, url);
+      if (url !== s.startUrl)
+        await new Promise<void>(resolve => {
+          finish = resolve;
+        });
+      return chapter;
+    });
+    const pending = s.merger.merge(s.startDoc, s.startUrl, {
+      ...s.handlers,
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+    controller.abort();
+    finish();
+    await pending;
+    expect(s.deltas).toHaveLength(0);
+    expect(s.ends).toEqual([{ loaded: 1, total: undefined, truncated: true }]);
+  });
+
+  it('never republishes the first section link as a next chapter on completion or truncation', async () => {
+    for (const missing of [[], [2]]) {
+      const s = setup({ missing });
+      const parse = s.parser.parse.getMockImplementation()!;
+      s.parser.parse.mockImplementation(async (doc, url) => ({
+        ...(await parse(doc, url)),
+        nextUrl: url === s.startUrl ? `${url}?page=2` : undefined,
+      }));
+      const result = await s.merger.merge(s.startDoc, s.startUrl, s.handlers);
+      expect(result?.nextUrl).toBeUndefined();
+    }
+  });
 
   it('emits one delta per extra page, each carrying only that page', async () => {
     const s = setup();
