@@ -514,7 +514,7 @@ describe('SectionMerger (progressive section streaming)', () => {
     };
 
     const parser = {
-      parse: vi.fn(async (_doc: Document, url: string) => {
+      parse: vi.fn(async (_doc: Document, url: string): Promise<ParsedChapter | null> => {
         const index = urls.indexOf(url);
         const parsed: ParsedChapter = {
           title: '第一章',
@@ -601,7 +601,7 @@ describe('SectionMerger (progressive section streaming)', () => {
       const s = setup({ missing });
       const parse = s.parser.parse.getMockImplementation()!;
       s.parser.parse.mockImplementation(async (doc, url) => ({
-        ...(await parse(doc, url)),
+        ...(await parse(doc, url))!,
         nextUrl: url === s.startUrl ? `${url}?page=2` : undefined,
       }));
       const result = await s.merger.merge(s.startDoc, s.startUrl, s.handlers);
@@ -727,12 +727,71 @@ describe('SectionMerger (progressive section streaming)', () => {
     expect(s.ends[0]?.total).toBe(3);
   });
 
-  it('drops the total when a page disagrees with its own position', async () => {
-    const s = setup({ marker: page => (page === 2 ? '(1/3)' : `(${page}/3)`) });
-    await s.merger.merge(s.startDoc, s.startUrl, s.handlers);
+  it.each([
+    ['skipped', '(3/5)', 5],
+    ['repeated', '(1/5)', 5],
+    ['changed total', '(2/4)', 5],
+    ['unknown initial total', '(3/5)', undefined],
+  ] as const)(
+    'stops before appending a contradictory marker: %s',
+    async (_reason, second, total) => {
+      const s = setup({ marker: page => (page === 1 ? (total ? `(1/${total})` : '') : second) });
+      const chapter = await s.merger.merge(s.startDoc, s.startUrl, s.handlers);
+      expect(s.fetcher).toHaveBeenCalledTimes(1);
+      expect(s.parser.parse).toHaveBeenCalledTimes(2);
+      expect(chapter?.content).toBe('<p>page1</p>');
+      expect(s.deltas).toHaveLength(0);
+      expect(s.ends).toEqual([{ loaded: 1, total, truncated: true }]);
+    }
+  );
 
-    expect(s.progressTotals).toEqual([3, undefined, undefined]);
-    expect(s.ends[0]?.total).toBeUndefined();
+  it('validates the refetched document when an opening section cannot be parsed from memory', async () => {
+    const s = setup({ marker: page => `(${page}/3)` });
+    const url = 'https://example.com/1_2.html';
+    const opening = await s.fetcher(url);
+    const fetch = s.fetcher.getMockImplementation()!;
+    s.fetcher.mockImplementation(async target => {
+      const doc = await fetch(target);
+      if (target !== url) return doc;
+      const replacement = doc!.cloneNode(true) as Document;
+      replacement.title = '第一章(3/3)';
+      return replacement;
+    });
+    const parse = s.parser.parse.getMockImplementation()!;
+    s.parser.parse.mockImplementation(async (doc, target) =>
+      doc === opening ? null : parse(doc, target)
+    );
+    const chapter = await s.merger.merge(opening!, url, s.handlers);
+    expect(chapter?.content).toBe('<p>page1</p>');
+    expect(s.deltas).toHaveLength(0);
+    expect(s.ends).toEqual([{ loaded: 1, total: 3, truncated: true }]);
+  });
+
+  it('keeps the declared total across an unnumbered page', async () => {
+    const s = setup({ marker: page => (page === 2 ? '' : `(${page}/3)`) });
+    await s.merger.merge(s.startDoc, s.startUrl, s.handlers);
+    expect(s.progressTotals).toEqual([3, 3, 3]);
+    expect(s.ends).toEqual([{ loaded: 3, total: 3, truncated: false }]);
+  });
+
+  it('still detects an early stop when later pages omit their markers', async () => {
+    const s = setup({ pages: 2, marker: page => (page === 1 ? '(1/3)' : '') });
+    await s.merger.merge(s.startDoc, s.startUrl, s.handlers);
+    expect(s.ends).toEqual([{ loaded: 2, total: 3, truncated: true }]);
+  });
+
+  it('accepts a matching marker first declared on a later page', async () => {
+    const s = setup({ marker: page => (page === 1 ? '' : `(${page}/3)`) });
+    await s.merger.merge(s.startDoc, s.startUrl, s.handlers);
+    expect(s.progressTotals).toEqual([undefined, 3, 3]);
+    expect(s.ends).toEqual([{ loaded: 3, total: 3, truncated: false }]);
+  });
+
+  it('keeps a declared total above the request cap without increasing the cap', async () => {
+    const s = setup({ marker: page => `(${page}/12)` });
+    await s.merger.merge(s.startDoc, s.startUrl, { ...s.handlers, maxPages: 2 });
+    expect(s.fetcher).toHaveBeenCalledTimes(1);
+    expect(s.ends).toEqual([{ loaded: 2, total: 12, truncated: true }]);
   });
 
   it('never substitutes the page cap for a missing marker', async () => {

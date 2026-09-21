@@ -4940,6 +4940,8 @@
 			if (state.kind === "done") return state.chapter;
 			const maxPages = Math.max(1, options.maxPages ?? first.rule?.advanced?.sectionMaxPages ?? 10);
 			const progressive = !!state.nextSectionUrl && maxPages > 1;
+			const marker = this.readSectionMarker(startPage.doc);
+			const totalPages = marker?.page === 1 ? marker.total : void 0;
 			if (progressive) {
 				await options.onFirstPage?.({
 					...first,
@@ -4948,11 +4950,11 @@
 				}, {
 					url: state.chapterUrl,
 					loaded: 1,
-					total: this.readSectionTotal(startPage.doc, 1, maxPages)
+					total: totalPages
 				});
 				if (options.signal?.aborted) return null;
 			}
-			return this.mergeSections(startPage, first, state, maxPages, options, progressive);
+			return this.mergeSections(startPage, first, state, maxPages, options, progressive, totalPages);
 		}
 		async resolveStartPage(doc, url, options) {
 			if (options.signal?.aborted) return null;
@@ -5008,23 +5010,20 @@
 				sectionDelayMs: hasCustomFetcher ? 0 : Math.max(0, first.rule?.advanced?.sectionDelayMs ?? 0)
 			};
 		}
-		readSectionTotal(doc, index, maxPages) {
+		readSectionMarker(doc) {
 			for (const source of [doc.title, doc.querySelector("h1")?.textContent]) {
 				const match = source?.match(SECTION_TOTAL_PATTERN);
 				if (!match) continue;
-				const current = Number(match[1]);
+				const page = Number(match[1]);
 				const total = Number(match[2]);
-				if (current !== index || total < index || total > maxPages) continue;
-				return total;
+				if (Number.isSafeInteger(total) && page >= 1 && page <= total) return {
+					page,
+					total
+				};
 			}
 		}
 		isTruncatedMerge(cursor, signal) {
-			if (cursor.nextSectionUrl || signal?.aborted) return true;
-			return cursor.totalPages !== void 0 && cursor.loadedPages < cursor.totalPages;
-		}
-		reconcileSectionTotal(cursor, doc, maxPages) {
-			if (cursor.totalPages === void 0) return void 0;
-			return this.readSectionTotal(doc, cursor.loadedPages, maxPages) === cursor.totalPages ? cursor.totalPages : void 0;
+			return !!cursor.nextSectionUrl || !!signal?.aborted || cursor.totalPages !== void 0 && cursor.loadedPages < cursor.totalPages;
 		}
 		getChapterUrl(startUrl, nextSectionUrl) {
 			if (!nextSectionUrl || !isSectionLikeUrl(startUrl, nextSectionUrl, parseSectionUrl)) return startUrl;
@@ -5040,10 +5039,10 @@
 			} catch {}
 			return startUrl;
 		}
-		async mergeSections(startPage, first, state, maxPages, options, progressive) {
+		async mergeSections(startPage, first, state, maxPages, options, progressive, totalPages) {
 			const { fetcher, signal } = options;
 			const cursor = this.createMergeCursor(startPage, first, state, maxPages);
-			cursor.totalPages = this.readSectionTotal(startPage.doc, 1, maxPages);
+			cursor.totalPages = totalPages;
 			while (cursor.remainingPages > 0 && cursor.nextSectionUrl) {
 				if (signal?.aborted) break;
 				if (state.sectionDelayMs > 0) {
@@ -5054,11 +5053,13 @@
 				if (!page) break;
 				const nextParsed = await this.parseLoadedSection(page, cursor.lastUrl, startPage.knownDocs, fetcher, signal);
 				if (signal?.aborted || !nextParsed) break;
+				const marker = this.readSectionMarker(page.doc);
+				if (marker && (marker.page !== cursor.loadedPages + 1 || cursor.totalPages !== void 0 && marker.total !== cursor.totalPages)) break;
 				const section = this.parser.detectSection(page.doc, page.url);
 				this.advanceMergeCursor(cursor, page.url, nextParsed, section);
 				cursor.remainingPages -= 1;
 				cursor.loadedPages += 1;
-				cursor.totalPages = this.reconcileSectionTotal(cursor, page.doc, maxPages);
+				cursor.totalPages ??= marker?.total;
 				if (progressive) await options.onSectionPage?.({
 					content: nextParsed.content,
 					rawContent: nextParsed.rawContent,
@@ -5117,6 +5118,7 @@
 			const doc = await this.fetchUrl(page.url, referrer, fetcher, signal);
 			if (!doc) return null;
 			knownDocs.set(page.url, doc);
+			page.doc = doc;
 			parsed = await this.parser.parse(doc, page.url);
 			return parsed;
 		}

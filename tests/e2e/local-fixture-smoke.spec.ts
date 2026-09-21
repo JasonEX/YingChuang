@@ -2473,3 +2473,55 @@ test('cancelled position restoration preserves storage until the reader actually
   await expect.poll(readPercent).not.toBe(70);
   expect(await readPercent()).toBeGreaterThan(0);
 });
+
+test('a contradictory section marker stops loading and never enters the chapter cache', async ({
+  page,
+  context,
+}) => {
+  const pages: number[] = [];
+  await context.route('https://xszj.org/**', async route => {
+    const url = new URL(route.request().url());
+    if (url.pathname !== '/b/490346/c/1534359') {
+      await route.fulfill({ status: 404, body: '' });
+      return;
+    }
+    const n = Number(url.searchParams.get('page') || 1);
+    pages.push(n);
+    // URLs are sequential, but the second response contains page 3: page 2 is missing.
+    const marker = n === 1 ? 1 : n + 1;
+    await route.fulfill({
+      contentType: 'text/html; charset=utf-8',
+      body: `<!doctype html><html lang="zh-Hans"><head><meta charset="utf-8"><title>第一章 跳页测试(${marker}/5)</title></head><body>
+       <h1 class="bookname">第一章 跳页测试(${marker}/5)</h1>
+       <div class="con_top"><a href="/b/490346">测试书</a></div>
+       <div class="bottem1"><a href="/b/490346/cs/1">目录</a>${n < 4 ? `<a href="?page=${n + 1}">下一页</a>` : ''}</div>
+       <div id="booktxt"><p>第${marker}页正文。${'山间的风吹过树林，他沿着熟悉的小路慢慢向前走去。'.repeat(60)}</p></div>
+       </body></html>`,
+    });
+  });
+  await context.addInitScript({
+    content:
+      createGmMockScript() +
+      "\nGM_setValue('mnr-config', {behavior:{preloadNext:false}});\n" +
+      fs.readFileSync(getMnrE2eConfig().userScriptPath, 'utf8'),
+  });
+  await page.goto('https://xszj.org/b/490346/c/1534359');
+  const root = page.locator('#mnr-reader-root');
+  await expect(root.locator('.mnr-section-progress')).toContainText('1/5');
+  await expect(root).toContainText('本章后续内容加载不完整');
+  await expect(root.locator('.mnr-section-progress')).toContainText('本章内容不完整');
+  await expect(root.locator('article')).toContainText('第1页正文');
+  await expect(root.locator('article')).not.toContainText('第3页正文');
+  await expect(root.locator('.mnr-chapter-end')).toHaveCount(0);
+  const diagnostic = await copyReaderDiagnostic(page);
+  expect(diagnostic.reader.cache.memory.count).toBe(0);
+  expect(diagnostic.recentEvents).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        type: 'reader.sectionMerge.complete',
+        detail: expect.objectContaining({ truncated: true }),
+      }),
+    ])
+  );
+  expect(pages).toEqual([1, 2]);
+});

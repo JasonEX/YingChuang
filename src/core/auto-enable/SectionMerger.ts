@@ -168,6 +168,8 @@ export class SectionMerger {
     const maxPages = Math.max(1, options.maxPages ?? first.rule?.advanced?.sectionMaxPages ?? 10);
 
     const progressive = !!state.nextSectionUrl && maxPages > 1;
+    const marker = this.readSectionMarker(startPage.doc);
+    const totalPages = marker?.page === 1 ? marker.total : undefined;
 
     if (progressive) {
       // Merging waits here, so page 2 is never requested before the first page is committed.
@@ -180,13 +182,13 @@ export class SectionMerger {
         {
           url: state.chapterUrl,
           loaded: 1,
-          total: this.readSectionTotal(startPage.doc, 1, maxPages),
+          total: totalPages,
         }
       );
       if (options.signal?.aborted) return null;
     }
 
-    return this.mergeSections(startPage, first, state, maxPages, options, progressive);
+    return this.mergeSections(startPage, first, state, maxPages, options, progressive, totalPages);
   }
 
   private async resolveStartPage(
@@ -262,44 +264,25 @@ export class SectionMerger {
     };
   }
 
-  /**
-   * Read an `(n/m)` section marker, accepting it only when `n` matches the page we are
-   * actually on and `m` fits inside the merge cap. `sectionMaxPages` is a protection cap
-   * rather than a real page count, so it must never stand in for a total.
-   */
-  private readSectionTotal(doc: Document, index: number, maxPages: number): number | undefined {
+  /** Read a declared page position; the request cap is never a substitute for a total. */
+  private readSectionMarker(doc: Document): { page: number; total: number } | undefined {
     for (const source of [doc.title, doc.querySelector('h1')?.textContent]) {
       const match = source?.match(SECTION_TOTAL_PATTERN);
       if (!match) continue;
-
-      const current = Number(match[1]);
+      const page = Number(match[1]);
       const total = Number(match[2]);
-      if (current !== index || total < index || total > maxPages) continue;
-
-      return total;
+      if (Number.isSafeInteger(total) && page >= 1 && page <= total) return { page, total };
     }
-
     return undefined;
   }
 
   /** A merge is truncated whenever pages it was still owed never arrived. */
   private isTruncatedMerge(cursor: MergeCursor, signal?: AbortSignal): boolean {
-    if (cursor.nextSectionUrl || signal?.aborted) return true;
-    // Every merged page confirmed this total, so falling short of it means pages are missing
-    // even though the site stopped linking to them.
-    return cursor.totalPages !== undefined && cursor.loadedPages < cursor.totalPages;
-  }
-
-  /** Keep a section total only while every page agrees with it. */
-  private reconcileSectionTotal(
-    cursor: MergeCursor,
-    doc: Document,
-    maxPages: number
-  ): number | undefined {
-    if (cursor.totalPages === undefined) return undefined;
-    return this.readSectionTotal(doc, cursor.loadedPages, maxPages) === cursor.totalPages
-      ? cursor.totalPages
-      : undefined;
+    return (
+      !!cursor.nextSectionUrl ||
+      !!signal?.aborted ||
+      (cursor.totalPages !== undefined && cursor.loadedPages < cursor.totalPages)
+    );
   }
 
   /** Keep a canonical chapter identity separate from the URL used to fetch each section. */
@@ -339,11 +322,12 @@ export class SectionMerger {
     state: Extract<SectionMergeState, { kind: 'merge' }>,
     maxPages: number,
     options: SectionMergeOptions,
-    progressive: boolean
+    progressive: boolean,
+    totalPages?: number
   ): Promise<ParsedChapter> {
     const { fetcher, signal } = options;
     const cursor = this.createMergeCursor(startPage, first, state, maxPages);
-    cursor.totalPages = this.readSectionTotal(startPage.doc, 1, maxPages);
+    cursor.totalPages = totalPages;
 
     while (cursor.remainingPages > 0 && cursor.nextSectionUrl) {
       if (signal?.aborted) break;
@@ -365,11 +349,22 @@ export class SectionMerger {
       );
       if (signal?.aborted || !nextParsed) break;
 
+      const marker = this.readSectionMarker(page.doc);
+      if (
+        marker &&
+        (marker.page !== cursor.loadedPages + 1 ||
+          (cursor.totalPages !== undefined && marker.total !== cursor.totalPages))
+      ) {
+        // Leave the pending section URL intact: the existing truncated exit owns this failure.
+        // Do not append a contradictory page or guess where the missing content belongs.
+        break;
+      }
+
       const section = this.parser.detectSection(page.doc, page.url) as SectionInfo | undefined;
       this.advanceMergeCursor(cursor, page.url, nextParsed, section);
       cursor.remainingPages -= 1;
       cursor.loadedPages += 1;
-      cursor.totalPages = this.reconcileSectionTotal(cursor, page.doc, maxPages);
+      cursor.totalPages ??= marker?.total;
 
       if (progressive) {
         await options.onSectionPage?.(
@@ -451,6 +446,7 @@ export class SectionMerger {
     if (!doc) return null;
 
     knownDocs.set(page.url, doc);
+    page.doc = doc;
     parsed = await this.parser.parse(doc, page.url);
     return parsed;
   }
