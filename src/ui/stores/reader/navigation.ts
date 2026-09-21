@@ -295,7 +295,12 @@ export function createNavigation(ctx: NavigationContext) {
     // The reload rewrites this entry wholesale. Left running, the old merge would append its
     // remaining pages onto the replacement, and an unchanged source script means completion
     // never rewrites the content that would have hidden the duplication.
+    const abandonedMerge = ctx.sectionMerges.value.has(current.id);
     cancelChapterSections(ctx, current.id, 'aborted');
+    // Unlike a teardown, the half-merged chapter stays on screen. It has to keep saying it is
+    // short until a replacement lands, or a reload that never gets one would leave partial
+    // content looking whole -- and the book looking finished.
+    if (abandonedMerge) current.sectionsIncomplete = true;
 
     ctx.showToast('正在重新加载...', 'info');
 

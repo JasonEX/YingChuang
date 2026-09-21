@@ -979,6 +979,7 @@ describe('ReaderStore - workflows', () => {
 
     expect(abort).toHaveBeenCalledTimes(1);
     expect(store.chapters[0]?.sectionProgress).toBeUndefined();
+    expect(store.chapters[0]?.sectionsIncomplete).toBeUndefined();
     expect(store.chapters[0]?.chapter.content).toBe('<p>重新加载</p>');
 
     // The abandoned merge must not append its remaining pages onto the replacement.
@@ -991,6 +992,36 @@ describe('ReaderStore - workflows', () => {
       })
     ).resolves.toBe(false);
     expect(store.chapters[0]?.chapter.content).not.toContain('陈旧分页');
+
+    store.clearError();
+  });
+
+  it('keeps a half-merged chapter marked incomplete when a reload never lands', async () => {
+    const store = useReaderStore();
+    const entryId = store.setChapter({
+      title: '第1章',
+      content: '<p>第一页</p>',
+      rawContent: '<p>第一页</p>',
+      url: 'https://example.com/book/1/1.html',
+      indexUrl: 'https://example.com/book/1/index.html',
+      confidence: 1,
+      method: 'rule',
+    });
+    store.beginChapterSections(entryId, { loaded: 1, total: 4 }, vi.fn());
+
+    mockFetchAndParseUrl.mockReturnValue({
+      promise: Promise.resolve({ doc: null, status: 500, finalUrl: null, error: 'http' }),
+      abort: vi.fn(),
+    });
+
+    await store.reloadCurrentChapter();
+
+    // Partial content is still on screen, so the book must not look finished.
+    expect(store.chapters[0]?.chapter.content).toBe('<p>第一页</p>');
+    expect(store.chapters[0]?.sectionProgress).toBeUndefined();
+    expect(store.chapters[0]?.sectionsIncomplete).toBe(true);
+    expect(store.hasNext).toBe(false);
+    expect(store.isTailChapterIncomplete).toBe(true);
 
     store.clearError();
   });
