@@ -31,6 +31,7 @@ let readerStore: {
   deactivate: () => void;
   setChapter: (chapter: { url?: string }, rule?: unknown) => string;
   beginChapterSections: (entryId: string, progress: unknown, abort: () => void) => boolean;
+  cancelChapterSections: (entryId: string, reason: 'aborted' | 'failed') => void;
   appendChapterSection: (entryId: string, delta: unknown) => Promise<boolean>;
   completeChapterSections: (
     entryId: string,
@@ -195,6 +196,7 @@ describe('bootstrap', () => {
         return 'chapter-1';
       }),
       beginChapterSections: vi.fn(() => true),
+      cancelChapterSections: vi.fn(),
       appendChapterSection: vi.fn(async () => true),
       completeChapterSections: vi.fn(async () => true),
       showToast: vi.fn(),
@@ -631,6 +633,54 @@ describe('bootstrap', () => {
       { truncated: false }
     );
     expect(readerStore.activate).toHaveBeenCalledTimes(1);
+    expect(readerStore.cancelChapterSections).not.toHaveBeenCalled();
+    expect(document.querySelectorAll('#mnr-reader-root')).toHaveLength(1);
+  });
+
+  it('drops progressive state when background merging fails after launch', async () => {
+    dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
+      url: 'https://example.com/chapter/1',
+      pretendToBeVisual: true,
+    });
+    vi.stubGlobal('window', dom.window);
+    vi.stubGlobal('document', dom.window.document);
+    vi.stubGlobal('sessionStorage', dom.window.sessionStorage);
+
+    const first = {
+      title: '第1章',
+      content: '<p>第一页</p>',
+      rawContent: '<p>第一页</p>',
+      url: dom.window.location.href,
+    };
+    let launchCb: ((event: LaunchEvent) => void) | null = null;
+    const manager = {
+      check: vi.fn(() => ({ shouldEnable: true, method: 'builtin-rule' })),
+      setPromptCallback: vi.fn(),
+      setLaunchCallback: vi.fn((callback: (event: LaunchEvent) => void) => {
+        launchCb = callback;
+      }),
+      execute: vi.fn(async () => {
+        launchCb?.({
+          stage: 'initial',
+          chapter: first,
+          progress: { url: first.url, loaded: 1 },
+          abort: vi.fn(),
+        } as unknown as LaunchEvent);
+        // A site hook or the parser threw while fetching a later section page.
+        launchCb?.({ stage: 'cancel', reason: 'failed' } as unknown as LaunchEvent);
+      }),
+      manualEnable: vi.fn(async () => {}),
+    };
+    mockGetAutoEnableManager.mockReturnValue(manager);
+
+    const bootstrap = await import('@/bootstrap');
+    await bootstrap.initialize();
+
+    // The reader keeps the first page, but the chapter must stop reporting itself as merging.
+    expect(bootstrap.isActive()).toBe(true);
+    expect(readerStore.setChapter).toHaveBeenCalledWith(first, undefined);
+    expect(readerStore.cancelChapterSections).toHaveBeenCalledWith('chapter-1', 'failed');
+    expect(readerStore.completeChapterSections).not.toHaveBeenCalled();
     expect(document.querySelectorAll('#mnr-reader-root')).toHaveLength(1);
   });
 

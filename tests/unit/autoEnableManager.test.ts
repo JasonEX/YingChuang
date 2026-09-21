@@ -676,13 +676,16 @@ describe('AutoEnableManager', () => {
     const launch = vi.fn();
     manager.setLaunchCallback(launch);
     await manager.manualEnable(doc);
-    expect(launch).toHaveBeenCalledExactlyOnceWith({
+    expect(launch).toHaveBeenNthCalledWith(1, {
       stage: 'initial',
       chapter: firstPage,
       rule: undefined,
       progress: { url: firstPage.url, loaded: 1 },
       abort: expect.any(Function),
     });
+    // Without this the chapter would stay marked as merging for the rest of the session.
+    expect(launch).toHaveBeenNthCalledWith(2, { stage: 'cancel', reason: 'failed' });
+    expect(launch).toHaveBeenCalledTimes(2);
     expect(mockedProtection.deactivate).not.toHaveBeenCalled();
     expect(mockedRuleStorage.setSitePreference).not.toHaveBeenCalled();
   });

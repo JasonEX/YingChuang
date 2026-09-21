@@ -65,6 +65,11 @@ export type LaunchEvent =
     }
   | { stage: 'append'; delta: SectionPageDelta; progress: SectionMergeProgress }
   | {
+      /** The merge stopped without a chapter, so the reader must drop its progress state. */
+      stage: 'cancel';
+      reason: 'aborted' | 'failed';
+    }
+  | {
       stage: 'complete';
       chapter: ParsedChapter;
       rule?: SiteRule;
@@ -450,12 +455,21 @@ export class AutoEnableManager {
         });
         return 'complete';
       }
-      if (launchedEarly) return 'initial';
+      if (launchedEarly) {
+        // Reaching here after the first page means the signal was pulled mid-merge.
+        this.launchCallback?.({ stage: 'cancel', reason: 'aborted' });
+        return 'initial';
+      }
       this.deactivateProtection();
       return false;
     } catch (e) {
       console.error('[AutoEnableManager] Parse error:', e);
-      if (launchedEarly) return 'initial';
+      if (launchedEarly) {
+        // The reader is already showing the first page; without this the chapter would stay
+        // marked as merging forever.
+        this.launchCallback?.({ stage: 'cancel', reason: 'failed' });
+        return 'initial';
+      }
       this.deactivateProtection();
       return false;
     }

@@ -284,6 +284,14 @@ function launchReader(event: LaunchEvent): void {
     return;
   }
 
+  if (event.stage === 'cancel') {
+    const mergingEntryId = appState.progressiveEntryId;
+    appState.progressiveEntryId = null;
+    if (!appState.isActive || !mergingEntryId) return;
+    readerStore.cancelChapterSections(mergingEntryId, event.reason);
+    return;
+  }
+
   if (event.stage === 'complete' && event.progressive) {
     const mergingEntryId = appState.progressiveEntryId;
     appState.progressiveEntryId = null;

@@ -685,6 +685,7 @@ export const useReaderStore = defineStore('reader', () => {
     loadToc: tocActions.loadToc,
     appendChapterSection: nav.appendChapterSection,
     beginChapterSections: nav.beginChapterSections,
+    cancelChapterSections: nav.cancelChapterSections,
     completeChapterSections: nav.completeChapterSections,
     rebuildChaptersAround,
     reloadCurrentChapter,
