@@ -98,7 +98,7 @@
           readerStore.chapters.length > 0 &&
           !readerStore.hasNext &&
           !readerStore.isLoadingNext &&
-          !readerStore.isSectionMerging
+          !readerStore.isTailSectionMerging
         "
         class="mnr-chapter-end"
       >

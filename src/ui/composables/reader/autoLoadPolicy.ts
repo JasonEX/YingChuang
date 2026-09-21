@@ -10,6 +10,8 @@ type AutoLoadDecision =
 
 export interface AutoLoadPolicyInput {
   autoLoadInFlight: boolean;
+  /** The chapter being read is still merging its own section pages. */
+  currentChapterMerging: boolean;
   enabled: boolean;
   failureCooldownUntil: number;
   graceUntil: number;
@@ -68,6 +70,9 @@ function canAutoLoadBase(input: AutoLoadPolicyInput): boolean {
   return (
     input.enabled &&
     input.hasChapter &&
+    // Finish owing the reader their current chapter before fetching ahead: on a rate-limited
+    // site a speculative next chapter would compete with the pages still being merged.
+    !input.currentChapterMerging &&
     input.hasNext &&
     !input.isLoadingNext &&
     !input.isLoadingPrev &&

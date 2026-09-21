@@ -10,6 +10,7 @@ import {
 function makeInput(overrides: Partial<AutoLoadPolicyInput> = {}): AutoLoadPolicyInput {
   return {
     autoLoadInFlight: false,
+    currentChapterMerging: false,
     enabled: true,
     failureCooldownUntil: 0,
     graceUntil: 0,
@@ -27,6 +28,16 @@ function makeInput(overrides: Partial<AutoLoadPolicyInput> = {}): AutoLoadPolicy
 }
 
 describe('autoLoadPolicy', () => {
+  it('waits for the current chapter to finish merging before fetching ahead', () => {
+    expect(decideAutoLoadNext('state', makeInput({ currentChapterMerging: true }))).toEqual({
+      type: 'idle',
+      clearTimer: false,
+    });
+    expect(decideAutoLoadNext('state', makeInput({ currentChapterMerging: false }))).toEqual({
+      type: 'start',
+    });
+  });
+
   it('uses the configured 1600px near-bottom fallback', () => {
     expect(INTERSECTION_ROOT_MARGIN_PX).toBe(1600);
     expect(isViewportNearBottom(5000, 2900, 600)).toBe(true);

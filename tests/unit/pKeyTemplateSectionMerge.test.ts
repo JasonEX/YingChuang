@@ -151,7 +151,7 @@ describe('p_key template + extensionless section merge', () => {
     // Remaining section pages merge in the background once the first page is on screen.
     await vi.waitFor(
       () => {
-        expect(store.isSectionMerging).toBe(false);
+        expect(store.isTailSectionMerging).toBe(false);
       },
       { timeout: 8000 }
     );

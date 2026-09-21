@@ -120,7 +120,7 @@ describe('ReaderStore - workflows', () => {
     expect(entry?.chapter.content).toBe('<p>第一页</p>');
     expect(entry?.sectionProgress).toEqual({ loaded: 1, total: 3 });
     expect(commit).toHaveBeenCalledWith(entry?.id);
-    expect(store.isSectionMerging).toBe(true);
+    expect(store.isTailSectionMerging).toBe(true);
     // The first page is on screen, so the load itself is over while pages keep arriving.
     expect(store.isLoadingNext).toBe(false);
 
@@ -137,7 +137,13 @@ describe('ReaderStore - workflows', () => {
     });
     expect(await store.loadNextChapter('manual')).toBe(true);
     expect(abort).not.toHaveBeenCalled();
-    expect(store.isSectionMerging).toBe(true);
+    expect(store.chapters.find(item => item.id === entry?.id)?.sectionProgress).toEqual({
+      loaded: 1,
+      total: 3,
+    });
+    // The guard follows the tail: a merge still running further back says nothing about
+    // whether the book has ended, and must not hide the end-of-book marker.
+    expect(store.isTailSectionMerging).toBe(false);
 
     // A table-of-contents jump rebuilds the list, and does cancel it.
     store.cachedContents.set('https://example.com/book/1/9.html', {
@@ -154,7 +160,7 @@ describe('ReaderStore - workflows', () => {
     });
     expect(await store.rebuildChaptersAround('https://example.com/book/1/9.html')).toBe(true);
     expect(abort).toHaveBeenCalledTimes(1);
-    expect(store.isSectionMerging).toBe(false);
+    expect(store.isTailSectionMerging).toBe(false);
   });
 
   it('grows a progressively merged chapter without resetting its reader entry', async () => {
@@ -172,7 +178,7 @@ describe('ReaderStore - workflows', () => {
 
     // A chapter that is still growing must not be reachable as a complete cache entry.
     expect(store.cachedContents.has('https://example.com/book/1/1.html')).toBe(false);
-    expect(store.isSectionMerging).toBe(true);
+    expect(store.isTailSectionMerging).toBe(true);
 
     await store.appendChapterSection(entryId, {
       content: '<p>第二页</p>',
@@ -198,7 +204,7 @@ describe('ReaderStore - workflows', () => {
     expect(store.chapters).toHaveLength(1);
     expect(store.chapters[0]?.id).toBe(entryId);
     expect(store.chapters[0]?.sectionProgress).toBeUndefined();
-    expect(store.isSectionMerging).toBe(false);
+    expect(store.isTailSectionMerging).toBe(false);
     expect(store.chapters[0]?.chapter.content).toContain('第二页');
     expect(store.chapters[0]?.chapter.url).toBe('https://example.com/book/1/1.html');
     expect(store.chapters[0]?.chapter.nextUrl).toBe('https://example.com/book/1/2.html');

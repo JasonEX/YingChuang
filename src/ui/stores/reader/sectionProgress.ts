@@ -116,6 +116,9 @@ export async function appendChapterSection(
     ...entry.chapter,
     rawContent: joinHtml(entry.chapter.rawContent, delta.rawContent),
     sourceScript: delta.sourceScript,
+    // A later page can be the first to reveal the next chapter. Publishing it now is what
+    // lets the reader move on instead of waiting out the rest of the merge.
+    ...(delta.nextUrl ? { nextUrl: normalizeUrlForFetch(delta.nextUrl) } : {}),
   };
 
   const mode = ctx.currentConversionMode.value;

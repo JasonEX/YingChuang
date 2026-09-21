@@ -254,6 +254,35 @@ describe('useReaderAutoLoad', () => {
     expect(opts.readerStore.loadNextChapter).toHaveBeenCalledWith('auto');
   });
 
+  it('holds preloading while the chapter being read is still merging', async () => {
+    const mainEl = document.createElement('div');
+    defineScrollMetrics(mainEl, { scrollHeight: 5000, scrollTop: 2900, clientHeight: 600 });
+    const current = {
+      ...makeChapter('https://example.com/chapter/1'),
+      sectionProgress: { loaded: 2, total: 40 },
+    };
+    const opts = createAutoLoadOptions({
+      mainRef: mainEl,
+      chapters: [current],
+      currentChapterIndex: 0,
+      // A page revealed the next chapter mid-merge, so the buffer alone would let this run.
+      hasNext: true,
+    });
+
+    useReaderAutoLoad(opts);
+    vi.advanceTimersByTime(5000);
+    await flushPromises();
+
+    expect(opts.readerStore.loadNextChapter).not.toHaveBeenCalled();
+
+    opts.readerStore.chapters[0].sectionProgress = undefined;
+    await nextTick();
+    vi.advanceTimersByTime(5000);
+    await flushPromises();
+
+    expect(opts.readerStore.loadNextChapter).toHaveBeenCalledWith('auto');
+  });
+
   it('holds preloading while an unread chapter is still merging its sections', async () => {
     const mainEl = document.createElement('div');
     defineScrollMetrics(mainEl, { scrollHeight: 5000, scrollTop: 2900, clientHeight: 600 });

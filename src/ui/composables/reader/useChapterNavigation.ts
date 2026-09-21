@@ -150,7 +150,7 @@ export function useChapterNavigation(options: UseChapterNavigationOptions) {
 
   function showBoundaryEnd(direction: ChapterDirection): void {
     // A merging chapter withholds its next URL, so an end-of-book claim would be wrong.
-    if (direction === 'next' && readerStore.isSectionMerging) {
+    if (direction === 'next' && readerStore.isTailSectionMerging) {
       readerStore.showToast(SECTION_MERGING_TOAST, 'info');
       return;
     }

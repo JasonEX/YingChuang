@@ -106,12 +106,16 @@ export const useReaderStore = defineStore('reader', () => {
   }
 
   /**
-   * True while any displayed chapter is still appending section pages.
+   * True while the chapter at the end of the display list is still appending section pages.
    *
-   * A merging chapter withholds its next-chapter URL, so `hasNext` reads false long before
-   * the book actually ends. Anything that claims "no more chapters" must consult this too.
+   * Such a chapter may not know its next-chapter URL yet, so `hasNext` can read false long
+   * before the book actually ends. Anything claiming "no more chapters" must consult this too.
+   * Scoped to the tail like `hasNext` itself: a merge left running further back in the list
+   * says nothing about whether the book has ended.
    */
-  const isSectionMerging = computed(() => chapters.value.some(entry => !!entry.sectionProgress));
+  const isTailSectionMerging = computed(
+    () => !!chapters.value[chapters.value.length - 1]?.sectionProgress
+  );
 
   const hasNext = computed(() => {
     const lastChapter = chapters.value[chapters.value.length - 1];
@@ -664,7 +668,7 @@ export const useReaderStore = defineStore('reader', () => {
     bookTitle,
     hasNext,
     hasPrev,
-    isSectionMerging,
+    isTailSectionMerging,
     tocWithStatus,
     activate,
     deactivate,

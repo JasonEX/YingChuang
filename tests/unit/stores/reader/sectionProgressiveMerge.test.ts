@@ -92,12 +92,41 @@ describe('reader store - section progress', () => {
     expect(store.chapters[0]?.sectionProgress).toEqual({ loaded: 3, total: 3 });
   });
 
+  it('publishes a next-chapter URL as soon as a page reveals one', async () => {
+    const store = useReaderStore();
+    const { entryId } = startMerge(store);
+
+    expect(store.hasNext).toBe(false);
+
+    await store.appendChapterSection(entryId, {
+      content: '<p>第二页</p>',
+      rawContent: '<p>raw2</p>',
+      nextUrl: 'https://example.com/book/1/2.html#top',
+      loaded: 2,
+      total: 3,
+    });
+
+    // Live immediately and normalized, so the reader can move on without awaiting the merge.
+    expect(store.chapters[0]?.chapter.nextUrl).toBe('https://example.com/book/1/2.html');
+    expect(store.hasNext).toBe(true);
+
+    await store.appendChapterSection(entryId, {
+      content: '<p>第三页</p>',
+      rawContent: '<p>raw3</p>',
+      loaded: 3,
+      total: 3,
+    });
+
+    // A later page that reveals nothing must not take it away again.
+    expect(store.chapters[0]?.chapter.nextUrl).toBe('https://example.com/book/1/2.html');
+  });
+
   it('keeps a merging chapter out of the session cache until it completes', async () => {
     const store = useReaderStore();
     const { entryId } = startMerge(store);
 
     expect(store.cachedContents.has(CHAPTER_URL)).toBe(false);
-    expect(store.isSectionMerging).toBe(true);
+    expect(store.isTailSectionMerging).toBe(true);
 
     await store.appendChapterSection(entryId, {
       content: '<p>第二页</p>',
@@ -112,7 +141,7 @@ describe('reader store - section progress', () => {
 
     expect(store.cachedContents.get(CHAPTER_URL)?.chapter.content).toBe(merged);
     expect(store.chapters[0]?.sectionProgress).toBeUndefined();
-    expect(store.isSectionMerging).toBe(false);
+    expect(store.isTailSectionMerging).toBe(false);
   });
 
   it('never caches a truncated chapter, and says so', async () => {

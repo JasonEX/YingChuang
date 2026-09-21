@@ -271,6 +271,7 @@ export function useReaderAutoLoad(options: UseReaderAutoLoadOptions) {
     recordBufferState(unreadBufferState);
     const decision = decideAutoLoadNext(reason, {
       autoLoadInFlight,
+      currentChapterMerging: !!readerStore.chapters[getCurrentIndex()]?.sectionProgress,
       enabled: configStore.behavior.preloadNext,
       failureCooldownUntil,
       graceUntil,
