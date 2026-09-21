@@ -19043,6 +19043,86 @@ ul, ol {
 			loadToc
 		};
 	}
+	async function parseWithSectionMerge(parser, initialDoc, url, options = {}) {
+		return createSectionMerger(parser).merge(initialDoc, url, options);
+	}
+	async function startProgressiveSectionMerge(parser, initialDoc, url, options) {
+		const { controller, sink } = options;
+		let resolveFirst;
+		const firstReady = new Promise((resolve) => {
+			resolveFirst = resolve;
+		});
+		let releaseGate;
+		const gate = new Promise((resolve) => {
+			releaseGate = resolve;
+		});
+		let entryId = null;
+		let progressive = false;
+		let progress = { loaded: 1 };
+		let truncated = false;
+		let chain = Promise.resolve();
+		const enqueue = (task) => {
+			chain = chain.then(task, task);
+		};
+		createSectionMerger(parser).merge(initialDoc, url, {
+			signal: controller.signal,
+			onFirstPage: (chapter, info) => {
+				progressive = true;
+				progress = {
+					loaded: info.loaded,
+					total: info.total
+				};
+				resolveFirst(chapter);
+				return gate;
+			},
+			onSectionPage: (delta, info) => {
+				const target = entryId;
+				if (!target) return;
+				enqueue(() => sink.append(target, {
+					...delta,
+					loaded: info.loaded,
+					total: info.total
+				}));
+			},
+			onMergeEnd: (end) => {
+				truncated = end.truncated;
+			}
+		}).then((chapter) => {
+			resolveFirst(chapter);
+			const target = entryId;
+			if (!target) return;
+			if (!chapter || controller.signal.aborted) {
+				enqueue(async () => sink.cancel(target, controller.signal.aborted ? "aborted" : "failed"));
+				return;
+			}
+			enqueue(() => sink.complete(target, chapter, chapter.rule, { truncated }));
+		}).catch((error) => {
+			console.error("[MNR] Background section merge failed:", error);
+			const target = entryId;
+			if (target) enqueue(async () => sink.cancel(target, "failed"));
+			resolveFirst(null);
+		});
+		const chapter = await firstReady;
+		if (!progressive) return {
+			chapter,
+			merge: null
+		};
+		return {
+			chapter,
+			merge: {
+				progress,
+				abort: () => controller.abort(),
+				commit: (id) => {
+					entryId = id;
+					releaseGate();
+				},
+				reject: () => {
+					controller.abort();
+					releaseGate();
+				}
+			}
+		};
+	}
 	function trimCachedContents(cachedContents, maxSessionCache) {
 		if (cachedContents.size <= maxSessionCache) return;
 		const entries = Array.from(cachedContents.entries()).sort((a, b) => a[1].cachedAt - b[1].cachedAt);
@@ -19205,86 +19285,6 @@ ul, ol {
 	function clearNavFailure(failures, key) {
 		failures.delete(key);
 	}
-	async function parseWithSectionMerge(parser, initialDoc, url, options = {}) {
-		return createSectionMerger(parser).merge(initialDoc, url, options);
-	}
-	async function startProgressiveSectionMerge(parser, initialDoc, url, options) {
-		const { controller, sink } = options;
-		let resolveFirst;
-		const firstReady = new Promise((resolve) => {
-			resolveFirst = resolve;
-		});
-		let releaseGate;
-		const gate = new Promise((resolve) => {
-			releaseGate = resolve;
-		});
-		let entryId = null;
-		let progressive = false;
-		let progress = { loaded: 1 };
-		let truncated = false;
-		let chain = Promise.resolve();
-		const enqueue = (task) => {
-			chain = chain.then(task, task);
-		};
-		createSectionMerger(parser).merge(initialDoc, url, {
-			signal: controller.signal,
-			onFirstPage: (chapter, info) => {
-				progressive = true;
-				progress = {
-					loaded: info.loaded,
-					total: info.total
-				};
-				resolveFirst(chapter);
-				return gate;
-			},
-			onSectionPage: (delta, info) => {
-				const target = entryId;
-				if (!target) return;
-				enqueue(() => sink.append(target, {
-					...delta,
-					loaded: info.loaded,
-					total: info.total
-				}));
-			},
-			onMergeEnd: (end) => {
-				truncated = end.truncated;
-			}
-		}).then((chapter) => {
-			resolveFirst(chapter);
-			const target = entryId;
-			if (!target) return;
-			if (!chapter || controller.signal.aborted) {
-				enqueue(async () => sink.cancel(target, controller.signal.aborted ? "aborted" : "failed"));
-				return;
-			}
-			enqueue(() => sink.complete(target, chapter, chapter.rule, { truncated }));
-		}).catch((error) => {
-			console.error("[MNR] Background section merge failed:", error);
-			const target = entryId;
-			if (target) enqueue(async () => sink.cancel(target, "failed"));
-			resolveFirst(null);
-		});
-		const chapter = await firstReady;
-		if (!progressive) return {
-			chapter,
-			merge: null
-		};
-		return {
-			chapter,
-			merge: {
-				progress,
-				abort: () => controller.abort(),
-				commit: (id) => {
-					entryId = id;
-					releaseGate();
-				},
-				reject: () => {
-					controller.abort();
-					releaseGate();
-				}
-			}
-		};
-	}
 	function loadDocumentInIframe(url, timeoutMs = 15e3) {
 		let iframe = null;
 		let timeoutId = null;
@@ -19413,6 +19413,11 @@ ul, ol {
 		const abort = () => controller.abort();
 		load.pendingAbortRef.value = abort;
 		try {
+			if (!load.isNext) {
+				const parsed = await parseWithSectionMerge(parser, doc, load.targetUrl, { signal: controller.signal });
+				if (controller.signal.aborted || ctx.runtime.isViewStale(runId)) return "abort";
+				return parsed;
+			}
 			const { chapter, merge } = await startProgressiveSectionMerge(parser, doc, load.targetUrl, {
 				controller,
 				sink: createSectionMergeSink(ctx)
@@ -20111,6 +20116,7 @@ ul, ol {
 			const current = ctx.chapters.value[ctx.currentChapterIndex.value];
 			if (!current) return;
 			const url = current.chapter.url;
+			cancelChapterSections(ctx, current.id, "aborted");
 			ctx.showToast("正在重新加载...", "info");
 			ctx.reloadAbort.value?.();
 			ctx.reloadAbort.value = null;
