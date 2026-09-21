@@ -141,7 +141,9 @@ describe('reader store - section progress', () => {
 
     expect(store.cachedContents.get(CHAPTER_URL)?.chapter.content).toBe(merged);
     expect(store.chapters[0]?.sectionProgress).toBeUndefined();
+    expect(store.chapters[0]?.sectionsIncomplete).toBeUndefined();
     expect(store.isTailSectionMerging).toBe(false);
+    expect(store.isTailChapterIncomplete).toBe(false);
   });
 
   it('never caches a truncated chapter, and says so', async () => {
@@ -153,6 +155,35 @@ describe('reader store - section progress', () => {
     expect(store.cachedContents.has(CHAPTER_URL)).toBe(false);
     expect(store.chapters[0]?.sectionProgress).toBeUndefined();
     expect(store.error).toBe('本章后续内容加载不完整');
+
+    // A short chapter never found its next URL, so the book must not look finished.
+    expect(store.chapters[0]?.sectionsIncomplete).toBe(true);
+    expect(store.hasNext).toBe(false);
+    expect(store.isTailChapterIncomplete).toBe(true);
+  });
+
+  it('keeps a failed merge marked incomplete so the book does not look finished', async () => {
+    const store = useReaderStore();
+    const { entryId } = startMerge(store);
+
+    store.cancelChapterSections(entryId, 'failed');
+
+    expect(store.chapters[0]?.sectionProgress).toBeUndefined();
+    expect(store.chapters[0]?.sectionsIncomplete).toBe(true);
+    expect(store.hasNext).toBe(false);
+    // Nothing is loading any more, but the end of the book is still not established.
+    expect(store.isTailSectionMerging).toBe(false);
+    expect(store.isTailChapterIncomplete).toBe(true);
+  });
+
+  it('leaves no incomplete marker when a merge is torn down rather than failing', async () => {
+    const store = useReaderStore();
+    const { entryId } = startMerge(store);
+
+    store.cancelChapterSections(entryId, 'aborted');
+
+    expect(store.chapters[0]?.sectionsIncomplete).toBeUndefined();
+    expect(store.isTailChapterIncomplete).toBe(false);
   });
 
   it('persists nothing for a chapter that is still merging', async () => {
@@ -260,6 +291,40 @@ describe('reader store - section progress', () => {
     );
 
     expect(mocks.html).toHaveBeenCalledTimes(1);
+  });
+
+  it('lands a page still converting when completion arrives right behind it', async () => {
+    const store = useReaderStore();
+    await store.applyTextConversion('tc');
+    const { entryId } = startMerge(store);
+
+    // Converting yields. That gap is where a completion used to slip in, disown the append
+    // and drop its page; an unchanged source script then skips the repair pass.
+    let releaseConversion!: (html: string) => void;
+    mocks.html.mockReturnValueOnce(
+      new Promise<string>(resolve => {
+        releaseConversion = resolve;
+      })
+    );
+
+    const append = store.appendChapterSection(entryId, {
+      content: '<p>最后一页</p>',
+      rawContent: '<p>raw2</p>',
+      sourceScript: 'hant',
+      loaded: 2,
+      total: 2,
+    });
+    const complete = store.completeChapterSections(
+      entryId,
+      makeChapter({ content: fold('<p>第一页</p>', '<p>最后一页</p>'), sourceScript: 'hant' })
+    );
+
+    releaseConversion('<p>最后一页</p>');
+    await expect(append).resolves.toBe(true);
+    await complete;
+
+    expect(store.chapters[0]?.chapter.content).toContain('最后一页');
+    expect(store.isTailSectionMerging).toBe(false);
   });
 
   it('leaves the incrementally converted text alone when the script never changed', async () => {

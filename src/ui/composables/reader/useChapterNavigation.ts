@@ -6,7 +6,7 @@
  */
 
 import { nextTick, onScopeDispose, type Ref } from 'vue';
-import { SECTION_MERGING_TOAST } from '@/ui/stores/reader/types';
+import { SECTION_INCOMPLETE_TOAST, SECTION_MERGING_TOAST } from '@/ui/stores/reader/types';
 import type { useReaderStore } from '@/ui/stores/reader';
 
 export interface UseChapterNavigationOptions {
@@ -152,6 +152,10 @@ export function useChapterNavigation(options: UseChapterNavigationOptions) {
     // A merging chapter withholds its next URL, so an end-of-book claim would be wrong.
     if (direction === 'next' && readerStore.isTailSectionMerging) {
       readerStore.showToast(SECTION_MERGING_TOAST, 'info');
+      return;
+    }
+    if (direction === 'next' && readerStore.isTailChapterIncomplete) {
+      readerStore.showToast(SECTION_INCOMPLETE_TOAST, 'info');
       return;
     }
     const fallback = direction === 'next' ? '已经是最后一章了' : '已经是第一章了';

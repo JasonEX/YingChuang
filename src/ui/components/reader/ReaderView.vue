@@ -81,6 +81,11 @@
           <MnrSpinner size="small" />
           <span>{{ sectionProgressLabel(entry.sectionProgress) }}</span>
         </div>
+
+        <!-- The merge stopped short, so say so rather than let the text just end -->
+        <div v-else-if="entry.sectionsIncomplete" class="mnr-section-progress" role="status">
+          <span>— 本章内容不完整 —</span>
+        </div>
       </article>
 
       <!-- Bottom sentinel for IntersectionObserver -->
@@ -98,7 +103,7 @@
           readerStore.chapters.length > 0 &&
           !readerStore.hasNext &&
           !readerStore.isLoadingNext &&
-          !readerStore.isTailSectionMerging
+          !readerStore.isTailChapterIncomplete
         "
         class="mnr-chapter-end"
       >

@@ -117,6 +117,16 @@ export const useReaderStore = defineStore('reader', () => {
     () => !!chapters.value[chapters.value.length - 1]?.sectionProgress
   );
 
+  /**
+   * True while the tail chapter may still be owed content: merging now, or known to be short
+   * after a failed or truncated merge. Such a chapter may never have found its next-chapter
+   * URL, so an end-of-book claim would be guesswork.
+   */
+  const isTailChapterIncomplete = computed(() => {
+    const lastChapter = chapters.value[chapters.value.length - 1];
+    return !!lastChapter?.sectionProgress || !!lastChapter?.sectionsIncomplete;
+  });
+
   const hasNext = computed(() => {
     const lastChapter = chapters.value[chapters.value.length - 1];
     const nextUrl = lastChapter?.chapter.nextUrl;
@@ -668,6 +678,7 @@ export const useReaderStore = defineStore('reader', () => {
     bookTitle,
     hasNext,
     hasPrev,
+    isTailChapterIncomplete,
     isTailSectionMerging,
     tocWithStatus,
     activate,

@@ -23,6 +23,9 @@ export const VIP_BLOCK_TOAST = '该章节为VIP/付费内容，无法加载';
 /** Shown instead of an end-of-book message while a chapter is still merging its sections */
 export const SECTION_MERGING_TOAST = '本章正在加载后续内容，请稍候';
 
+/** Shown instead of an end-of-book message once a chapter is known to be missing pages */
+export const SECTION_INCOMPLETE_TOAST = '本章内容不完整，无法确认下一章';
+
 // ============ Types ============
 
 /** Load source type */
@@ -51,6 +54,8 @@ export interface SectionMergeRecord {
   convertedMode: ConversionMode;
   /** Source script the appended deltas were converted with */
   convertedScript?: ChineseScript;
+  /** Serialises this merge's writes; see `queueMergeWrite` */
+  queue: Promise<unknown>;
   viewId: number;
 }
 
@@ -61,6 +66,8 @@ export interface ChapterEntry {
   id: string; // unique ID for Vue key
   /** Present only while more section pages are still being merged into `chapter` */
   sectionProgress?: SectionProgressState;
+  /** Set once a merge ended without every page, so the chapter is known to be short */
+  sectionsIncomplete?: boolean;
 }
 
 /** Table of contents entry */

@@ -65,6 +65,17 @@ describe('chapterLoadGuards', () => {
     expect(ctx.showToast).toHaveBeenCalledWith('本章正在加载后续内容，请稍候', 'info');
   });
 
+  it('reports an incomplete chapter rather than the end of the book', () => {
+    const entry: ChapterEntry = {
+      ...makeEntry({ nextUrl: '' }),
+      sectionsIncomplete: true,
+    };
+    const ctx = createContext({ chapters: [entry] });
+
+    expect(prepareChapterLoad(ctx, 'next', 'manual')).toBeNull();
+    expect(ctx.showToast).toHaveBeenCalledWith('本章内容不完整，无法确认下一章', 'info');
+  });
+
   it('still reports the end of the book when nothing is merging', () => {
     const ctx = createContext({ chapter: { nextUrl: '' } });
 

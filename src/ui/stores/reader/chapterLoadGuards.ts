@@ -1,6 +1,6 @@
 import type { ChapterEntry, LoadSource } from './types';
 import { normalizeUrl, normalizeUrlForBlock, normalizeUrlForFetch } from './utils';
-import { SECTION_MERGING_TOAST, VIP_BLOCK_TOAST } from './types';
+import { SECTION_INCOMPLETE_TOAST, SECTION_MERGING_TOAST, VIP_BLOCK_TOAST } from './types';
 import {
   shouldPersistNavigationBlock,
   shouldUseNavigationFailureCooldown,
@@ -25,6 +25,13 @@ export interface PreparedChapterLoad {
   targetUrl: string;
 }
 
+/** An end-of-book claim is only honest once the boundary chapter has all of its pages. */
+function boundaryMessage(refChapter: ChapterEntry | undefined, endMessage: string): string {
+  if (refChapter?.sectionProgress) return SECTION_MERGING_TOAST;
+  if (refChapter?.sectionsIncomplete) return SECTION_INCOMPLETE_TOAST;
+  return endMessage;
+}
+
 export function prepareChapterLoad(
   ctx: NavigationContext,
   direction: 'next' | 'prev',
@@ -47,7 +54,7 @@ export function prepareChapterLoad(
   if (!rawTargetUrl || !refChapter) {
     if (source === 'manual') {
       // A merging chapter withholds its next URL, so an end-of-book claim would be wrong.
-      ctx.showToast(refChapter?.sectionProgress ? SECTION_MERGING_TOAST : endMessage, 'info');
+      ctx.showToast(boundaryMessage(refChapter, endMessage), 'info');
     }
     return null;
   }

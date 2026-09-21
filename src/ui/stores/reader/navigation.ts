@@ -360,6 +360,7 @@ export function createNavigation(ctx: NavigationContext) {
 
       current.chapter = parsed;
       current.rule = parsed.rule || current.rule;
+      delete current.sectionsIncomplete;
       ctx.originalContents.value.set(current.id, parsed.content);
       ctx.originalTitles.value.set(current.id, {
         title: parsed.title,

@@ -46,6 +46,26 @@ export function createSectionMergeSink(ctx: NavigationContext): SectionMergeSink
   };
 }
 
+/**
+ * Run one write for a merge, after every write already queued against it.
+ *
+ * Appending converts HTML and therefore yields. The queue belongs to the merge rather than to
+ * any one caller: a completion slipping in mid-append would drop the record, the resuming
+ * append would then find itself disowned, and with an unchanged source script nothing
+ * afterwards rewrites the content -- that page would be missing from the screen for good.
+ */
+function queueMergeWrite(
+  merge: SectionMergeRecord,
+  task: () => Promise<boolean>
+): Promise<boolean> {
+  const run = merge.queue.then(task, task);
+  merge.queue = run.then(
+    () => undefined,
+    () => undefined
+  );
+  return run;
+}
+
 /** Resolve the entry a merge still owns, or null once it was cancelled or trimmed away. */
 function findMergingEntry(
   ctx: NavigationContext,
@@ -72,10 +92,12 @@ export function beginChapterSections(
   if (!entry) return false;
 
   entry.sectionProgress = { ...progress };
+  delete entry.sectionsIncomplete;
   ctx.sectionMerges.value.set(entryId, {
     abort,
     convertedMode: ctx.currentConversionMode.value,
     convertedScript: entry.chapter.sourceScript,
+    queue: Promise.resolve(),
     viewId: ctx.runtime.viewId(),
   });
 
@@ -97,13 +119,22 @@ export function beginChapterSections(
  * Returns false once the merge was cancelled or its entry is gone; the merge itself keeps
  * running, so its completion can still populate the session cache.
  */
-export async function appendChapterSection(
+export function appendChapterSection(
   ctx: NavigationContext,
   entryId: string,
   delta: SectionAppendDelta
 ): Promise<boolean> {
   const merge = ctx.sectionMerges.value.get(entryId);
-  if (!merge) return false;
+  if (!merge) return Promise.resolve(false);
+  return queueMergeWrite(merge, () => appendSectionPage(ctx, entryId, merge, delta));
+}
+
+async function appendSectionPage(
+  ctx: NavigationContext,
+  entryId: string,
+  merge: SectionMergeRecord,
+  delta: SectionAppendDelta
+): Promise<boolean> {
   const entry = findMergingEntry(ctx, entryId, merge);
   if (!entry) return false;
 
@@ -159,7 +190,7 @@ export async function appendChapterSection(
  * Only an untruncated chapter is cached: a partial one would be indistinguishable from a
  * complete chapter on the next visit.
  */
-export async function completeChapterSections(
+export function completeChapterSections(
   ctx: NavigationContext,
   entryId: string,
   chapter: ParsedChapter,
@@ -167,7 +198,22 @@ export async function completeChapterSections(
   info: { truncated?: boolean } = {}
 ): Promise<boolean> {
   const merge = ctx.sectionMerges.value.get(entryId);
-  if (!merge) return false;
+  if (!merge) return Promise.resolve(false);
+  return queueMergeWrite(merge, () =>
+    finishChapterSections(ctx, entryId, merge, chapter, rule, info)
+  );
+}
+
+async function finishChapterSections(
+  ctx: NavigationContext,
+  entryId: string,
+  merge: SectionMergeRecord,
+  chapter: ParsedChapter,
+  rule: SiteRule | undefined,
+  info: { truncated?: boolean }
+): Promise<boolean> {
+  // A cancellation can land while this write waits its turn.
+  if (ctx.sectionMerges.value.get(entryId) !== merge) return false;
   ctx.sectionMerges.value.delete(entryId);
 
   const url = normalizeUrlForFetch(chapter.url);
@@ -211,6 +257,10 @@ export async function completeChapterSections(
     sourceScript: merged.sourceScript,
   };
   delete entry.sectionProgress;
+  // A short chapter must keep saying so: its next-chapter URL may never have been found, and
+  // silently dropping the marker would let the reader be told the book had ended.
+  if (info.truncated) entry.sectionsIncomplete = true;
+  else delete entry.sectionsIncomplete;
 
   await reconcileMergedConversion(ctx, entryId, entry, merged, merge.convertedScript);
 
@@ -255,7 +305,12 @@ export function cancelChapterSections(
   merge.abort();
 
   const entry = ctx.chapters.value.find(item => item.id === entryId);
-  if (entry) delete entry.sectionProgress;
+  if (entry) {
+    delete entry.sectionProgress;
+    // A failed merge leaves the chapter short of pages it was owed; only a deliberate
+    // teardown means the chapter is being discarded anyway.
+    if (reason === 'failed') entry.sectionsIncomplete = true;
+  }
 
   recordDebugEvent('reader.sectionMerge.cancel', { entryId, reason });
   if (reason === 'failed') ctx.showToast('本章后续内容加载失败', 'info', 2500);
