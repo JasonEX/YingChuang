@@ -891,11 +891,13 @@ watch(
   cursor: pointer;
 }
 
-.mnr-close-btn:hover,
-.mnr-secondary-action:hover,
-.mnr-segment:hover,
-.mnr-exit-btn:hover {
-  background: var(--mnr-border, #f0f0f0);
+@media (hover: hover) {
+  .mnr-close-btn:hover,
+  .mnr-secondary-action:enabled:hover,
+  .mnr-segment:not(.active):hover,
+  .mnr-exit-btn:hover {
+    background: var(--mnr-border, #f0f0f0);
+  }
 }
 
 .mnr-settings-header h3:focus-visible,

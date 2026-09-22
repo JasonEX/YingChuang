@@ -2649,3 +2649,117 @@ test('novels failed preparation preserves the host and allows manual recovery an
   await expect(page.locator('#article')).toBeVisible();
   await expect(entry).toBeVisible();
 });
+
+for (const touch of [false, true]) {
+  test.describe(`UI state colors (${touch ? 'touch' : 'mouse'})`, () => {
+    test.use({
+      viewport: { width: touch ? 390 : 1280, height: 844 },
+      isMobile: touch,
+      hasTouch: touch,
+    });
+
+    test('preserves selection and disabled appearance across hover and panel transitions', async ({
+      page,
+      context,
+    }) => {
+      await context.route(targetUrl, route =>
+        route.fulfill({
+          contentType: 'text/html; charset=utf-8',
+          body: fixtureHtml
+            .replace(
+              '<head>',
+              '<head><meta name="viewport" content="width=device-width,initial-scale=1">'
+            )
+            .replace('<a href="/chapter/101.html">下一章</a>', ''),
+        })
+      );
+      let releaseCatalog!: () => void;
+      const catalogReady = new Promise<void>(resolve => {
+        releaseCatalog = resolve;
+      });
+      await context.route('http://mnr.test/book/1/index.html', async route => {
+        await catalogReady;
+        await route.fulfill({
+          contentType: 'text/html; charset=utf-8',
+          body: `<main>${tocLinks}</main>`,
+        });
+      });
+      const appearance = (locator: Locator) =>
+        locator.evaluate(element => {
+          const style = getComputedStyle(element);
+          return { background: style.backgroundColor, color: style.color, filter: style.filter };
+        });
+      const activate = (locator: Locator) => (touch ? locator.tap() : locator.click());
+      await addYingChuangUserscript(context);
+      await page.goto(targetUrl);
+      await waitForMnrReader(page);
+      const root = page.locator('#mnr-reader-root');
+      await activate(root.getByRole('button', { name: '打开设置', exact: true }));
+      const panel = root.locator('.mnr-settings-panel');
+      const conversion = panel.locator('fieldset').filter({ hasText: '简繁转换' });
+      const simplified = conversion.getByRole('button', { name: '简体', exact: true });
+      for (const theme of ['跟随系统', '明亮', '米黄', '绿色', '蓝色', '深色']) {
+        await activate(panel.getByRole('button', { name: theme, exact: true }));
+        await activate(simplified);
+        await expect(simplified).toHaveAttribute('aria-pressed', 'true');
+        const selected = await appearance(simplified);
+        await simplified.hover();
+        expect(await appearance(simplified)).toEqual(selected);
+        // Check the theme's actual selected colors, not merely its reactive class.
+        const selectedColor = await panel
+          .locator('.mnr-theme-btn.active')
+          .evaluate(element => getComputedStyle(element).borderColor);
+        await expect(simplified).toHaveCSS('background-color', selectedColor);
+        await expect(simplified).toHaveCSS(
+          'color',
+          theme === '深色' ? 'rgb(17, 17, 17)' : 'rgb(255, 255, 255)'
+        );
+      }
+      await panel.locator('summary').filter({ hasText: '本站与高级' }).click();
+      const aggressive = panel.getByRole('button', { name: '强力', exact: true });
+      await activate(aggressive);
+      await expect(aggressive).toHaveAttribute('aria-pressed', 'true');
+      await page.mouse.move(0, 0);
+      const selectedProtection = await appearance(aggressive);
+      await aggressive.hover();
+      expect(await appearance(aggressive)).toEqual(selectedProtection);
+      const add = panel.getByRole('button', { name: '添加规则', exact: true });
+      await expect(add).toBeDisabled();
+      const disabled = await appearance(add);
+      await add.hover();
+      expect(await appearance(add)).toEqual(disabled);
+      const reset = panel.getByRole('button', { name: '恢复默认外观', exact: true });
+      const idle = await appearance(reset);
+      await reset.hover();
+      if (touch) expect(await appearance(reset)).toEqual(idle);
+      else expect((await appearance(reset)).background).not.toBe(idle.background);
+      await panel.getByRole('button', { name: '退出阅读模式', exact: true }).focus();
+      await page.keyboard.press('Tab');
+      await expect(panel.getByRole('button', { name: '关闭设置', exact: true })).toBeFocused();
+      await page.keyboard.press('Escape');
+      await expect(panel).toHaveCount(0);
+      await expect(root.getByRole('button', { name: '打开设置', exact: true })).toBeFocused();
+      await activate(root.getByRole('button', { name: '打开目录', exact: true }));
+      const drawer = root.locator('.mnr-drawer');
+      const cache = drawer.getByRole('button', { name: '缓存本书', exact: true });
+      try {
+        await expect(cache).toBeDisabled();
+        const loading = await appearance(cache);
+        await cache.hover();
+        expect(await appearance(cache)).toEqual(loading);
+      } finally {
+        releaseCatalog();
+      }
+      await expect(cache).toBeEnabled();
+      const current = drawer.locator('[aria-current="page"]');
+      await expect(current).toBeVisible();
+      await page.mouse.move(0, 0);
+      const selectedChapter = await appearance(current);
+      await current.hover();
+      expect(await appearance(current)).toEqual(selectedChapter);
+      await page.keyboard.press('Escape');
+      await expect(drawer).toHaveAttribute('inert', '');
+      await expect(root.locator('.mnr-reader-main')).not.toHaveAttribute('inert');
+    });
+  });
+}

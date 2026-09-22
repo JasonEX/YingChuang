@@ -565,15 +565,17 @@ watch(
   stroke-linejoin: round;
 }
 
-.mnr-drawer-close:hover,
-.mnr-chapter-button:hover,
-.mnr-offline-action:hover {
-  background: var(--mnr-border, #f0f0f0);
-}
+@media (hover: hover) {
+  .mnr-drawer-close:hover,
+  .mnr-chapter-button:not(.active):hover,
+  .mnr-offline-action:enabled:hover {
+    background: var(--mnr-border, #f0f0f0);
+  }
 
-.mnr-offline-action.primary:hover {
-  background: var(--mnr-link, #1976d2);
-  filter: brightness(0.94);
+  .mnr-offline-action.primary:enabled:hover {
+    background: var(--mnr-link, #1976d2);
+    filter: brightness(0.94);
+  }
 }
 
 .mnr-drawer-close:focus-visible,
