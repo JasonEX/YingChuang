@@ -95,6 +95,20 @@ describe('ChineseConverter', () => {
     );
   });
 
+  it.each(['unknown', 'mixed'] as const)(
+    'converts characters outside the detection alphabet for %s source',
+    async sourceScript => {
+      await expect(convertText('鐘聲響徹，燈籠搖曳。', 'sc', { sourceScript })).resolves.toBe(
+        '钟声响彻，灯笼摇曳。'
+      );
+      await expect(
+        convertHTML('<p>山間的風</p><p title="鐘聲">鐘聲響徹，燈籠搖曳。</p>', 'sc', {
+          sourceScript,
+        })
+      ).resolves.toBe('<p>山间的风</p><p title="鐘聲">钟声响彻，灯笼摇曳。</p>');
+    }
+  );
+
   it('convertText returns original text on converter error', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     tify.mockImplementationOnce(() => {
@@ -124,7 +138,7 @@ describe('ChineseConverter', () => {
     expect(createElementSpy).not.toHaveBeenCalled();
   });
 
-  it('converts marked nodes in mixed HTML without changing Simplified prose or attributes', async () => {
+  it('converts mixed HTML without changing Simplified prose or attributes', async () => {
     const html = '<p>搁这说我坏话是吧</p><p title="黒竜">黒竜看著著作，連忙走過乾涸的河床。</p>';
 
     await expect(convertHTML(html, 'sc', { sourceScript: 'mixed' })).resolves.toBe(

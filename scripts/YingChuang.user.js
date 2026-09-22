@@ -7483,7 +7483,6 @@
 	var HANS_PATTERN = new RegExp(`[${HANS_MARKERS}]`, "g");
 	var HANT_PATTERN = new RegExp(`[${HANT_MARKERS}]`, "g");
 	var JPAN_PATTERN = new RegExp(`[${JPAN_MARKERS}]`, "g");
-	var SIMPLIFIED_SOURCE_MARKER_PATTERN = new RegExp(`[${HANT_MARKERS}${JPAN_MARKERS}]`);
 	function scriptFromLocale(locale) {
 		const tag = locale.trim().toLowerCase().replace(/_/g, "-").split(";")[0];
 		if (!tag) return "unknown";
@@ -7528,9 +7527,6 @@
 		const max = Math.max(...scores.map(([, score]) => score));
 		if (max === 0) return "unknown";
 		return scores.reduce((script, [candidate, score]) => score >= max * .5 ? mergeScript(script, candidate) : script, "unknown");
-	}
-	function hasSimplifiedConversionMarkers(text) {
-		return SIMPLIFIED_SOURCE_MARKER_PATTERN.test(text);
 	}
 	function inferChineseScript(doc, contentText = "") {
 		let script = "unknown";
@@ -17758,18 +17754,13 @@ ul, ol {
 		}
 		return r;
 	}
-	function shouldSkipConversion(text, mode, options) {
+	function shouldSkipConversion(mode, options) {
 		const sourceScript = options.sourceScript || "unknown";
-		if (mode === "sc") {
-			if (sourceScript === "hans") return true;
-			if (sourceScript === "hant" || sourceScript === "jpan") return false;
-			return !hasSimplifiedConversionMarkers(text);
-		}
-		return sourceScript === "hant";
+		return mode === "sc" ? sourceScript === "hans" : sourceScript === "hant";
 	}
 	async function convertText(text, mode, options = {}) {
 		if (mode === "none" || !text) return text;
-		if (shouldSkipConversion(text, mode, options)) return text;
+		if (shouldSkipConversion(mode, options)) return text;
 		try {
 			return getConverter(mode)(text);
 		} catch (error) {
@@ -17779,21 +17770,16 @@ ul, ol {
 	}
 	async function convertHTML(html, mode, options = {}) {
 		if (mode === "none" || !html) return html;
-		if (shouldSkipConversion(html, mode, options)) return html;
+		if (shouldSkipConversion(mode, options)) return html;
 		try {
 			const converter = getConverter(mode);
-			const sourceScript = options.sourceScript || "unknown";
-			const convertMarkedNodesOnly = mode === "sc" && (sourceScript === "unknown" || sourceScript === "mixed");
 			const template = document.createElement("template");
 			template.innerHTML = html;
 			const walker = document.createTreeWalker(template.content, NodeFilter.SHOW_TEXT, null);
 			const textNodes = [];
 			let node;
 			while (node = walker.nextNode()) textNodes.push(node);
-			for (const textNode of textNodes) if (textNode.textContent) {
-				if (convertMarkedNodesOnly && !hasSimplifiedConversionMarkers(textNode.textContent)) continue;
-				textNode.textContent = converter(textNode.textContent);
-			}
+			for (const textNode of textNodes) if (textNode.textContent) textNode.textContent = converter(textNode.textContent);
 			return template.innerHTML;
 		} catch (error) {
 			console.error("[ChineseConverter] HTML conversion error:", error);

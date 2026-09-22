@@ -11,7 +11,6 @@ const JPAN_MARKERS =
 const HANS_PATTERN = new RegExp(`[${HANS_MARKERS}]`, 'g');
 const HANT_PATTERN = new RegExp(`[${HANT_MARKERS}]`, 'g');
 const JPAN_PATTERN = new RegExp(`[${JPAN_MARKERS}]`, 'g');
-const SIMPLIFIED_SOURCE_MARKER_PATTERN = new RegExp(`[${HANT_MARKERS}${JPAN_MARKERS}]`);
 
 function scriptFromLocale(locale: string): ChineseScript {
   const tag = locale.trim().toLowerCase().replace(/_/g, '-').split(';')[0];
@@ -79,10 +78,6 @@ export function detectChineseScriptFromText(text: string): ChineseScript {
     (script, [candidate, score]) => (score >= max * 0.5 ? mergeScript(script, candidate) : script),
     'unknown'
   );
-}
-
-export function hasSimplifiedConversionMarkers(text: string): boolean {
-  return SIMPLIFIED_SOURCE_MARKER_PATTERN.test(text);
 }
 
 export function inferChineseScript(doc: Document, contentText = ''): ChineseScript {

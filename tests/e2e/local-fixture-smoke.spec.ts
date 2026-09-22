@@ -2763,3 +2763,59 @@ for (const touch of [false, true]) {
     });
   });
 }
+
+for (const lang of ['', 'zh-CN', 'zh-TW']) {
+  test(`conversion preserves source semantics and converts mixed prose: locale "${lang}"`, async ({
+    page,
+    context,
+  }) => {
+    const traditional = '鐘聲響徹，燈籠搖曳。';
+    const simplified = '钟声响彻，灯笼摇曳。';
+    const sourceTitle = lang === 'zh-CN' ? simplified : traditional;
+    const sourceParagraph =
+      lang === 'zh-CN'
+        ? '搁这说我坏话是吧。山间的风吹过树林，他沿着熟悉的小路慢慢向前走去。'
+        : '山間的風吹過樹林，他沿著熟悉的小路慢慢向前走去。';
+    await context.route('http://mnr.test/**', route =>
+      route.fulfill({
+        contentType: 'text/html; charset=utf-8',
+        body: route.request().url().endsWith('/book/index.html')
+          ? `<main><a href="/chapter/100.html">第一章 ${sourceTitle}</a></main>`
+          : `<html lang="${lang}"><head><title>第一章 ${sourceTitle}</title></head><body>
+              <h1>第一章 ${sourceTitle}</h1><div id="content">
+              ${`<p>${sourceParagraph}</p>${lang ? '' : '<p>山间的风吹过树林，他沿着熟悉的小路慢慢向前走去。</p>'}`.repeat(40)}
+              <p>${sourceTitle}</p></div><nav>
+              <a href="/chapter/99.html">上一章</a><a href="/book/index.html">目录</a>
+              <a href="/chapter/101.html">下一章</a></nav></body></html>`,
+      })
+    );
+    await addYingChuangUserscript(context);
+    await page.goto(targetUrl);
+    await waitForMnrReader(page);
+    const root = page.locator('#mnr-reader-root');
+    const content = root.locator('.mnr-reader-content').first();
+    const originalHtml = await content.innerHTML();
+    await root.getByRole('button', { name: '打开目录', exact: true }).click();
+    await expect(root.locator('.mnr-chapter-button').first()).toContainText(sourceTitle);
+    await root.getByRole('button', { name: '关闭目录', exact: true }).click();
+    await root.getByRole('button', { name: '打开设置', exact: true }).click();
+    await root.getByRole('button', { name: '简体', exact: true }).click();
+    await expect(content).toContainText(simplified);
+    await expect(root.locator('.mnr-chapter-title').first()).toContainText(simplified);
+    await expect(content).not.toContainText('山間的風');
+    if (lang === 'zh-CN') {
+      await expect(content).toHaveJSProperty('innerHTML', originalHtml);
+      await expect(content).toContainText('搁这说我坏话是吧');
+    }
+    await root.getByRole('button', { name: '关闭设置', exact: true }).click();
+    await root.getByRole('button', { name: '打开目录', exact: true }).click();
+    await expect(root.locator('.mnr-chapter-button').first()).toContainText(simplified);
+    await root.getByRole('button', { name: '关闭目录', exact: true }).click();
+    await root.getByRole('button', { name: '打开设置', exact: true }).click();
+    await root.getByRole('button', { name: '繁體', exact: true }).click();
+    await expect(content).toContainText(traditional);
+    await expect(content).not.toContainText('山间的风');
+    await root.getByRole('button', { name: '原文', exact: true }).click();
+    await expect(content).toHaveJSProperty('innerHTML', originalHtml);
+  });
+}

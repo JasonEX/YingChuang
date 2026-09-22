@@ -4,8 +4,8 @@
  * Traditional/variant/Japanese-shinjitai -> Simplified conversion.
  */
 
-import { type ChineseScript, hasSimplifiedConversionMarkers } from '@/core/converter/scriptProfile';
 import { ConverterFactory, type ConverterFunction } from 'opencc-js/core';
+import type { ChineseScript } from '@/core/converter/scriptProfile';
 import cjkCompatibility from 'opencc-js/dict/CJK_Compatibility_Ideographs';
 import { tify } from 'chinese-conv';
 import traditionalToSimplified from 'opencc-js/to/cn';
@@ -171,19 +171,14 @@ function getConverter(mode: Exclude<ConversionMode, 'none'>): ConverterFunction 
 }
 
 function shouldSkipConversion(
-  text: string,
   mode: Exclude<ConversionMode, 'none'>,
   options: ConversionOptions
 ): boolean {
   const sourceScript = options.sourceScript || 'unknown';
 
-  if (mode === 'sc') {
-    if (sourceScript === 'hans') return true;
-    if (sourceScript === 'hant' || sourceScript === 'jpan') return false;
-    return !hasSimplifiedConversionMarkers(text);
-  }
-
-  return sourceScript === 'hant';
+  // Preserve known target-script prose: conversion can alter valid same-script words.
+  // Unknown/mixed sources must be converted; detection markers are not a complete alphabet.
+  return mode === 'sc' ? sourceScript === 'hans' : sourceScript === 'hant';
 }
 
 /**
@@ -198,7 +193,7 @@ export async function convertText(
     return text;
   }
 
-  if (shouldSkipConversion(text, mode, options)) {
+  if (shouldSkipConversion(mode, options)) {
     return text;
   }
 
@@ -224,15 +219,12 @@ export async function convertHTML(
     return html;
   }
 
-  if (shouldSkipConversion(html, mode, options)) {
+  if (shouldSkipConversion(mode, options)) {
     return html;
   }
 
   try {
     const converter = getConverter(mode);
-    const sourceScript = options.sourceScript || 'unknown';
-    const convertMarkedNodesOnly =
-      mode === 'sc' && (sourceScript === 'unknown' || sourceScript === 'mixed');
 
     // Parse HTML and convert text nodes only
     const template = document.createElement('template');
@@ -249,9 +241,6 @@ export async function convertHTML(
     // Convert all text nodes
     for (const textNode of textNodes) {
       if (textNode.textContent) {
-        if (convertMarkedNodesOnly && !hasSimplifiedConversionMarkers(textNode.textContent)) {
-          continue;
-        }
         textNode.textContent = converter(textNode.textContent);
       }
     }
