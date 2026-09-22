@@ -28,12 +28,12 @@ import {
 } from './chapterListMutations';
 import { MAX_NAV_FAILURES, MAX_SESSION_CACHE, VIP_BLOCK_TOAST } from './types';
 import { normalizeUrl, normalizeUrlForBlock, normalizeUrlForFetch } from './utils';
-import { prepareChapterLoad, validateTargetChapterUrl } from './chapterLoadGuards';
 import { detectTocPage } from './detection';
 import { fetchAndParseUrl } from '@/core/utils/network';
 import { getChapterDocumentBlockReason } from '@/core/detection';
 import type { NavigationContext } from './navigationContext';
 import { parseWithSectionMerge } from './section';
+import { prepareChapterLoad } from './chapterLoadGuards';
 import { recordDebugEvent } from '@/core/debug/events';
 import { shouldPersistNavigationBlock } from './navigationPolicy';
 import type { SiteRule } from '@/core/rules/types';
@@ -71,11 +71,6 @@ export function createNavigation(ctx: NavigationContext) {
       if (load.pendingAbortRef.value) {
         load.pendingAbortRef.value();
         load.pendingAbortRef.value = null;
-      }
-
-      if (!validateTargetChapterUrl(ctx, load, source)) {
-        outcome = 'invalid-url';
-        return false;
       }
 
       const referer = load.refChapter.chapter.url;
@@ -184,6 +179,9 @@ export function createNavigation(ctx: NavigationContext) {
         outcome = 'toc';
         if (shouldPersistNavigationBlock(source)) {
           ctx.blockedNavUrls.value.add(load.navKey);
+        } else {
+          // A preload cannot conclude the book ended; it backs off like any failed preload.
+          recordNavFailure(ctx.navFailures, load.navKey, { maxFailures: MAX_NAV_FAILURES });
         }
         if (source === 'manual') {
           ctx.showToast(load.endMessage, 'info');

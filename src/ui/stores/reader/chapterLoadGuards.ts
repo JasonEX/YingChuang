@@ -1,10 +1,7 @@
 import type { ChapterEntry, LoadSource } from './types';
 import { normalizeUrl, normalizeUrlForBlock, normalizeUrlForFetch } from './utils';
 import { SECTION_INCOMPLETE_TOAST, SECTION_MERGING_TOAST, VIP_BLOCK_TOAST } from './types';
-import {
-  shouldPersistNavigationBlock,
-  shouldUseNavigationFailureCooldown,
-} from './navigationPolicy';
+import { shouldUseNavigationFailureCooldown } from './navigationPolicy';
 
 import { isInvalidChapterUrl } from './detection';
 import type { NavigationContext } from './navigationContext';
@@ -23,6 +20,21 @@ export interface PreparedChapterLoad {
   /** Set once a progressive merge hands back its handle; not reactive state. */
   sectionMerge: PendingSectionMerge | null;
   targetUrl: string;
+}
+
+function isBookIndexUrl(targetUrl: string, refChapter: ChapterEntry): boolean {
+  const indexUrl = refChapter.chapter.indexUrl;
+  return !!indexUrl && normalizeUrl(normalizeUrlForFetch(targetUrl)) === normalizeUrl(indexUrl);
+}
+
+/**
+ * A link that can only leave the book: its index page, or a URL that cannot be a chapter.
+ * These are URL facts, so the reader knows a boundary is final without fetching anything.
+ */
+export function leadsOutOfBook(targetUrl: string, refChapter: ChapterEntry): boolean {
+  return (
+    isBookIndexUrl(targetUrl, refChapter) || isInvalidChapterUrl(targetUrl, refChapter.chapter.url)
+  );
 }
 
 /** An end-of-book claim is only honest once the boundary chapter has all of its pages. */
@@ -68,13 +80,8 @@ export function prepareChapterLoad(
     }
   }
 
-  if (
-    refChapter.chapter.indexUrl &&
-    normalizeUrl(targetUrl) === normalizeUrl(refChapter.chapter.indexUrl)
-  ) {
-    if (shouldPersistNavigationBlock(source)) {
-      ctx.blockedNavUrls.value.add(normalizeUrlForBlock(targetUrl));
-    }
+  // hasNext/hasPrev derive this from the URL as well, so no block needs recording.
+  if (leadsOutOfBook(targetUrl, refChapter)) {
     if (source === 'manual') {
       ctx.showToast(endMessage, 'info');
     }
@@ -115,23 +122,4 @@ export function prepareChapterLoad(
     sectionMerge: null,
     targetUrl,
   };
-}
-
-export function validateTargetChapterUrl(
-  ctx: NavigationContext,
-  load: PreparedChapterLoad,
-  source: LoadSource
-): boolean {
-  if (!isInvalidChapterUrl(load.targetUrl, load.refChapter.chapter.url)) {
-    return true;
-  }
-
-  load.isLoadingRef.value = false;
-  if (shouldPersistNavigationBlock(source)) {
-    ctx.blockedNavUrls.value.add(load.navKey);
-  }
-  if (source === 'manual') {
-    ctx.showToast(load.endMessage, 'info');
-  }
-  return false;
 }

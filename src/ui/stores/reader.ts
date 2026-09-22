@@ -42,6 +42,7 @@ import { createCacheAll } from './reader/cacheAll';
 import { createChapterEntryId } from './reader/types';
 import { createNavigation } from './reader/navigation';
 import { createReaderRuntime } from './reader/runtime';
+import { leadsOutOfBook } from './reader/chapterLoadGuards';
 import { syncHostPageToChapter } from './reader/hostPage';
 
 // Re-export reader types used by UI modules.
@@ -129,14 +130,14 @@ export const useReaderStore = defineStore('reader', () => {
   const hasNext = computed(() => {
     const lastChapter = chapters.value[chapters.value.length - 1];
     const nextUrl = lastChapter?.chapter.nextUrl;
-    if (!nextUrl) return false;
+    if (!nextUrl || leadsOutOfBook(nextUrl, lastChapter)) return false;
     if (blockedNavUrls.value.has(normalizeUrlForBlock(nextUrl))) return false;
     return !isVipBlockedUrl(nextUrl);
   });
   const hasPrev = computed(() => {
     const firstChapter = chapters.value[0];
     const prevUrl = firstChapter?.chapter.prevUrl;
-    if (!prevUrl) return false;
+    if (!prevUrl || leadsOutOfBook(prevUrl, firstChapter)) return false;
     if (blockedNavUrls.value.has(normalizeUrlForBlock(prevUrl))) return false;
     return !isVipBlockedUrl(prevUrl);
   });

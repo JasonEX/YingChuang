@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ref } from 'vue';
 
-import { prepareChapterLoad, validateTargetChapterUrl } from '@/ui/stores/reader/chapterLoadGuards';
+import { leadsOutOfBook, prepareChapterLoad } from '@/ui/stores/reader/chapterLoadGuards';
 import type { ChapterEntry } from '@/ui/stores/reader/types';
 import type { NavigationContext } from '@/ui/stores/reader/navigationContext';
 
@@ -114,13 +114,15 @@ describe('chapterLoadGuards', () => {
   });
 
   it('blocks index, VIP, known blocked, auto recent failure, and already loaded targets', () => {
+    // The index is a URL fact that availability derives too, so nothing is recorded.
     const indexCtx = createContext({ chapter: { nextUrl: 'https://example.com/book/' } });
     expect(prepareChapterLoad(indexCtx, 'next', 'manual')).toBeNull();
-    expect(indexCtx.blockedNavUrls.value.has('https://example.com/book')).toBe(true);
+    expect(indexCtx.showToast).toHaveBeenCalledWith('已经是最后一章了', 'info');
+    expect(indexCtx.blockedNavUrls.value.size).toBe(0);
 
     const autoIndexCtx = createContext({ chapter: { nextUrl: 'https://example.com/book/' } });
     expect(prepareChapterLoad(autoIndexCtx, 'next', 'auto')).toBeNull();
-    expect(autoIndexCtx.blockedNavUrls.value.has('https://example.com/book')).toBe(false);
+    expect(autoIndexCtx.showToast).not.toHaveBeenCalled();
 
     const vipCtx = createContext({
       vipBlockedUrls: new Set(['https://example.com/book/2.html']),
@@ -159,30 +161,25 @@ describe('chapterLoadGuards', () => {
     expect(prepareChapterLoad(loadedCtx, 'next', 'auto')).toBeNull();
   });
 
-  it('validates candidate target URLs and reports manual invalid targets', () => {
-    const ctx = createContext();
-    const load = prepareChapterLoad(ctx, 'next', 'manual');
-    expect(load).not.toBeNull();
-    expect(validateTargetChapterUrl(ctx, load!, 'manual')).toBe(true);
+  it('refuses targets that lead out of the book, reporting only manual attempts', () => {
+    expect(prepareChapterLoad(createContext(), 'next', 'manual')).not.toBeNull();
 
     const invalidCtx = createContext({ chapter: { nextUrl: 'https://example.com/' } });
-    const invalidLoad = prepareChapterLoad(invalidCtx, 'next', 'manual');
-    expect(invalidLoad).not.toBeNull();
-    invalidLoad!.isLoadingRef.value = true;
-
-    expect(validateTargetChapterUrl(invalidCtx, invalidLoad!, 'manual')).toBe(false);
-    expect(invalidLoad!.isLoadingRef.value).toBe(false);
-    expect(invalidCtx.blockedNavUrls.value.has('https://example.com')).toBe(true);
+    expect(prepareChapterLoad(invalidCtx, 'next', 'manual')).toBeNull();
+    expect(invalidCtx.isLoadingNext.value).toBe(false);
     expect(invalidCtx.showToast).toHaveBeenCalledWith('已经是最后一章了', 'info');
+    expect(invalidCtx.blockedNavUrls.value.size).toBe(0);
 
     const autoInvalidCtx = createContext({ chapter: { nextUrl: 'https://example.com/' } });
-    const autoInvalidLoad = prepareChapterLoad(autoInvalidCtx, 'next', 'auto');
-    expect(autoInvalidLoad).not.toBeNull();
-    autoInvalidLoad!.isLoadingRef.value = true;
-
-    expect(validateTargetChapterUrl(autoInvalidCtx, autoInvalidLoad!, 'auto')).toBe(false);
-    expect(autoInvalidLoad!.isLoadingRef.value).toBe(false);
-    expect(autoInvalidCtx.blockedNavUrls.value.has('https://example.com')).toBe(false);
+    expect(prepareChapterLoad(autoInvalidCtx, 'next', 'auto')).toBeNull();
     expect(autoInvalidCtx.showToast).not.toHaveBeenCalled();
+  });
+
+  it('treats the book index and non-chapter URLs as leading out of the book', () => {
+    // A book page that no URL heuristic flags is still the end once it is the index.
+    const entry = makeEntry({ indexUrl: 'https://example.com/info/7.html' });
+    expect(leadsOutOfBook('https://example.com/book/2.html', entry)).toBe(false);
+    expect(leadsOutOfBook('https://example.com/info/7.html#top', entry)).toBe(true);
+    expect(leadsOutOfBook('https://example.com/', entry)).toBe(true);
   });
 });

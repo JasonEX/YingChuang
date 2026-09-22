@@ -58,6 +58,32 @@ describe('ReaderStore - navigation & toast', () => {
     store.clearError();
   });
 
+  it('ends the book at boundary links to the index or a non-chapter page', async () => {
+    const store = useReaderStore();
+    store.setChapter({
+      title: '第1章',
+      content: '<p>init</p>',
+      rawContent: '<p>init</p>',
+      url: 'https://example.com/book/1/1.html',
+      indexUrl: 'https://example.com/book/1/',
+      prevUrl: 'https://example.com/',
+      nextUrl: 'https://example.com/book/1/',
+      confidence: 1,
+      method: 'rule',
+    });
+
+    // URL facts settle availability at once; nothing waits for a load to discover them.
+    expect(store.hasNext).toBe(false);
+    expect(store.hasPrev).toBe(false);
+    expect(await store.loadNextChapter('auto')).toBe(false);
+    expect(store.isLoadingNext).toBe(false);
+    expect(store.error).toBeNull();
+    expect(await store.loadNextChapter('manual')).toBe(false);
+    expect(store.error).toBe('已经是最后一章了');
+
+    store.clearError();
+  });
+
   it('setError auto-dismisses after 3 seconds', () => {
     vi.useFakeTimers();
 

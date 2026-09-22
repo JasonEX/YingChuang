@@ -111,7 +111,7 @@
         "
         class="mnr-chapter-end"
       >
-        <p class="mnr-chapter-end-text">— 已是最后一章 —</p>
+        <p class="mnr-chapter-end-text">— {{ endOfListText }} —</p>
         <div class="mnr-chapter-nav">
           <a
             v-if="readerStore.chapter?.indexUrl"
@@ -221,6 +221,8 @@ const compiledCustomParagraphFilters = computed(() =>
 const customCleanupHostname = computed(
   () => getCustomParagraphFilterHostname(readerStore.chapter?.url) || ''
 );
+/** A paywalled next chapter is not the end of the book; say what the boundary toast says. */
+const endOfListText = computed(() => readerStore.getVipBlockedToast('next') ?? '已是最后一章');
 const displayChapters = computed(() => {
   const compiled = compiledCustomParagraphFilters.value;
   return readerStore.chapters.map(entry => ({

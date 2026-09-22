@@ -1222,6 +1222,10 @@ describe('ReaderStore - workflows', () => {
     expect(ok).toBe(false);
     expect(store.hasNext).toBe(true);
     expect(snapshot.navigation.blockedNavUrls.count).toBe(0);
+    // Without a block, the preload backs off rather than refetching the page at once.
+    expect(await store.loadNextChapter('auto')).toBe(false);
+    expect(mockFetchAndParseUrl).toHaveBeenCalledTimes(1);
+    expect(store.error).toBeNull();
   });
 
   it('persists a terminal block when manual next receives a TOC-like page', async () => {
