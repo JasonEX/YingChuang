@@ -16,6 +16,8 @@ export interface Theme {
   link: string;
   onLink: string;
   border: string;
+  /** Destructive actions and errors; readable on this theme's background. */
+  danger: string;
 }
 
 /** Reading settings */
@@ -78,6 +80,7 @@ export const THEMES: Theme[] = [
     link: '#2563a8',
     onLink: '#ffffff',
     border: '#d8d8d8',
+    danger: '#b3261e',
   },
   {
     id: 'light',
@@ -87,6 +90,7 @@ export const THEMES: Theme[] = [
     link: '#0066cc',
     onLink: '#ffffff',
     border: '#e5e5e5',
+    danger: '#b3261e',
   },
   {
     id: 'sepia',
@@ -96,6 +100,7 @@ export const THEMES: Theme[] = [
     link: '#7a4f26',
     onLink: '#ffffff',
     border: '#e8dcc8',
+    danger: '#b3261e',
   },
   {
     id: 'green',
@@ -105,6 +110,7 @@ export const THEMES: Theme[] = [
     link: '#2f6f3d',
     onLink: '#ffffff',
     border: '#c9ddc9',
+    danger: '#b3261e',
   },
   {
     id: 'blue',
@@ -114,6 +120,7 @@ export const THEMES: Theme[] = [
     link: '#2563a8',
     onLink: '#ffffff',
     border: '#c7d8e8',
+    danger: '#b3261e',
   },
   {
     id: 'dark',
@@ -123,6 +130,7 @@ export const THEMES: Theme[] = [
     link: '#78bdf2',
     onLink: '#111111',
     border: '#3a3a3a',
+    danger: '#f28b82',
   },
 ];
 
@@ -238,6 +246,7 @@ export const useConfigStore = defineStore('config', () => {
       '--mnr-link': t.link,
       '--mnr-on-link': t.onLink,
       '--mnr-border': t.border,
+      '--mnr-danger': t.danger,
     });
   }
 

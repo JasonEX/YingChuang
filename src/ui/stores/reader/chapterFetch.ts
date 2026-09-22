@@ -1,4 +1,4 @@
-import { MAX_NAV_FAILURES, VIP_BLOCK_TOAST } from './types';
+import { CLOUDFLARE_TOAST, MAX_NAV_FAILURES, VIP_BLOCK_TOAST } from './types';
 import type { ParsedChapter, Parser } from '@/core/parser';
 import { parseWithSectionMerge, startProgressiveSectionMerge } from './section';
 
@@ -178,7 +178,7 @@ export async function parseCandidateDocument(
       maxFailures: MAX_NAV_FAILURES,
     });
     if (source === 'manual' || count === 1) {
-      ctx.showToast('Cloudflare 验证页面，请在新标签页中完成验证后重试', 'info', 4000);
+      ctx.showToast(CLOUDFLARE_TOAST, 'info', 4000);
     }
     return 'blocked';
   }

@@ -313,7 +313,7 @@ export function createTocActions(ctx: TocActionContext) {
       diagnostic.entries = entries.length;
       diagnostic.outcome = entries.length ? 'complete' : 'empty';
       if (entries.length === 0) {
-        ctx.showToast('目录解析为空，可稍后重试或刷新页面', 'info', 2500);
+        ctx.showToast('目录解析为空，可稍后重试', 'info', 2500);
       }
     } catch (e) {
       if (!ctx.runtime.isSessionStale(runId)) {

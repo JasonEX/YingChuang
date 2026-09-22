@@ -182,7 +182,6 @@ function getPageSnapshot(): DebugJsonValue {
     pageFlags: getPageFlags(),
     mnrRoots: {
       readerRoot: Boolean(document.getElementById('mnr-reader-root')),
-      entryPromptRoot: Boolean(document.getElementById('mnr-entry-prompt-root')),
       readerEntryRoot: Boolean(document.getElementById('mnr-entry-root')),
       hideOriginalStyle: Boolean(document.getElementById('mnr-hide-original')),
     },
