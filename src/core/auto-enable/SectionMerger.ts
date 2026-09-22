@@ -16,6 +16,9 @@ import { getRuleManager } from '@/core/rules/RuleManager';
 import type { SiteRule } from '@/core/rules/types';
 
 const parseSectionUrl = (url: string) => getRuleManager().parseSectionUrl(url);
+// Reuse documents by site-declared identity while retaining the actual URL for requests.
+const getDocumentKey = (url: string, base: string) =>
+  getRuleManager().normalizeChapterUrl(normalizeAbsoluteUrl(url, base));
 
 /** Matches `(2/5)`, `（2/5）` and `(第2/5页)` section markers printed by site templates. */
 const SECTION_TOTAL_PATTERN = /[（(]\s*(?:第\s*)?(\d+)\s*[/／]\s*(\d+)\s*(?:页|頁)?\s*[）)]/;
@@ -200,7 +203,7 @@ export class SectionMerger {
 
     let startUrl = url;
     let startDoc = doc;
-    const knownDocs = new Map<string, Document>([[normalizeAbsoluteUrl(url, url), doc]]);
+    const knownDocs = new Map<string, Document>([[getDocumentKey(url, url), doc]]);
     const baseUrl = getSectionBaseUrl(url, parseSectionUrl);
 
     if (baseUrl && baseUrl !== url) {
@@ -209,7 +212,7 @@ export class SectionMerger {
       if (baseDoc) {
         startUrl = baseUrl;
         startDoc = baseDoc;
-        knownDocs.set(normalizeAbsoluteUrl(baseUrl, url), baseDoc);
+        knownDocs.set(getDocumentKey(baseUrl, url), baseDoc);
       }
     }
 
@@ -401,7 +404,7 @@ export class SectionMerger {
       mergedRaw: first.rawContent,
       nextSectionUrl: state.nextSectionUrl,
       nextChapterUrl: state.nextChapterUrl,
-      seen: new Set([normalizeAbsoluteUrl(startPage.url, startPage.url)]),
+      seen: new Set([getDocumentKey(startPage.url, startPage.url)]),
       remainingPages: Math.max(0, maxPages - 1),
       loadedPages: 1,
       sourceScript: first.sourceScript,
@@ -417,10 +420,11 @@ export class SectionMerger {
     if (signal?.aborted || !cursor.nextSectionUrl) return null;
 
     const url = normalizeAbsoluteUrl(cursor.nextSectionUrl, cursor.lastUrl);
-    if (cursor.seen.has(url)) return null;
-    cursor.seen.add(url);
+    const key = getDocumentKey(url, cursor.lastUrl);
+    if (cursor.seen.has(key)) return null;
+    cursor.seen.add(key);
 
-    const cachedDoc = knownDocs.get(url) ?? null;
+    const cachedDoc = knownDocs.get(key) ?? null;
     if (cachedDoc) {
       return { doc: cachedDoc, url, fromCache: true };
     }
@@ -428,7 +432,7 @@ export class SectionMerger {
     const doc = await this.fetchUrl(url, cursor.lastUrl, fetcher, signal);
     if (!doc) return null;
 
-    knownDocs.set(url, doc);
+    knownDocs.set(key, doc);
     return { doc, url, fromCache: false };
   }
 
@@ -445,7 +449,7 @@ export class SectionMerger {
     const doc = await this.fetchUrl(page.url, referrer, fetcher, signal);
     if (!doc) return null;
 
-    knownDocs.set(page.url, doc);
+    knownDocs.set(getDocumentKey(page.url, referrer), doc);
     page.doc = doc;
     parsed = await this.parser.parse(doc, page.url);
     return parsed;

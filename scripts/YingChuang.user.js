@@ -3,7 +3,7 @@
 // @name:zh-CN         萤窗
 // @name:zh-TW         螢窗
 // @namespace          https://github.com/JasonEX
-// @version            1.0.5
+// @version            1.0.6
 // @author             JasonEX
 // @description        萤窗：小说阅读脚本，智能正文识别、连续阅读、阅读位置恢复、简繁转换
 // @description:zh-CN  萤窗：小说阅读脚本，智能正文识别、连续阅读、阅读位置恢复、简繁转换
@@ -49,6 +49,7 @@
 // @match              *://xszj.org/*
 // @match              *://m.xszj.org/*
 // @match              *://m.kudushu.org/html/*/*
+// @match              *://www.novels.com.tw/novels/*
 // @match              *://*/*.php?*
 // @match              *://*/*_*.html
 // @match              *://*/book/*/*.html
@@ -4035,9 +4036,9 @@
 		}
 	};
 	var novel543_exports = __exportAll({ novel543Rule: () => novel543Rule });
-	var CHAPTER_URL = /^https?:\/\/(?:www\.)?novel543\.com(\/\d+\/\d+_\d+)(?:_(\d+))?\.html(?:[?#].*)?$/;
+	var CHAPTER_URL$1 = /^https?:\/\/(?:www\.)?novel543\.com(\/\d+\/\d+_\d+)(?:_(\d+))?\.html(?:[?#].*)?$/;
 	function parseNovel543Url(url) {
-		const match = url.match(CHAPTER_URL);
+		const match = url.match(CHAPTER_URL$1);
 		if (!match) return null;
 		const parsed = new URL(url);
 		parsed.pathname = `${match[1]}.html`;
@@ -4051,7 +4052,7 @@
 		id: "novel543",
 		name: "稷下書院",
 		version: 1,
-		match: { pattern: CHAPTER_URL.source },
+		match: { pattern: CHAPTER_URL$1.source },
 		content: {
 			selector: ".chapter-content > .content",
 			remove: ".adBlock, .gadBlock, [id^=div-onead-], div:has(> img[src=\"/images/vip.png\"]):has(> a[href$=\"/auth/govip.html\"]), div:has(> p img[src=\"/images/vip.png\"]):has(> a[href$=\"/auth/govip.html\"])"
@@ -4082,6 +4083,78 @@
 		meta: {
 			source: "builtin",
 			exampleUrl: "https://www.novel543.com/1019622989/8096_941.html"
+		}
+	};
+	var novels_exports = __exportAll({ novelsRule: () => novelsRule });
+	var CHAPTER_URL = /^https?:\/\/www\.novels\.com\.tw(\/novels\/[^/?#]+\/\d+)(?:_(\d+))?\.html(?:[?#].*)?$/;
+	function normalizeNovelsUrl(url) {
+		if (!CHAPTER_URL.test(url)) return null;
+		const parsed = new URL(url);
+		parsed.searchParams.delete("aid");
+		return parsed.href;
+	}
+	var novelsRule = {
+		id: "novels",
+		name: "繁體小說",
+		version: 1,
+		match: { pattern: CHAPTER_URL.source },
+		content: {
+			selector: "#article",
+			remove: ":scope > div, script, style, iframe, ins"
+		},
+		navigation: {
+			prev: "#prev_url",
+			next: "#next_url",
+			index: "#info_url"
+		},
+		title: {
+			selector: ".text_title h1",
+			replace: "\\s*[（(]\\d+\\s*/\\s*\\d+[）)]\\s*$",
+			bookSelector: ".text_info a:first-child"
+		},
+		advanced: {
+			checkSection: true,
+			sectionDelayMs: 1e3
+		},
+		hooks: {
+			normalizeChapterUrl: normalizeNovelsUrl,
+			parseSectionUrl: (url) => {
+				const match = url.match(CHAPTER_URL);
+				if (!match) return null;
+				const parsed = new URL(normalizeNovelsUrl(url));
+				parsed.pathname = `${match[1]}.html`;
+				parsed.hash = "";
+				return {
+					chapterUrl: parsed.href,
+					page: Number(match[2] || 1)
+				};
+			},
+			beforeParse: async (doc) => {
+				const article = doc.querySelector("#article");
+				const encoded = (article?.querySelector("#chapter-content script")?.textContent)?.match(/window\.encryptedContent\s*=\s*("(?:\\.|[^"\\])*")/);
+				if (article && encoded) {
+					const bytes = Uint8Array.from(atob(JSON.parse(encoded[1])), (c) => c.charCodeAt(0));
+					const key = await crypto.subtle.importKey("raw", new TextEncoder().encode("WZc0cbzgY3lhz3X6"), "AES-CBC", false, ["decrypt"]);
+					const decrypted = await crypto.subtle.decrypt({
+						name: "AES-CBC",
+						iv: new Uint8Array(16)
+					}, key, bytes);
+					let text = new TextDecoder().decode(decrypted);
+					const padding = text.charCodeAt(text.length - 1);
+					if (padding >= 1 && padding <= 16 && text.endsWith(String.fromCharCode(padding).repeat(padding))) text = text.slice(0, -padding);
+					if (/<[a-z][\s\S]*>/i.test(text)) article.innerHTML = text;
+					else article.replaceChildren(...text.split("\n").map((line) => {
+						const paragraph = doc.createElement("p");
+						paragraph.textContent = line;
+						return paragraph;
+					}));
+				}
+				for (const link of doc.querySelectorAll("#prev_url[data-real-href], #next_url[data-real-href], #info_url[data-real-href]")) link.setAttribute("href", link.getAttribute("data-real-href"));
+			}
+		},
+		meta: {
+			source: "builtin",
+			exampleUrl: "https://www.novels.com.tw/novels/no689ecf9c709950ae5cadd90cff89ffd6257bf537a60d904c9e6084f4aa2c12ca/199107755.html?aid=1092650"
 		}
 	};
 	var qidian_exports$1 = __exportAll({
@@ -4610,6 +4683,7 @@
 		"./hetushu.ts": hetushu_exports,
 		"./kudushu.ts": kudushu_exports,
 		"./novel543.ts": novel543_exports,
+		"./novels.ts": novels_exports,
 		"./qidian.ts": qidian_exports$1,
 		"./shu69.ts": shu69_exports,
 		"./sto9.ts": sto9_exports$1,
@@ -4859,6 +4933,7 @@
 			this.builtInRules = builtInRules;
 			this.compiledCache = new WeakMap();
 			this.sectionUrlParsers = this.builtInRules.flatMap((rule) => rule.hooks?.parseSectionUrl ? [rule.hooks.parseSectionUrl] : []);
+			this.chapterUrlNormalizers = this.builtInRules.flatMap((rule) => rule.hooks?.normalizeChapterUrl ? [rule.hooks.normalizeChapterUrl] : []);
 			this.entryResolvers = this.builtInRules.flatMap((rule) => rule.hooks?.resolveEntryUrl ? [rule.hooks.resolveEntryUrl] : []);
 			this.vipClassifiers = [...new Set(this.builtInRules.flatMap((rule) => rule.hooks?.isVipChapter ? [rule.hooks.isVipChapter] : []))];
 			this.parseSectionUrl = (url) => {
@@ -4875,6 +4950,13 @@
 				if (result !== null) return result;
 			}
 			return null;
+		}
+		normalizeChapterUrl(url) {
+			for (const normalize of this.chapterUrlNormalizers) {
+				const normalized = normalize(url);
+				if (normalized) return normalized;
+			}
+			return url;
 		}
 		resolveEntryUrl(doc, url) {
 			for (const resolve of this.entryResolvers) {
@@ -4919,6 +5001,7 @@
 		return ruleManagerInstance;
 	}
 	var parseSectionUrl = (url) => getRuleManager().parseSectionUrl(url);
+	var getDocumentKey = (url, base) => getRuleManager().normalizeChapterUrl(normalizeAbsoluteUrl(url, base));
 	var SECTION_TOTAL_PATTERN = /[（(]\s*(?:第\s*)?(\d+)\s*[/／]\s*(\d+)\s*(?:页|頁)?\s*[）)]/;
 	var SectionMerger = class {
 		constructor(parser) {
@@ -4960,7 +5043,7 @@
 			if (options.signal?.aborted) return null;
 			let startUrl = url;
 			let startDoc = doc;
-			const knownDocs = new Map([[normalizeAbsoluteUrl(url, url), doc]]);
+			const knownDocs = new Map([[getDocumentKey(url, url), doc]]);
 			const baseUrl = getSectionBaseUrl(url, parseSectionUrl);
 			if (baseUrl && baseUrl !== url) {
 				const baseDoc = await this.fetchUrl(baseUrl, url, options.fetcher, options.signal);
@@ -4968,7 +5051,7 @@
 				if (baseDoc) {
 					startUrl = baseUrl;
 					startDoc = baseDoc;
-					knownDocs.set(normalizeAbsoluteUrl(baseUrl, url), baseDoc);
+					knownDocs.set(getDocumentKey(baseUrl, url), baseDoc);
 				}
 			}
 			return {
@@ -5086,7 +5169,7 @@
 				mergedRaw: first.rawContent,
 				nextSectionUrl: state.nextSectionUrl,
 				nextChapterUrl: state.nextChapterUrl,
-				seen: new Set([normalizeAbsoluteUrl(startPage.url, startPage.url)]),
+				seen: new Set([getDocumentKey(startPage.url, startPage.url)]),
 				remainingPages: Math.max(0, maxPages - 1),
 				loadedPages: 1,
 				sourceScript: first.sourceScript
@@ -5095,9 +5178,10 @@
 		async loadNextSectionPage(cursor, knownDocs, fetcher, signal) {
 			if (signal?.aborted || !cursor.nextSectionUrl) return null;
 			const url = normalizeAbsoluteUrl(cursor.nextSectionUrl, cursor.lastUrl);
-			if (cursor.seen.has(url)) return null;
-			cursor.seen.add(url);
-			const cachedDoc = knownDocs.get(url) ?? null;
+			const key = getDocumentKey(url, cursor.lastUrl);
+			if (cursor.seen.has(key)) return null;
+			cursor.seen.add(key);
+			const cachedDoc = knownDocs.get(key) ?? null;
 			if (cachedDoc) return {
 				doc: cachedDoc,
 				url,
@@ -5105,7 +5189,7 @@
 			};
 			const doc = await this.fetchUrl(url, cursor.lastUrl, fetcher, signal);
 			if (!doc) return null;
-			knownDocs.set(url, doc);
+			knownDocs.set(key, doc);
 			return {
 				doc,
 				url,
@@ -5117,7 +5201,7 @@
 			if (parsed || !page.fromCache || signal?.aborted) return parsed;
 			const doc = await this.fetchUrl(page.url, referrer, fetcher, signal);
 			if (!doc) return null;
-			knownDocs.set(page.url, doc);
+			knownDocs.set(getDocumentKey(page.url, referrer), doc);
 			page.doc = doc;
 			parsed = await this.parser.parse(doc, page.url);
 			return parsed;
@@ -8134,7 +8218,7 @@
 		}
 		async parseWithRule(doc, url, ruleMatch) {
 			const rule = ruleMatch.rule;
-			await this.runBeforeParseHook(rule, doc, url);
+			if (!await this.runBeforeParseHook(rule, doc, url)) return null;
 			let contentElement = this.selectElement(doc, rule.content.selector);
 			if (this.shouldWaitForRuleContent(rule, contentElement)) {
 				await this.waitForRuleContent(doc, rule);
@@ -8507,11 +8591,13 @@
 		}
 		async runBeforeParseHook(rule, doc, url) {
 			const beforeParse = rule.hooks?.beforeParse;
-			if (!beforeParse) return;
+			if (!beforeParse) return true;
 			try {
 				await beforeParse(doc, url, this.getHookHelpers());
+				return true;
 			} catch (e) {
 				console.warn("[Parser] beforeParse hook error:", e);
+				return false;
 			}
 		}
 		getHookHelpers() {
@@ -8895,7 +8981,7 @@
 		else if (options) managerInstance.updateOptions(options);
 		return managerInstance;
 	}
-	var VERSION = "1.0.5";
+	var VERSION = "1.0.6";
 	var BUILD_DATE = "2026-09-21";
 	var SENSITIVE_QUERY_KEY = /(?:^|[_-])(?:token|auth|session|sid|key|sign|signature|ticket|password|passwd|pwd|jwt|credential|access|refresh|challenge|chl)(?:[_-]|$)|^__cf_|^_csrfToken$/i;
 	function redactUrl(url) {
@@ -18196,7 +18282,7 @@ ul, ol {
 		}
 	}
 	function normalizeUrlForFetch(url) {
-		const normalized = normalizeRedundantFirstPageParam(normalizeCiwemaoChapterUrl(url));
+		const normalized = getRuleManager().normalizeChapterUrl(normalizeRedundantFirstPageParam(normalizeCiwemaoChapterUrl(url)));
 		try {
 			const u = new URL(normalized);
 			u.hash = "";
@@ -18209,7 +18295,7 @@ ul, ol {
 		return url.replace(/\/$/, "").replace(/\/index\.html?$/, "");
 	}
 	function normalizeUrlForBlock(url) {
-		const normalized = normalizeCiwemaoChapterUrl(url);
+		const normalized = getRuleManager().normalizeChapterUrl(normalizeCiwemaoChapterUrl(url));
 		try {
 			const u = new URL(normalized);
 			u.hash = "";

@@ -98,7 +98,7 @@ export class Parser {
     const rule = ruleMatch.rule;
 
     // Execute beforeParse hook if present (supports async)
-    await this.runBeforeParseHook(rule, doc, url);
+    if (!(await this.runBeforeParseHook(rule, doc, url))) return null;
 
     // Extract content
     let contentElement = this.selectElement(doc, rule.content.selector);
@@ -676,14 +676,16 @@ export class Parser {
     return null;
   }
 
-  private async runBeforeParseHook(rule: SiteRule, doc: Document, url?: string): Promise<void> {
+  private async runBeforeParseHook(rule: SiteRule, doc: Document, url?: string): Promise<boolean> {
     const beforeParse = rule.hooks?.beforeParse;
-    if (!beforeParse) return;
+    if (!beforeParse) return true;
 
     try {
       await beforeParse(doc, url, this.getHookHelpers());
+      return true;
     } catch (e) {
       console.warn('[Parser] beforeParse hook error:', e);
+      return false;
     }
   }
 

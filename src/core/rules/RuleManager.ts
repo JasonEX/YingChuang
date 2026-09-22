@@ -30,6 +30,9 @@ export class RuleManager {
   private readonly sectionUrlParsers = this.builtInRules.flatMap(rule =>
     rule.hooks?.parseSectionUrl ? [rule.hooks.parseSectionUrl] : []
   );
+  private readonly chapterUrlNormalizers = this.builtInRules.flatMap(rule =>
+    rule.hooks?.normalizeChapterUrl ? [rule.hooks.normalizeChapterUrl] : []
+  );
   private readonly entryResolvers = this.builtInRules.flatMap(rule =>
     rule.hooks?.resolveEntryUrl ? [rule.hooks.resolveEntryUrl] : []
   );
@@ -47,6 +50,15 @@ export class RuleManager {
       if (result !== null) return result;
     }
     return null;
+  }
+
+  /** Site-declared aliases share a reader identity without hardcoding hosts in the store. */
+  normalizeChapterUrl(url: string): string {
+    for (const normalize of this.chapterUrlNormalizers) {
+      const normalized = normalize(url);
+      if (normalized) return normalized;
+    }
+    return url;
   }
 
   /** Synchronous so URL helpers and detectors can use the same site parser. */

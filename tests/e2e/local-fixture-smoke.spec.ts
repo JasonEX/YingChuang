@@ -10,6 +10,8 @@ import {
   waitForMnrReader,
 } from './mnrE2e';
 
+import { makeNovelsChapter, novelsOrigin, novelsUrl } from '../testUtils/novels';
+
 import {
   makeNovel543Chapter,
   makeNovel543Toc,
@@ -2524,4 +2526,126 @@ test('a contradictory section marker stops loading and never enters the chapter 
     ])
   );
   expect(pages).toEqual([1, 2]);
+});
+
+for (const width of [1280, 390]) {
+  test(`novels decrypts, merges sections and navigates at ${width}px`, async ({
+    page,
+    context,
+  }) => {
+    await page.setViewportSize({ width, height: 844 });
+    const initialRequests: string[] = [];
+    await context.route(`${novelsOrigin}/**`, async route => {
+      const requested = new URL(route.request().url());
+      const match = requested.pathname.match(/\/(\d+)(?:_(\d+))?\.html$/);
+      if (!match) {
+        return route.fulfill({
+          contentType: 'text/html; charset=utf-8',
+          body: `<div id="catalog"><ul>${Array.from(
+            { length: 30 },
+            (_, i) =>
+              `<li><a href="${novelsUrl(i + 1).split('?')[0]}">第${i + 1}章 山間行旅</a></li>`
+          ).join('')}</ul></div>`,
+        });
+      }
+      if (match[1] === '199107755') initialRequests.push(requested.pathname);
+      await route.fulfill({
+        contentType: 'text/html; charset=utf-8',
+        body: makeNovelsChapter(Number(match[1]) - 199107734, Number(match[2] || 1)).replaceAll(
+          '?aid=1092650',
+          requested.search
+        ),
+      });
+    });
+    const header = fs
+      .readFileSync(getMnrE2eConfig().userScriptPath, 'utf8')
+      .split('// ==/UserScript==')[0];
+    expect(header).toMatch(/^\/\/ @match\s+\*:\/\/www\.novels\.com\.tw\/novels\/\*\s*$/m);
+    await addYingChuangUserscript(context);
+    await page.goto(novelsUrl(21, width === 390 ? 2 : 1));
+    const root = page.locator('#mnr-reader-root');
+    await expect(root.locator('.mnr-reader')).toBeVisible();
+    const first = root.locator(`article[data-chapter-url="${novelsUrl().split('?')[0]}"]`);
+    for (const section of [1, 2, 3]) await expect(first).toContainText(`第${section}頁終點`);
+    expect(initialRequests.sort()).toEqual(
+      [1, 2, 3].map(section => new URL(novelsUrl(21, section)).pathname).sort()
+    );
+    await expect(first).not.toContainText('繼續全文閱讀');
+    await expect(page).toHaveTitle('第21章 山間行旅 - 山間行旅');
+    await root.getByRole('button', { name: '打开目录', exact: true }).click();
+    await expect(root.locator('.mnr-drawer-position')).toContainText('第 21 / 30 章');
+    await root.getByRole('button', { name: '关闭目录', exact: true }).click();
+    await expect(first).toHaveCount(1);
+    await page.keyboard.press('ArrowRight');
+    await expect(page).toHaveURL(novelsUrl(22).split('?')[0]);
+    const next = root.locator(`article[data-chapter-url="${novelsUrl(22).split('?')[0]}"]`);
+    await expect(next).toContainText('第3頁終點');
+    await expect(next).not.toContainText('encryptedContent');
+    // Cached chapter navigation keeps its smooth-scroll lock until the transition settles.
+    await page.waitForTimeout(800);
+    await page.keyboard.press('ArrowLeft');
+    await expect(page).toHaveURL(novelsUrl().split('?')[0]);
+    await root.getByRole('button', { name: '打开目录', exact: true }).click();
+    await expect(root.locator('.mnr-drawer-position')).toContainText('第 21 / 30 章');
+    await root
+      .locator('.mnr-chapter-button')
+      .filter({ hasText: /^第22章 / })
+      .click();
+    await expect(page).toHaveURL(novelsUrl(22).split('?')[0]);
+    await expect(next).toHaveCount(1);
+  });
+}
+
+test('novels failed preparation preserves the host and allows manual recovery and exit', async ({
+  page,
+  context,
+}) => {
+  const logs: string[] = [];
+  page.on('console', message => logs.push(message.text()));
+  const requests: string[] = [];
+  const healthy = makeNovelsChapter();
+  const broken = healthy.replace(
+    /window\.encryptedContent = .*?;<\/script>/,
+    'window.encryptedContent = "broken";</script>'
+  );
+  await context.route(`${novelsOrigin}/**`, async route => {
+    const url = new URL(route.request().url());
+    requests.push(url.pathname);
+    const section = Number(url.pathname.match(/_(\d+)\.html$/)?.[1] || 1);
+    await route.fulfill({
+      contentType: 'text/html; charset=utf-8',
+      body:
+        requests.length === 1
+          ? broken
+          : makeNovelsChapter(21, section).replaceAll('?aid=1092650', url.search),
+    });
+  });
+  await addYingChuangUserscript(context);
+  await page.goto(novelsUrl());
+  const reader = page.locator('#mnr-reader-root');
+  const entry = page.locator('#mnr-entry-root #mnr-entry-button');
+  await expect(entry).toBeVisible();
+  expect(logs.some(line => line.includes('[Parser] beforeParse hook error:'))).toBe(true);
+  await expect(reader).toHaveCount(0);
+  await expect(page.locator('#article')).toBeVisible();
+  await expect(page.locator('#chapter-content')).toContainText('繼續全文閱讀');
+  expect(await page.locator('#chapter-content script').textContent()).toBe(
+    'window.encryptedContent = "broken";'
+  );
+  expect(requests).toHaveLength(1);
+  // Simulate the host supplying a valid payload, then reuse the existing manual entry.
+  await page.locator('#chapter-content script').evaluate((script, html) => {
+    script.textContent = new DOMParser()
+      .parseFromString(html, 'text/html')
+      .querySelector('#chapter-content script')!.textContent;
+  }, healthy);
+  await entry.click();
+  await expect(reader.locator('.mnr-reader')).toBeVisible();
+  await expect(reader.locator('article')).toContainText('第3頁終點');
+  expect(requests).toHaveLength(3);
+  await reader.getByRole('button', { name: '打开设置' }).click();
+  await reader.getByRole('button', { name: '退出阅读模式' }).click();
+  await expect(reader).toHaveCount(0);
+  await expect(page.locator('#article')).toBeVisible();
+  await expect(entry).toBeVisible();
 });

@@ -169,7 +169,7 @@ describe('Parser', () => {
 
     const runBeforeParseHook = (
       parser as unknown as {
-        runBeforeParseHook: (rule: SiteRule, doc: Document, url?: string) => Promise<void>;
+        runBeforeParseHook: (rule: SiteRule, doc: Document, url?: string) => Promise<boolean>;
       }
     ).runBeforeParseHook.bind(parser);
     await runBeforeParseHook(rule, doc, dom.window.location.href);
@@ -203,7 +203,7 @@ describe('Parser', () => {
 
     const runBeforeParseHook = (
       parser as unknown as {
-        runBeforeParseHook: (rule: SiteRule, doc: Document, url?: string) => Promise<void>;
+        runBeforeParseHook: (rule: SiteRule, doc: Document, url?: string) => Promise<boolean>;
       }
     ).runBeforeParseHook.bind(parser);
     await runBeforeParseHook(rule, doc, dom.window.location.href);
@@ -216,7 +216,7 @@ describe('Parser', () => {
     );
   });
 
-  it('handles hook errors without throwing', async () => {
+  it('reports failed rule preparation without throwing', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     const doc = dom.window.document;
@@ -233,13 +233,8 @@ describe('Parser', () => {
       meta: { source: 'builtin' },
     };
 
-    const runBeforeParseHook = (
-      parser as unknown as {
-        runBeforeParseHook: (rule: SiteRule, doc: Document, url?: string) => Promise<void>;
-      }
-    ).runBeforeParseHook.bind(parser);
-
-    await expect(runBeforeParseHook(rule, doc, dom.window.location.href)).resolves.toBeUndefined();
+    mockMatchRule.mockReturnValue({ rule, source: 'builtin', matchedPattern: '.*' });
+    await expect(parser.parse(doc, dom.window.location.href)).resolves.toBeNull();
     expect(warn).toHaveBeenCalled();
   });
 

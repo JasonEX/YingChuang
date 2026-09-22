@@ -173,11 +173,13 @@ export type FetchDocumentHook = (
 
 /** JavaScript hooks for built-in site adapters */
 interface HooksConfig {
+  /** Canonical chapter URL for reader navigation/cache identity; null for other sites. */
+  normalizeChapterUrl?: (url: string) => string | null;
   /** Site-specific VIP evidence; null leaves the generic document classifier in charge. */
   isVipChapter?: (doc: Document, url: string) => boolean | null;
   /** Override generic section parsing when the chapter ID itself contains a separator. */
   parseSectionUrl?: SectionUrlParser;
-  /** Typed hook to run before parsing. */
+  /** Prepare the document before parsing; an uncaught error aborts this parse. */
   beforeParse?: BeforeParseHook;
   /** Typed hook that supplies a chapter document from a site API instead of a page fetch. */
   fetchDocument?: FetchDocumentHook;

@@ -3,12 +3,15 @@
  */
 
 import { normalizeCiwemaoChapterUrl, normalizeRedundantFirstPageParam } from '@/core/utils';
+import { getRuleManager } from '@/core/rules/RuleManager';
 
 /**
  * Normalize URL for fetching (remove hash, canonicalize)
  */
 export function normalizeUrlForFetch(url: string): string {
-  const normalized = normalizeRedundantFirstPageParam(normalizeCiwemaoChapterUrl(url));
+  const normalized = getRuleManager().normalizeChapterUrl(
+    normalizeRedundantFirstPageParam(normalizeCiwemaoChapterUrl(url))
+  );
   try {
     const u = new URL(normalized);
     u.hash = '';
@@ -29,7 +32,7 @@ export function normalizeUrl(url: string): string {
  * Normalize URL for block list (combines fetch and comparison normalization)
  */
 export function normalizeUrlForBlock(url: string): string {
-  const normalized = normalizeCiwemaoChapterUrl(url);
+  const normalized = getRuleManager().normalizeChapterUrl(normalizeCiwemaoChapterUrl(url));
   try {
     const u = new URL(normalized);
     u.hash = '';
