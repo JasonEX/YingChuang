@@ -109,6 +109,31 @@ describe('ChineseConverter', () => {
     }
   );
 
+  it.each(['unknown', 'mixed'] as const)(
+    'preserves Simplified names in %s text while converting adjacent Traditional nodes',
+    async sourceScript => {
+      await expect(convertText('沈默', 'sc', { sourceScript })).resolves.toBe('沈默');
+      await expect(convertText('車 龍 神 福 圧', 'sc', { sourceScript })).resolves.toBe(
+        '车 龙 神 福 压'
+      );
+      await expect(convertText('主角沈默走进房间。', 'sc', { sourceScript })).resolves.toBe(
+        '主角沈默走进房间。'
+      );
+      await expect(
+        convertText('沈默走向鐘樓，看著乾涸的河床，想起乾坤。', 'sc', { sourceScript })
+      ).resolves.toBe('沈默走向钟楼，看着干涸的河床，想起乾坤。');
+      await expect(
+        convertHTML('<p>主角沈默走进房间。</p><p>鐘聲響徹，燈籠搖曳。</p>', 'sc', {
+          sourceScript,
+        })
+      ).resolves.toBe('<p>主角沈默走进房间。</p><p>钟声响彻，灯笼摇曳。</p>');
+    }
+  );
+
+  it('retains phrase normalization for explicitly Traditional sources', async () => {
+    await expect(convertText('沈默', 'sc', { sourceScript: 'hant' })).resolves.toBe('沉默');
+  });
+
   it('convertText returns original text on converter error', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     tify.mockImplementationOnce(() => {

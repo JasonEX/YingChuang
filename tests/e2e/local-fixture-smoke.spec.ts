@@ -2772,6 +2772,8 @@ for (const lang of ['', 'zh-CN', 'zh-TW']) {
     const traditional = '鐘聲響徹，燈籠搖曳。';
     const simplified = '钟声响彻，灯笼摇曳。';
     const sourceTitle = lang === 'zh-CN' ? simplified : traditional;
+    const chapterTitle = lang ? `第一章 ${sourceTitle}` : '第一章 沈默';
+    const simplifiedTitle = lang ? `第一章 ${simplified}` : '第一章 沈默';
     const sourceParagraph =
       lang === 'zh-CN'
         ? '搁这说我坏话是吧。山间的风吹过树林，他沿着熟悉的小路慢慢向前走去。'
@@ -2780,11 +2782,11 @@ for (const lang of ['', 'zh-CN', 'zh-TW']) {
       route.fulfill({
         contentType: 'text/html; charset=utf-8',
         body: route.request().url().endsWith('/book/index.html')
-          ? `<main><a href="/chapter/100.html">第一章 ${sourceTitle}</a></main>`
-          : `<html lang="${lang}"><head><title>第一章 ${sourceTitle}</title></head><body>
-              <h1>第一章 ${sourceTitle}</h1><div id="content">
+          ? `<main><a href="/chapter/100.html">${chapterTitle}</a></main>`
+          : `<html lang="${lang}"><head><title>${chapterTitle}</title></head><body>
+              <h1>${chapterTitle}</h1><div id="content">
               ${`<p>${sourceParagraph}</p>${lang ? '' : '<p>山间的风吹过树林，他沿着熟悉的小路慢慢向前走去。</p>'}`.repeat(40)}
-              <p>${sourceTitle}</p></div><nav>
+              <p>${sourceTitle}</p>${lang ? '' : '<p>主角沈默走进房间。</p><p>沈默走向鐘樓。</p>'}</div><nav>
               <a href="/chapter/99.html">上一章</a><a href="/book/index.html">目录</a>
               <a href="/chapter/101.html">下一章</a></nav></body></html>`,
       })
@@ -2796,20 +2798,24 @@ for (const lang of ['', 'zh-CN', 'zh-TW']) {
     const content = root.locator('.mnr-reader-content').first();
     const originalHtml = await content.innerHTML();
     await root.getByRole('button', { name: '打开目录', exact: true }).click();
-    await expect(root.locator('.mnr-chapter-button').first()).toContainText(sourceTitle);
+    await expect(root.locator('.mnr-chapter-button').first()).toContainText(chapterTitle);
     await root.getByRole('button', { name: '关闭目录', exact: true }).click();
     await root.getByRole('button', { name: '打开设置', exact: true }).click();
     await root.getByRole('button', { name: '简体', exact: true }).click();
     await expect(content).toContainText(simplified);
-    await expect(root.locator('.mnr-chapter-title').first()).toContainText(simplified);
+    await expect(root.locator('.mnr-chapter-title').first()).toContainText(simplifiedTitle);
     await expect(content).not.toContainText('山間的風');
+    if (!lang) {
+      await expect(content).toContainText('主角沈默走进房间。');
+      await expect(content).toContainText('沈默走向钟楼。');
+    }
     if (lang === 'zh-CN') {
       await expect(content).toHaveJSProperty('innerHTML', originalHtml);
       await expect(content).toContainText('搁这说我坏话是吧');
     }
     await root.getByRole('button', { name: '关闭设置', exact: true }).click();
     await root.getByRole('button', { name: '打开目录', exact: true }).click();
-    await expect(root.locator('.mnr-chapter-button').first()).toContainText(simplified);
+    await expect(root.locator('.mnr-chapter-button').first()).toContainText(simplifiedTitle);
     await root.getByRole('button', { name: '关闭目录', exact: true }).click();
     await root.getByRole('button', { name: '打开设置', exact: true }).click();
     await root.getByRole('button', { name: '繁體', exact: true }).click();

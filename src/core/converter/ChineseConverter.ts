@@ -8,6 +8,8 @@ import { ConverterFactory, type ConverterFunction } from 'opencc-js/core';
 import type { ChineseScript } from '@/core/converter/scriptProfile';
 import cjkCompatibility from 'opencc-js/dict/CJK_Compatibility_Ideographs';
 import { tify } from 'chinese-conv';
+import traditionalCharacters from 'opencc-js/dict/TSCharacters';
+import traditionalPhrases from 'opencc-js/dict/TSPhrases';
 import traditionalToSimplified from 'opencc-js/to/cn';
 
 export type ConversionMode = 'none' | 'sc' | 'tc';
@@ -17,6 +19,8 @@ export interface ConversionOptions {
 }
 
 let simplifiedConverter: ConverterFunction | null = null;
+let mixedSimplifiedConverter: ConverterFunction | null = null;
+let simplifiedSourceCharacters: Set<string> | null = null;
 
 const japaneseVariantMap: Record<string, string> = {
   亜: '亚',
@@ -132,7 +136,22 @@ const protectedZhuWords = [
   '彰明较著',
 ];
 
-function getSimplifiedConverter(): ConverterFunction {
+function getSimplifiedConverter(preserveSimplified: boolean): ConverterFunction {
+  if (preserveSimplified) {
+    // Ambiguous phrase-only rewrites (沈默 → 沉默) are unsafe in mixed prose.
+    // Keep rules containing actual source characters, including exceptions such as 乾坤.
+    mixedSimplifiedConverter ??= ConverterFactory(
+      [cjkCompatibility],
+      [
+        traditionalPhrases
+          .split('|')
+          .filter(entry => hasSimplifiedSourceCharacters(entry.split(' ')[0]))
+          .join('|'),
+        traditionalCharacters,
+      ]
+    );
+    return mixedSimplifiedConverter;
+  }
   // Match OpenCC's t2s chain: normalize compatibility ideographs before phrases/characters.
   // Keep the Japanese repairs below separate from the unused regional presets.
   simplifiedConverter ??= ConverterFactory([cjkCompatibility], ...traditionalToSimplified);
@@ -161,24 +180,53 @@ function normalizeZheForSimplified(text: string): string {
   return converted.replace(/\uE000(\d+)\uE001/g, (_, index: string) => placeholders[Number(index)]);
 }
 
-function getConverter(mode: Exclude<ConversionMode, 'none'>): ConverterFunction {
+function getConverter(
+  mode: Exclude<ConversionMode, 'none'>,
+  options: ConversionOptions
+): ConverterFunction {
   if (mode === 'sc') {
-    const converter = getSimplifiedConverter();
+    const sourceScript = options.sourceScript || 'unknown';
+    const converter = getSimplifiedConverter(
+      sourceScript === 'unknown' || sourceScript === 'mixed'
+    );
     return text =>
       normalizeZheForSimplified(normalizeJapaneseVariantsForSimplified(converter(text)));
   }
   return tify;
 }
 
+function hasSimplifiedSourceCharacters(text: string): boolean {
+  if (!simplifiedSourceCharacters) {
+    // Use the conversion dictionaries, not the small alphabet used for script inference.
+    // This also covers compatibility ideographs and the Japanese repairs applied below.
+    simplifiedSourceCharacters = new Set([...Object.keys(japaneseVariantMap), '著']);
+    for (const dictionary of [traditionalCharacters, cjkCompatibility]) {
+      for (const entry of dictionary.split('|')) {
+        const [source, target] = entry.split(' ');
+        if (source !== target) simplifiedSourceCharacters.add(source);
+      }
+    }
+  }
+  for (const char of text) {
+    if (simplifiedSourceCharacters.has(char)) return true;
+  }
+  return false;
+}
+
 function shouldSkipConversion(
+  text: string,
   mode: Exclude<ConversionMode, 'none'>,
   options: ConversionOptions
 ): boolean {
   const sourceScript = options.sourceScript || 'unknown';
 
-  // Preserve known target-script prose: conversion can alter valid same-script words.
-  // Unknown/mixed sources must be converted; detection markers are not a complete alphabet.
-  return mode === 'sc' ? sourceScript === 'hans' : sourceScript === 'hant';
+  if (mode === 'sc') {
+    if (sourceScript === 'hans') return true;
+    if (sourceScript === 'hant' || sourceScript === 'jpan') return false;
+    // Phrase rules can change already-Simplified names such as 沈默.
+    return !hasSimplifiedSourceCharacters(text);
+  }
+  return sourceScript === 'hant';
 }
 
 /**
@@ -193,12 +241,12 @@ export async function convertText(
     return text;
   }
 
-  if (shouldSkipConversion(mode, options)) {
+  if (shouldSkipConversion(text, mode, options)) {
     return text;
   }
 
   try {
-    const converter = getConverter(mode);
+    const converter = getConverter(mode, options);
     return converter(text);
   } catch (error) {
     console.error('[ChineseConverter] Text conversion error:', error);
@@ -219,12 +267,12 @@ export async function convertHTML(
     return html;
   }
 
-  if (shouldSkipConversion(mode, options)) {
+  if (shouldSkipConversion(html, mode, options)) {
     return html;
   }
 
   try {
-    const converter = getConverter(mode);
+    const converter = getConverter(mode, options);
 
     // Parse HTML and convert text nodes only
     const template = document.createElement('template');
@@ -240,7 +288,7 @@ export async function convertHTML(
 
     // Convert all text nodes
     for (const textNode of textNodes) {
-      if (textNode.textContent) {
+      if (textNode.textContent && !shouldSkipConversion(textNode.textContent, mode, options)) {
         textNode.textContent = converter(textNode.textContent);
       }
     }
