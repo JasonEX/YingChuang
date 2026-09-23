@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   catalogChapterCount,
+  makeBqg5Catalog,
   makePagedCatalog,
   makePagedCatalogChapter,
   pagedCatalogSites,
@@ -53,6 +54,47 @@ it('still follows a generic pagination landing page without a configured chapter
   ).toEqual([{ title: '第1章 正文', url: 'https://example.com/book/123/1.html' }]);
   expect(fetchAndParseUrl).toHaveBeenCalledTimes(2);
 });
+
+it.each(['original', 'without-select', 'footer-preview'])(
+  'orders the complete catalog with repeated start/latest links (%s)',
+  async layout => {
+    const origin = 'https://m.bqg5.com';
+    const indexUrl = `${origin}/4_4581/`;
+    vi.mocked(fetchAndParseUrl).mockReset();
+    vi.mocked(fetchAndParseUrl).mockImplementation(url => {
+      const page = Number(url.match(/index_(\d+)\.html$/)?.[1] || 1);
+      const doc = parse(makeBqg5Catalog(page));
+      if (layout === 'without-select') doc.querySelector('select')!.remove();
+      if (layout === 'footer-preview') {
+        doc.body.append(doc.querySelector('.synopsisArea')!, doc.querySelector('.directoryArea')!);
+      }
+      return {
+        promise: Promise.resolve({
+          doc,
+          finalUrl: url,
+          status: 200,
+          error: null,
+        }),
+        abort: vi.fn(),
+      };
+    });
+
+    const entries = await loadTocEntriesPaged(
+      indexUrl,
+      `${origin}/4_4581/2196198.html`,
+      undefined,
+      vi.fn()
+    );
+    expect(entries).toHaveLength(203);
+    expect(entries.map(entry => entry.title)).toEqual(
+      Array.from({ length: 203 }, (_, i) => `${i + 1}、第${i + 1}章 正文`)
+    );
+    expect(vi.mocked(fetchAndParseUrl).mock.calls.map(([url]) => url)).toEqual([
+      indexUrl,
+      ...Array.from({ length: 10 }, (_, i) => `${indexUrl}index_${i + 2}.html`),
+    ]);
+  }
+);
 
 for (const site of pagedCatalogSites) {
   const rule = site.id === 'wxsl' ? wxslRule : kudushuRule;

@@ -45,6 +45,43 @@ describe('reader TOC entry helpers', () => {
     ]);
   });
 
+  it.each([
+    { input: [198, 1, 200, 199, 201, 202, 203], expected: [1, 198, 199, 200, 201, 202, 203] },
+    { input: [3, 1, 2], expected: [1, 2, 3] },
+    { input: [2, 1], expected: [1, 2] },
+  ])(
+    'orders numbered chapters independently of link position and URL IDs: $input',
+    ({ input, expected }) => {
+      const entry = (num: number) => ({
+        title: `第${num}章 正文`,
+        url: `https://example.com/book/1/${10000 - num}.html`,
+      });
+      const entries = input.map(entry);
+      const original = structuredClone(entries);
+      expect(filterTocEntries(entries)).toEqual(expected.map(entry));
+      expect(entries).toEqual(original);
+    }
+  );
+
+  it.each([
+    ['第1章 上卷开篇', '第2章 上卷继续', '第3章 上卷结束', '第1章 下卷开篇', '第2章 下卷继续'],
+    ['序章', '第2章 旧事', '第1章 回忆', '第3章 归来', '番外'],
+  ])('preserves source order when chapter numbering is ambiguous: %j', (...titles) => {
+    const entries = titles.map((title, index) => ({
+      title,
+      url: `https://example.com/book/1/${index}.html`,
+    }));
+    expect(sortTocEntries(entries)).toEqual(entries);
+  });
+
+  it('retains whole-list reversal for a descending list with an unnumbered prologue', () => {
+    const entries = ['第4章', '第3章', '第2章', '第1章', '序章'].map((title, index) => ({
+      title,
+      url: `https://example.com/book/1/${index}.html`,
+    }));
+    expect(sortTocEntries(entries)).toEqual([...entries].reverse());
+  });
+
   it('filters TOC noise outside the dominant book', () => {
     const entries = filterTocEntries([
       { title: '第1章', url: 'https://example.com/book/100/1.html' },

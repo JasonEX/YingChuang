@@ -22,6 +22,8 @@ import {
 
 import {
   catalogChapterCount,
+  makeBqg5Catalog,
+  makeBqg5Chapter,
   makePagedCatalog,
   makePagedCatalogChapter,
   pagedCatalogSites,
@@ -156,6 +158,49 @@ for (const site of pagedCatalogSites) {
     });
   }
 }
+
+test('mobile paged catalog shows chapters 198 through 203 in order', async ({ page, context }) => {
+  const origin = 'https://m.bqg5.com';
+  await page.setViewportSize({ width: 353, height: 693 });
+  await context.route(`${origin}/**`, async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/4_4581/' || /^\/4_4581\/index_\d+\.html$/.test(path)) {
+      const catalogPage = Number(path.match(/index_(\d+)\.html$/)?.[1] || 1);
+      await route.fulfill({
+        contentType: 'text/html; charset=utf-8',
+        body: makeBqg5Catalog(catalogPage),
+      });
+      return;
+    }
+    const chapterId = Number(path.match(/^\/4_4581\/(\d+)\.html$/)?.[1]);
+    if (!chapterId) {
+      await route.fulfill({ status: 404, body: '' });
+      return;
+    }
+    await route.fulfill({
+      contentType: 'text/html; charset=utf-8',
+      body: makeBqg5Chapter(chapterId - 2196145),
+    });
+  });
+  await addYingChuangUserscript(context);
+  await page.goto(`${origin}/4_4581/2196198.html`);
+  await waitForMnrReader(page);
+  const root = page.locator('#mnr-reader-root');
+  await root.getByRole('button', { name: '打开目录', exact: true }).click();
+  await expect(root.locator('.mnr-drawer-position')).toContainText('第 53 / 203 章');
+  const list = root.locator('.mnr-drawer-content');
+  await list.evaluate(el => {
+    el.scrollTop = el.scrollHeight;
+  });
+  await expect(root.locator('.mnr-chapter-button').last()).toContainText('第203章 正文');
+  expect((await root.locator('.mnr-chapter-title-text').allTextContents()).slice(-6)).toEqual(
+    Array.from({ length: 6 }, (_, i) => `${i + 198}、第${i + 198}章 正文`)
+  );
+  await list.evaluate(el => {
+    el.scrollTop = 0;
+  });
+  await expect(root.locator('.mnr-chapter-button').first()).toContainText('第1章 正文');
+});
 
 test('Ciweimao keeps short closing prose across initial parsing and chapter navigation', async ({
   page,

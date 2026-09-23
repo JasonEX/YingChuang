@@ -138,7 +138,7 @@ function cleanTocTitleForUrl(title: string, url: string): string {
  * Smart filter TOC entries based on URL pattern analysis and title filtering
  */
 export function filterTocEntries(entries: TocEntry[]): TocEntry[] {
-  if (entries.length < 5) return entries;
+  if (entries.length < 5) return sortTocEntries(entries);
 
   // Step 0: Same-book filtering
   const bookIdCounts = new Map<string, number>();
@@ -232,7 +232,7 @@ export function filterTocEntries(entries: TocEntry[]): TocEntry[] {
  * Detect list order and sort/reverse if necessary
  */
 export function sortTocEntries(entries: TocEntry[]): TocEntry[] {
-  if (entries.length < 5) return entries;
+  if (entries.length < 2) return entries;
 
   const entriesWithNum = entries
     .map((entry, index) => ({
@@ -242,7 +242,20 @@ export function sortTocEntries(entries: TocEntry[]): TocEntry[] {
     }))
     .filter(item => item.num !== null);
 
-  if (entriesWithNum.length < entries.length * 0.3 || entriesWithNum.length < 3) {
+  // Repeated preview/start links can move entries during URL deduplication.
+  // A complete, unique numbering determines order independently of link position.
+  if (
+    entriesWithNum.length === entries.length &&
+    new Set(entriesWithNum.map(item => item.num)).size === entries.length
+  ) {
+    return entriesWithNum.sort((a, b) => a.num! - b.num!).map(item => item.entry);
+  }
+
+  if (
+    entries.length < 5 ||
+    entriesWithNum.length < entries.length * 0.3 ||
+    entriesWithNum.length < 3
+  ) {
     return entries;
   }
 

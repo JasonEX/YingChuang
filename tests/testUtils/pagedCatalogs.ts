@@ -22,6 +22,48 @@ export type PagedCatalogSite = (typeof pagedCatalogSites)[number];
 export const catalogChapterCount = 46;
 export const catalogPageCount = 3;
 
+// Reduced mobile DOM from m.bqg5.com: every page repeats the start link and
+// latest five chapters before the main list.
+export function makeBqg5Catalog(page: number): string {
+  const chapterPath = (chapter: number): string => `/4_4581/${2196145 + chapter}.html`;
+  const link = (chapter: number, numbered = false): string =>
+    `<p><a href="${chapterPath(chapter)}">${numbered ? `${chapter}、` : ''}第${chapter}章 正文</a></p>`;
+  const latest = [203, 202, 201, 200, 199].map(chapter => link(chapter)).join('');
+  const first = (page - 1) * 20 + 1;
+  const main = Array.from({ length: Math.min(20, 204 - first) }, (_, i) =>
+    link(first + i, true)
+  ).join('');
+  const options = Array.from({ length: 11 }, (_, i) => {
+    const number = i + 1;
+    return `<option value="index_${number}.html" ${number === page ? 'selected' : ''}>${
+      i * 20 + 1
+    } - ${(i + 1) * 20}章</option>`;
+  }).join('');
+  return `<html><body>
+    <div class="synopsisArea"><a href="${chapterPath(203)}">第203章 正文</a>
+      <a href="${chapterPath(1)}">开始阅读</a></div>
+    <div class="recommend"><h2>最新免费章节</h2><div class="directoryArea">${latest}</div>
+      <h2>正文 共203章</h2><div class="directoryArea">${main}
+        <div class="listpage"><select name="pageselect">${options}</select>
+          ${page < 11 ? `<a href="index_${page + 1}.html">下一页</a>` : '<a>下一页</a>'}
+        </div>
+      </div>
+    </div>
+  </body></html>`;
+}
+
+export function makeBqg5Chapter(chapter: number): string {
+  const chapterPath = (number: number): string => `/4_4581/${2196145 + number}.html`;
+  return `<html><head><title>第${chapter}章 正文_测试书名</title></head><body>
+    <h1>第${chapter}章 正文</h1><nav>
+      <a href="${chapterPath(chapter - 1)}">上一章</a>
+      <a href="/4_4581/">目录</a>
+      <a href="${chapterPath(chapter + 1)}">下一章</a>
+    </nav>
+    <div id="content">${'<p>山间的风吹过树梢，他停下来仔细查看地图，沿着河岸继续赶路。</p>'.repeat(130)}</div>
+  </body></html>`;
+}
+
 export function makePagedCatalog(site: PagedCatalogSite, page: number): string {
   const links = (numbers: number[]): string =>
     numbers

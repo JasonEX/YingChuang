@@ -3,7 +3,7 @@
 // @name:zh-CN         萤窗
 // @name:zh-TW         螢窗
 // @namespace          https://github.com/JasonEX
-// @version            1.0.9
+// @version            1.0.10
 // @author             JasonEX
 // @description        萤窗：小说阅读脚本，智能正文识别、连续阅读、阅读位置恢复、简繁转换
 // @description:zh-CN  萤窗：小说阅读脚本，智能正文识别、连续阅读、阅读位置恢复、简繁转换
@@ -9167,8 +9167,8 @@
 		else if (options) managerInstance.updateOptions(options);
 		return managerInstance;
 	}
-	var VERSION = "1.0.9";
-	var BUILD_DATE = "2026-09-22";
+	var VERSION = "1.0.10";
+	var BUILD_DATE = "2026-09-23";
 	function buildDiagnosticInfo(options = {}) {
 		return {
 			schema: "mnr-debug-v1",
@@ -18774,7 +18774,7 @@ ul, ol {
 		return cleaned;
 	}
 	function filterTocEntries(entries) {
-		if (entries.length < 5) return entries;
+		if (entries.length < 5) return sortTocEntries(entries);
 		const bookIdCounts = new Map();
 		for (const entry of entries) {
 			const bookId = extractBookId$1(entry.url);
@@ -18825,13 +18825,14 @@ ul, ol {
 		return sortTocEntries(filtered);
 	}
 	function sortTocEntries(entries) {
-		if (entries.length < 5) return entries;
+		if (entries.length < 2) return entries;
 		const entriesWithNum = entries.map((entry, index) => ({
 			index,
 			entry,
 			num: extractChapterNumber(entry.title)
 		})).filter((item) => item.num !== null);
-		if (entriesWithNum.length < entries.length * .3 || entriesWithNum.length < 3) return entries;
+		if (entriesWithNum.length === entries.length && new Set(entriesWithNum.map((item) => item.num)).size === entries.length) return entriesWithNum.sort((a, b) => a.num - b.num).map((item) => item.entry);
+		if (entries.length < 5 || entriesWithNum.length < entries.length * .3 || entriesWithNum.length < 3) return entries;
 		let descendingPairs = 0;
 		let ascendingPairs = 0;
 		for (let i = 0; i < entriesWithNum.length - 1; i++) {
