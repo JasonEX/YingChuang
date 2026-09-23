@@ -219,6 +219,11 @@ export class SectionMerger {
       );
       if (options.signal?.aborted) return null;
       if (baseDoc) {
+        // A live later page will be reused after first-page delivery hides and retitles the
+        // host. Retain its source document before that reader transition changes detection.
+        if (doc.defaultView) {
+          knownDocs.set(getDocumentKey(url, url), doc.cloneNode(true) as Document);
+        }
         startUrl = baseUrl;
         startDoc = baseDoc;
         knownDocs.set(getDocumentKey(baseUrl, url), baseDoc);

@@ -64,6 +64,37 @@ export function makeBqg5Chapter(chapter: number): string {
   </body></html>`;
 }
 
+// Preserve the live chapter template: body#read, no h1, page suffix in the
+// document title, br-delimited prose and navigation labelled 下一章 even for page 2.
+export function makeBqg5Section(chapter: number, section: number): string {
+  const id = 2196145 + chapter;
+  const title = `第${chapter}章 春游与打猎`;
+  const next = section === 1 ? `${id}_2` : String(id + 1);
+  const prev = section === 1 ? String(id - 1) : String(id);
+  const navigation = `<p class="Readpage">
+    <a href="/4_4581/${prev}.html" id="pt_prev">上一章</a>
+    <a href="/4_4581/" id="pt_mulu">目录</a>
+    <a href="/4_4581/${next}.html" id="pt_next">下一章</a></p>`;
+  const prose = Array.from(
+    { length: 50 },
+    (_, i) =>
+      `第${section}页正文段落${i + 1}：山间的风吹过树梢，他停下来仔细查看地图，沿着河岸继续赶路。`
+  ).join('<br><br>&nbsp;&nbsp;&nbsp;&nbsp;');
+  return `<html><head><title>${title}${section}_测试书名_笔趣阁</title></head>
+    <body id="read" class="read">
+      <header><span class="title">${title}&nbsp;&nbsp;测试书名</span></header>
+      ${navigation}
+      <div id="chaptercontent" class="Readarea ReadAjax_content">
+        ${title}第(${section}/2)页<br>
+        ${prose}<br><br>
+        ${section === 1 ? `${title}第(1/2)页,点击下一页继续阅读。<br>` : ''}
+        <p><a href="javascript:addBookMarkByManual(${id},4581)">『加入书签，方便阅读』</a></p>
+      </div>
+      ${navigation}
+      <footer>首页 我的书架 阅读记录</footer>
+    </body></html>`;
+}
+
 export function makePagedCatalog(site: PagedCatalogSite, page: number): string {
   const links = (numbers: number[]): string =>
     numbers
@@ -126,6 +157,7 @@ export function makePagedCatalogChapter(site: PagedCatalogSite, chapter: number)
       <div class="content_novel">${navRow}
         <div id="novelcontent" class="novelcontent">
           <div id="content_tip"><b>最新网址：m.kudushu.org</b></div>
+          第${chapter}章 测试正文 (第1/3页)<br>
           ${body}${navRow}
         </div>
       </div>

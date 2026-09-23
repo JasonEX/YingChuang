@@ -43,7 +43,6 @@ export const ttksRule: SiteRule = {
   },
   content: {
     selector: '.frame_body > .title + .content',
-    remove: '.anchor_bookmark, .txtcenter, .div_feedback, .social_share_frame',
   },
   navigation: {
     prev: '#linkPrev',

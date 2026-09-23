@@ -4204,12 +4204,7 @@
 		match: { pattern: "^https?://m\\.kudushu\\.org/html/\\d+/\\d+(?:_\\d+)?/(?:[?#].*)?$" },
 		content: {
 			selector: "#novelcontent",
-			remove: "#content_tip, ul.novelbutton",
-			replace: [{
-				pattern: "^[\\s\\S]*?[（(]第\\d+[/／]\\d+页[）)]",
-				replacement: "",
-				flags: ""
-			}]
+			remove: "#content_tip, ul.novelbutton"
 		},
 		navigation: {
 			prev: ".content_novel > ul.novelbutton p.p1:not(.p3) > a[href*=\"/html/\"]",
@@ -4735,10 +4730,7 @@
 		name: "天天看小說",
 		version: 1,
 		match: { pattern: "^https?://(?:www\\.)?ttks\\.tw/novel/chapters/[^/?#]+/\\d+\\.html(?:[?#].*)?$" },
-		content: {
-			selector: ".frame_body > .title + .content",
-			remove: ".anchor_bookmark, .txtcenter, .div_feedback, .social_share_frame"
-		},
+		content: { selector: ".frame_body > .title + .content" },
 		navigation: {
 			prev: "#linkPrev",
 			index: ".breadcrumb_nav a[href$=\"/index.html\"]",
@@ -5257,6 +5249,7 @@
 				const baseDoc = await this.fetchUrl(baseUrl, url, options.fetcher, options.signal, options.retryRateLimit);
 				if (options.signal?.aborted) return null;
 				if (baseDoc) {
+					if (doc.defaultView) knownDocs.set(getDocumentKey(url, url), doc.cloneNode(true));
 					startUrl = baseUrl;
 					startDoc = baseDoc;
 					knownDocs.set(getDocumentKey(baseUrl, url), baseDoc);
@@ -7885,6 +7878,7 @@
 				const t = normalize(text);
 				if (!t) return false;
 				if (READER_UI_LABELS.has(t)) return true;
+				if (/^[『「【]?(?:加入|添加)[书書][签籤][，,]方便[阅閱][读讀][』」】]?$/.test(t)) return true;
 				if (/^字体[+-]$/.test(t) || /^字體[+-]$/.test(t)) return true;
 				if (/^(?:上一|下一)(?:章|页|頁)$/.test(t)) return true;
 				if (/^(?:章?节|章節)?(?:目录|目錄|列表)$/.test(t)) return true;
@@ -8156,6 +8150,7 @@
 			const tempDiv = doc.createElement("div");
 			tempDiv.innerHTML = result;
 			const combinedTitleFingerprint = chapterTitle && bookTitle ? `${bookTitle}${chapterTitle}`.replace(/\s+/g, "").toLowerCase() : "";
+			const normalizedChapterTitle = (chapterTitle || "").replace(/\s+/g, "").toLowerCase();
 			const isRemovableEmptyNode = (node) => {
 				if (node.nodeType === Node.TEXT_NODE) return true;
 				if (node.nodeType !== Node.ELEMENT_NODE) return true;
@@ -8192,7 +8187,10 @@
 			for (const child of Array.from(tempDiv.children)) {
 				if (child.children.length > 0) continue;
 				const text = (child.textContent || "").trim();
-				if (!!combinedTitleFingerprint && text.replace(/\s+/g, "").toLowerCase() === combinedTitleFingerprint || /^>+$/.test(text)) child.remove();
+				const isCombinedTitleFingerprint = !!combinedTitleFingerprint && text.replace(/\s+/g, "").toLowerCase() === combinedTitleFingerprint;
+				const sectionTitle = text.length < 100 && normalizedChapterTitle ? text.replace(/\s+/g, "").toLowerCase().match(/^(.*?)第[（(](\d+)[/／]\d+[）)][页頁](?:[，,]?(?:请|請)?[点點][击擊]下一[页頁][继繼][续續][阅閱][读讀])?[，,。.]*$/) : null;
+				const isSectionTitle = sectionTitle && (normalizedChapterTitle === sectionTitle[1] || normalizedChapterTitle === sectionTitle[1] + sectionTitle[2]);
+				if (isCombinedTitleFingerprint || isSectionTitle || /^>+$/.test(text)) child.remove();
 			}
 			const tailNodes = Array.from(tempDiv.childNodes);
 			let tailRemoved = 0;

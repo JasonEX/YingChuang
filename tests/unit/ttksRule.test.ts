@@ -95,6 +95,7 @@ describe('TTKS rule', () => {
     expect(content).not.toContain('天天看小說');
     expect(content).not.toContain('緩存原因');
     expect(content).not.toContain('loadAdv');
+    expect(content).not.toContain('書籤圖示');
     expect(content).not.toContain('添加書籤');
     expect(content).not.toContain('分享給朋友');
     expect(content).not.toContain('福');

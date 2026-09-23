@@ -137,6 +137,10 @@ for (const site of pagedCatalogSites) {
       expect(parsed?.nextUrl).toBe(site.origin + site.chapterPath(26));
       expect(parsed?.title).toBe('第25章 测试正文');
       expect(parsed?.content).toContain('沿着河岸继续赶路');
+      expect(parsed?.content).not.toMatch(/第25章|第1\/3页|最新网址|进入书架|上—章|下—章/);
+      expect(Array.from(parse(parsed!.content).querySelectorAll('p'), p => p.textContent)).toEqual(
+        Array(60).fill('山间的风吹过树梢，他停下来仔细查看地图，沿着河岸继续赶路。')
+      );
       const pattern = new RegExp(rule.match.pattern);
       expect(
         pattern.test(currentUrl.replace(/(\.html|\/)$/, '_2$1') + '?from=reader#content')

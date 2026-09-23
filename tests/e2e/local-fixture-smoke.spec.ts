@@ -24,6 +24,7 @@ import {
   catalogChapterCount,
   makeBqg5Catalog,
   makeBqg5Chapter,
+  makeBqg5Section,
   makePagedCatalog,
   makePagedCatalogChapter,
   pagedCatalogSites,
@@ -104,6 +105,8 @@ for (const site of pagedCatalogSites) {
       await expect(page.locator('#mnr-reader-root .mnr-reader')).toBeVisible();
       await waitForMnrReader(page);
       const root = page.locator('#mnr-reader-root');
+      await expect(root.locator('article > div').first()).not.toContainText('第25章');
+      await expect(root.locator('article > div').first()).not.toContainText('进入书架');
       await root.getByRole('button', { name: '打开目录', exact: true }).click();
       await expect(root).toContainText('目录加载失败');
       await expect(root.locator('.mnr-chapter-button')).toHaveCount(0);
@@ -201,6 +204,60 @@ test('mobile paged catalog shows chapters 198 through 203 in order', async ({ pa
   });
   await expect(root.locator('.mnr-chapter-button').first()).toContainText('第1章 正文');
 });
+
+for (const [width, entrySection] of [
+  [390, 1],
+  [1280, 2],
+]) {
+  test(`generic chapter cleaning survives section merge and navigation at ${width}px`, async ({
+    page,
+    context,
+  }) => {
+    const origin = 'https://m.bqg5.com';
+    const requests: string[] = [];
+    await page.setViewportSize({ width, height: 844 });
+    await context.route(`${origin}/**`, async route => {
+      const path = new URL(route.request().url()).pathname;
+      const match = path.match(/^\/4_4581\/(219619[89])(?:_(2))?\.html$/);
+      if (!match) {
+        await route.fulfill({ status: 404, body: '' });
+        return;
+      }
+      requests.push(path);
+      await route.fulfill({
+        contentType: 'text/html; charset=utf-8',
+        body: makeBqg5Section(Number(match[1]) - 2196145, Number(match[2] || 1)),
+      });
+    });
+    await addYingChuangUserscript(context);
+    await page.goto(`${origin}/4_4581/2196198${entrySection === 2 ? '_2' : ''}.html`);
+    await waitForMnrReader(page);
+    const root = page.locator('#mnr-reader-root');
+    const chapter = root.locator('article').first();
+    await expect(chapter).toContainText('第2页正文段落50');
+    await expect(root.locator('.mnr-section-progress')).toHaveCount(0);
+    const content = chapter;
+    await expect(content.locator('p').filter({ hasText: /\S/ })).toHaveCount(100);
+    await expect(content).not.toContainText('第(');
+    await expect(content).not.toContainText('书签');
+    await expect(content).not.toContainText('我的书架');
+    expect(requests.filter(path => path.includes('2196198')).sort()).toEqual([
+      '/4_4581/2196198.html',
+      '/4_4581/2196198_2.html',
+    ]);
+    await page.keyboard.press('ArrowRight');
+    await expect(page).toHaveURL(`${origin}/4_4581/2196199.html`);
+    const next = root.locator(`article[data-chapter-url="${origin}/4_4581/2196199.html"]`);
+    await expect(next).toContainText('第2页正文段落50');
+    await expect(next.locator('p').filter({ hasText: /\S/ })).toHaveCount(100);
+    await expect(next).not.toContainText('第(');
+    await expect(next).not.toContainText('书签');
+    await page.keyboard.press('q');
+    await expect(root).toHaveCount(0);
+    await expect(page.locator('#chaptercontent')).toBeVisible();
+    await expect(page.locator('#chaptercontent')).toContainText('加入书签，方便阅读');
+  });
+}
 
 test('Ciweimao keeps short closing prose across initial parsing and chapter navigation', async ({
   page,

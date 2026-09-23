@@ -226,6 +226,7 @@ export class ContentProcessor {
       const t = normalize(text);
       if (!t) return false;
       if (READER_UI_LABELS.has(t)) return true;
+      if (/^[『「【]?(?:加入|添加)[书書][签籤][，,]方便[阅閱][读讀][』」】]?$/.test(t)) return true;
       if (/^字体[+-]$/.test(t) || /^字體[+-]$/.test(t)) return true;
       if (/^(?:上一|下一)(?:章|页|頁)$/.test(t)) return true;
       if (/^(?:章?节|章節)?(?:目录|目錄|列表)$/.test(t)) return true;
@@ -723,6 +724,7 @@ export class ContentProcessor {
       chapterTitle && bookTitle
         ? `${bookTitle}${chapterTitle}`.replace(/\s+/g, '').toLowerCase()
         : '';
+    const normalizedChapterTitle = (chapterTitle || '').replace(/\s+/g, '').toLowerCase();
 
     const isRemovableEmptyNode = (node: Node): boolean => {
       if (node.nodeType === Node.TEXT_NODE) return true;
@@ -776,7 +778,22 @@ export class ContentProcessor {
       const isCombinedTitleFingerprint =
         !!combinedTitleFingerprint &&
         text.replace(/\s+/g, '').toLowerCase() === combinedTitleFingerprint;
-      if (isCombinedTitleFingerprint || /^>+$/.test(text)) {
+      // Match the whole template line, including punctuation left by ad cleaning.
+      // A bare page number in the document title is accepted only when this marker confirms it.
+      const sectionTitle =
+        text.length < 100 && normalizedChapterTitle
+          ? text
+              .replace(/\s+/g, '')
+              .toLowerCase()
+              .match(
+                /^(.*?)第[（(](\d+)[/／]\d+[）)][页頁](?:[，,]?(?:请|請)?[点點][击擊]下一[页頁][继繼][续續][阅閱][读讀])?[，,。.]*$/
+              )
+          : null;
+      const isSectionTitle =
+        sectionTitle &&
+        (normalizedChapterTitle === sectionTitle[1] ||
+          normalizedChapterTitle === sectionTitle[1] + sectionTitle[2]);
+      if (isCombinedTitleFingerprint || isSectionTitle || /^>+$/.test(text)) {
         child.remove();
       }
     }

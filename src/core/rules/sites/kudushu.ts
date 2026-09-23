@@ -15,11 +15,6 @@ export const kudushuRule: SiteRule = {
     selector: '#novelcontent',
     // #novelcontent also wraps the site watermark and a repeated nav block.
     remove: '#content_tip, ul.novelbutton',
-    replace: [
-      // Every section page repeats the chapter heading before the body, e.g.
-      // "第64章 标题 (第1/3页)". Drop it so merged chapters do not repeat the title.
-      { pattern: '^[\\s\\S]*?[（(]第\\d+[/／]\\d+页[）)]', replacement: '', flags: '' },
-    ],
   },
   navigation: {
     // Labels use a full-width dash ("上—章" / "下—页"), so text heuristics miss them.

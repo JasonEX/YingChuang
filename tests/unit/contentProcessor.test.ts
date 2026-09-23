@@ -859,6 +859,57 @@ describe('ContentProcessor', () => {
   });
 
   describe('cleanDuplicateInfo', () => {
+    it.each(['第53章 春游与打猎', '第53章 春游与打猎1'])(
+      'removes complete section title lines for %s without touching prose',
+      chapterTitle => {
+        processor.setOptions({ chapterTitle });
+        const element = doc.createElement('div');
+        element.innerHTML = [
+          '第53章 春游与打猎第(1/2)页<br>',
+          '正文开始。<br><br>',
+          '她翻到第(1/2)页，夹上书签。<br><br>',
+          '他念道：“第53章 春游与打猎第(1/2)页”。<br><br>',
+          '第53章 春游与打猎第(1/2)页,点击下一页继续阅读。<br>',
+          '<p><a href="javascript:addBookMarkByManual(1,2)">『加入书签，方便阅读』</a></p>',
+        ].join('');
+
+        const result = doc.createElement('div');
+        result.innerHTML = processor.process(element, doc);
+
+        expect(Array.from(result.querySelectorAll('p'), p => p.textContent?.trim())).toEqual([
+          '正文开始。',
+          '她翻到第(1/2)页，夹上书签。',
+          '他念道：“第53章 春游与打猎第(1/2)页”。',
+        ]);
+        expect(element.textContent).toContain('点击下一页继续阅读');
+        expect(element.querySelector('a')).not.toBeNull();
+      }
+    );
+
+    it('keeps unrelated titles, title numbers and unmarked title mentions', () => {
+      processor.setOptions({ chapterTitle: '第53章 春游与打猎21' });
+      const element = doc.createElement('div');
+      element.innerHTML = [
+        '<p>正文开始。</p>',
+        '<p>第54章 春游与打猎第(1/2)页</p>',
+        '<p>第53章 春游与打猎第(1/2)页</p>',
+        '<p>第53章 春游与打猎21</p>',
+        '<p>她写下“加入书签，方便阅读”，然后离开。</p>',
+      ].join('');
+
+      expect(processor.process(element, doc)).toBe(element.innerHTML);
+    });
+
+    it('cleans full-width section title lines even when ad removal is disabled', () => {
+      processor.setOptions({ chapterTitle: '第53章 春遊與打獵', removeAds: false });
+      const element = doc.createElement('div');
+      element.innerHTML =
+        '<p>正文開始。</p><p>第53章 春遊與打獵第（1／2）頁，點擊下一頁繼續閱讀。</p>' +
+        '<p><button>「加入書籤，方便閱讀」</button></p>';
+
+      expect(processor.process(element, doc)).toBe('<p>正文開始。</p>');
+    });
+
     it('should remove duplicate chapter title at start', () => {
       processor.setOptions({ chapterTitle: '第一章 新的开始' });
       const element = doc.createElement('div');
