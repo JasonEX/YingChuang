@@ -1,4 +1,5 @@
 import type { BeforeParseHook, SiteRule } from '../types';
+import { appendHiddenLink } from '../helpers/scriptNavigation';
 
 type QidianPageContext = {
   pageContext?: {
@@ -149,38 +150,24 @@ const qidianBeforeParse: BeforeParseHook = (doc, url) => {
     ) {
       nextChapterId = resolveQidianNextPreviewChapterId(data);
     }
-    const host = url ? new URL(url).hostname : location.hostname;
-    const navContainer = doc.createElement('div');
-    navContainer.id = 'mnr-qidian-nav';
-    navContainer.style.display = 'none';
-
-    if (bookId && hasQidianChapterId(prevChapterId)) {
-      const prev = doc.createElement('a');
-      prev.id = 'mnr-qidian-prev';
-      prev.href = `//${host}/chapter/${bookId}/${prevChapterId}/`;
-      prev.textContent = '上一章';
-      navContainer.appendChild(prev);
+    if (!bookId) return;
+    const pageUrl = url || location.href;
+    for (const [direction, id, text] of [
+      ['prev', prevChapterId, '上一章'],
+      ['next', nextChapterId, '下一章'],
+    ] as const) {
+      if (hasQidianChapterId(id)) {
+        appendHiddenLink(
+          doc,
+          `mnr-qidian-${direction}`,
+          `/chapter/${bookId}/${id}/`,
+          text,
+          pageUrl
+        );
+      }
     }
-
-    if (bookId && hasQidianChapterId(nextChapterId)) {
-      const next = doc.createElement('a');
-      next.id = 'mnr-qidian-next';
-      next.href = `//${host}/chapter/${bookId}/${nextChapterId}/`;
-      next.textContent = '下一章';
-      navContainer.appendChild(next);
-    }
-
-    if (bookId) {
-      const index = doc.createElement('a');
-      index.id = 'mnr-qidian-index';
-      // The /catalog/ route can return 406 to fetch/GM requests on newer Qidian pages.
-      // The book detail page contains the same chapter links and is more stable to parse.
-      index.href = `//${host}/book/${bookId}/`;
-      index.textContent = '目录';
-      navContainer.appendChild(index);
-    }
-
-    doc.body.appendChild(navContainer);
+    // The book page carries the same catalog without the /catalog/ route's fetch 406s.
+    appendHiddenLink(doc, 'mnr-qidian-index', `/book/${bookId}/`, '目录', pageUrl);
   } catch (e) {
     console.warn('[YingChuang] Qidian beforeParse error:', e);
   }
@@ -211,28 +198,17 @@ export const qidianMobileRule: SiteRule = {
   id: 'qidian-mobile',
   name: '起点中文网手机版',
   version: 1,
-  match: {
-    pattern: '^https?://m\\.qidian\\.com/chapter/.*',
-  },
-  content: {
-    ...qidianContent,
-  },
-  navigation: {
-    ...qidianNavigation,
-  },
-  title: {
-    ...qidianTitle,
-  },
+  match: { pattern: '^https?://m\\.qidian\\.com/chapter/.*' },
+  content: qidianContent,
+  navigation: qidianNavigation,
+  title: qidianTitle,
   hooks: {
     ...qidianHooks,
     // m.qidian.com/book/<id>/ embeds the first chapter but sits outside this rule's match on
     // purpose, so the entry redirect is declared here instead of hard-coded in SectionMerger.
     resolveEntryUrl: resolveQidianMobileBookPreviewChapterUrl,
   },
-  advanced: {
-    mutationSelector: 'main[id^="c-"]',
-    mutationChildCount: 0,
-  },
+  advanced: { mutationSelector: 'main[id^="c-"]' },
   meta: { source: 'builtin' },
 };
 
@@ -240,25 +216,14 @@ export const qidianRule: SiteRule = {
   id: 'qidian',
   name: '起点中文网',
   version: 9,
-  match: {
-    pattern: '^https?://www\\.qidian\\.com/chapter/.*',
-  },
-  content: {
-    ...qidianContent,
-  },
-  navigation: {
-    ...qidianNavigation,
-  },
-  title: {
-    ...qidianTitle,
-  },
-  hooks: {
-    ...qidianHooks,
-  },
+  match: { pattern: '^https?://www\\.qidian\\.com/chapter/.*' },
+  content: qidianContent,
+  navigation: qidianNavigation,
+  title: qidianTitle,
+  hooks: qidianHooks,
   advanced: {
     useIframe: true,
     mutationSelector: 'main[id^="c-"]',
-    mutationChildCount: 0,
   },
   meta: { source: 'builtin' },
 };

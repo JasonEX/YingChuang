@@ -8,12 +8,8 @@ export const uureadRule: SiteRule = {
   id: 'uuread',
   name: 'UU看书',
   version: 2,
-  match: {
-    pattern: '^https?://www\\.uuread\\.tw/chapter/\\d+/\\d+(?:_\\d+)?\\.html$',
-  },
-  content: {
-    selector: '.txt_tcontent',
-  },
+  match: { pattern: '^https?://www\\.uuread\\.tw/chapter/\\d+/\\d+(?:_\\d+)?\\.html$' },
+  content: { selector: '.txt_tcontent' },
   navigation: {
     next: 'a.btn-primary:nth-child(4)',
     prev: 'a.btn-primary:nth-child(1)',
@@ -24,8 +20,6 @@ export const uureadRule: SiteRule = {
     replace: '\\s*[（(]\\s*\\d+\\s*/\\s*\\d+\\s*[）)]\\s*$',
     bookSelector: '.bread > li:nth-child(4) > a:nth-child(1)',
   },
-  advanced: {
-    checkSection: true,
-  },
+  advanced: { checkSection: true },
   meta: { source: 'builtin', exampleUrl: 'https://www.uuread.tw/chapter/1880014/2545609.html' },
 };

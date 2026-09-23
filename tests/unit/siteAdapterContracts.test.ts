@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ciweimaoRule } from '@/core/rules/sites/ciweimao';
 import { createDom } from '../testUtils/dom';
 import { loadTocEntriesPaged } from '@/ui/stores/reader/toc';
+import { Parser } from '@/core/parser/Parser';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -18,6 +19,8 @@ describe('site adapter behavior contracts', () => {
     const content = '<p class="chapter">他们终于走出了山谷。</p><p class="chapter">回家。</p>';
     const decrypt = vi
       .fn()
+      .mockReturnValueOnce({ toString: () => btoa(btoa('1234567890123456second-pass')) })
+      .mockReturnValueOnce({ toString: () => content })
       .mockReturnValueOnce({ toString: () => btoa(btoa('1234567890123456second-pass')) })
       .mockReturnValueOnce({ toString: () => content });
     const fetchMock = vi.fn(async (input: string) => ({
@@ -46,6 +49,58 @@ describe('site adapter behavior contracts', () => {
     ]);
     expect(document.querySelector('#J_BookRead')!.innerHTML).toBe(content);
     expect(decrypt).toHaveBeenCalledTimes(2);
+
+    // Live host renderers can replace a body after hydration; it must remain recoverable.
+    document.querySelector('#J_BookRead')!.innerHTML = '加载中';
+    await ciweimaoRule.hooks?.beforeParse?.(document, url);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(document.querySelector('#J_BookRead')!.innerHTML).toBe(content);
+  });
+
+  it('parses a short API chapter without requesting or decrypting it a second time', async () => {
+    const url = 'https://www.ciweimao.com/chapter/123456780';
+    const indexUrl = 'https://www.ciweimao.com/chapter-list/987654321';
+    createDom(url);
+    const html = '<p class="chapter">他们终于走出了山谷。</p><p class="chapter">回家。</p>';
+    const decrypt = vi
+      .fn()
+      .mockReturnValueOnce({ toString: () => btoa(btoa('1234567890123456second-pass')) })
+      .mockReturnValueOnce({ toString: () => html });
+    const fetchMock = vi.fn(async (input: string) => {
+      if (input === indexUrl) {
+        return { ok: true, text: async () => `<a href="${url}">第一章 归途</a>` };
+      }
+      return {
+        ok: true,
+        json: async () =>
+          input.includes('ajax_get_session_code')
+            ? { code: 100000, chapter_access_key: 'abc' }
+            : {
+                code: 100000,
+                chapter_content: btoa('1234567890123456first-pass'),
+                encryt_keys: ['a', 'b', 'c'],
+              },
+      };
+    });
+    vi.stubGlobal('unsafeWindow', {
+      fetch: fetchMock,
+      CryptoJS: {
+        AES: { decrypt },
+        enc: { Base64: { parse: (s: string) => s }, Utf8: {} },
+        format: { OpenSSL: { parse: (s: string) => s } },
+      },
+    });
+    const doc = await ciweimaoRule.hooks!.fetchDocument!(url, {
+      refererUrl: url,
+      indexUrl,
+      bookTitle: '山谷归途',
+    });
+    const chapter = await new Parser().parse(doc!, url);
+    expect(chapter).toMatchObject({ title: '第一章 归途', indexUrl, bookTitle: '山谷归途' });
+    expect(chapter?.content).toContain('他们终于走出了山谷。');
+    expect(chapter?.content).toContain('回家。');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(decrypt).toHaveBeenCalledTimes(2);
   });
 
   it.each([
@@ -70,6 +125,8 @@ describe('site adapter behavior contracts', () => {
       await ciweimaoRule.hooks?.beforeParse?.(document, url);
       expect(document.querySelector('#J_BookRead')!.innerHTML).toBe('<p>已有正文不能丢失。</p>');
       expect(fetchMock).toHaveBeenCalledTimes(count as number);
+      await ciweimaoRule.hooks?.beforeParse?.(document, url);
+      expect(fetchMock).toHaveBeenCalledTimes((count as number) * 2);
     }
   );
 

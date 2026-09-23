@@ -88,8 +88,6 @@ interface ProcessingConfig {
 interface AdvancedConfig {
   /** Use iframe to load pages */
   useIframe?: boolean;
-  /** Iframe sandbox attributes */
-  iframeSandbox?: string;
   /** Mutation observer selector */
   mutationSelector?: string;
   /** Mutation child count threshold */
@@ -113,11 +111,6 @@ interface AdvancedConfig {
    * When true, treats each page as independent chapter even if URL looks like section
    */
   noSection?: boolean;
-  /**
-   * Include Referer header in requests
-   * Some sites require this to prevent 403 errors
-   */
-  withReferer?: boolean;
 }
 
 /** Canonical chapter identity and its 1-based section number. */
@@ -237,8 +230,6 @@ export interface SiteRule {
   advanced?: AdvancedConfig;
   /** Built-in adapter hooks */
   hooks?: HooksConfig;
-  /** Custom CSS styles */
-  style?: string;
 
   // === Metadata ===
   /** Rule metadata */

@@ -8,9 +8,7 @@ export const kudushuRule: SiteRule = {
   id: 'kudushu',
   name: '苦读书（移动版）',
   version: 2,
-  match: {
-    pattern: '^https?://m\\.kudushu\\.org/html/\\d+/\\d+(?:_\\d+)?/(?:[?#].*)?$',
-  },
+  match: { pattern: '^https?://m\\.kudushu\\.org/html/\\d+/\\d+(?:_\\d+)?/(?:[?#].*)?$' },
   content: {
     selector: '#novelcontent',
     // #novelcontent also wraps the site watermark and a repeated nav block.
@@ -23,9 +21,7 @@ export const kudushuRule: SiteRule = {
     next: '.content_novel > ul.novelbutton p.p3 > a[href*="/html/"]',
     index: '.content_novel > ul.novelbutton p.p2 > a[href*="/book/"]',
   },
-  title: {
-    selector: '#chaptertitle',
-  },
+  title: { selector: '#chaptertitle' },
   toc: {
     // Only the main list contains the pager; the preceding list is a repeated
     // latest-chapter preview, not part of this page's catalog order.
@@ -50,9 +46,7 @@ export const kudushuPcRule: SiteRule = {
   id: 'kudushu-pc',
   name: '苦读书（PC版）',
   version: 1,
-  match: {
-    pattern: '^https?://www\\.kudushu\\.org/html/\\d+/\\d+/\\d+\\.html(?:[?#].*)?$',
-  },
+  match: { pattern: '^https?://www\\.kudushu\\.org/html/\\d+/\\d+/\\d+\\.html(?:[?#].*)?$' },
   content: {
     selector: '#clickeye_content',
     remove: '.style3',
@@ -61,7 +55,6 @@ export const kudushuPcRule: SiteRule = {
       {
         pattern: '[（(]?\\s*苦读书\\s*www\\.kudushu\\.org\\s*[）)]?',
         replacement: '',
-        flags: 'g',
       },
     ],
   },
@@ -72,9 +65,7 @@ export const kudushuPcRule: SiteRule = {
     next: '.P_Nav .inforight a:not([href$="index.html"]):contains("下一页")',
     index: '.P_Nav .inforight a[href$="index.html"]',
   },
-  title: {
-    selector: '#cont h1',
-  },
+  title: { selector: '#cont h1' },
   toc: {
     // 源码里 <ul class="chapters"> 连开了两层，直接用 ul.chapters 会把同一批链接收集两遍。
     selector: '.index > ul.chapters',

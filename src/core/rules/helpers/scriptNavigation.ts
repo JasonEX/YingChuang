@@ -19,7 +19,7 @@ export function appendHiddenLink(
     link.href = new URL(href, base).toString();
     link.textContent = text;
     link.style.display = 'none';
-    doc.body?.appendChild(link);
+    (doc.body || doc.documentElement)?.appendChild(link);
   } catch {
     // ignore invalid URLs from site scripts
   }

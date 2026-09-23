@@ -1,4 +1,5 @@
 import type { BeforeParseHook, SiteRule } from '../types';
+import { appendHiddenLink } from '../helpers/scriptNavigation';
 
 const shu69BeforeParse: BeforeParseHook = (doc, url) => {
   try {
@@ -15,25 +16,6 @@ const shu69BeforeParse: BeforeParseHook = (doc, url) => {
       const match = text.match(new RegExp(`${key}\\s*:\\s*(["'])([^"'\\r\\n]{1,300})\\1`, 'i'));
       return match?.[2]?.trim() || '';
     };
-    const normalizeUrl = (value: string): string => {
-      if (!value) return '';
-      try {
-        return new URL(value, pageUrl).href;
-      } catch {
-        return value;
-      }
-    };
-    const ensureAnchor = (id: string, href: string, label: string): void => {
-      if (!href || doc.querySelector(`#${id}`)) return;
-      const parent = doc.body || doc.documentElement;
-      if (!parent) return;
-      const anchor = doc.createElement('a');
-      anchor.id = id;
-      anchor.href = normalizeUrl(href);
-      anchor.textContent = label;
-      anchor.style.display = 'none';
-      parent.appendChild(anchor);
-    };
 
     const bookTitle = extractString('articlename');
     const chapterTitle = extractString('chaptername');
@@ -41,10 +23,10 @@ const shu69BeforeParse: BeforeParseHook = (doc, url) => {
     const prevUrl = extractString('preview_page');
     const nextUrl = extractString('next_page');
 
-    ensureAnchor('mnr-69shu-book', indexUrl || prevUrl, bookTitle);
-    ensureAnchor('mnr-69shu-index', indexUrl, '目录');
-    ensureAnchor('mnr-69shu-prev', prevUrl, '上一章');
-    ensureAnchor('mnr-69shu-next', nextUrl, '下一章');
+    appendHiddenLink(doc, 'mnr-69shu-book', indexUrl || prevUrl, bookTitle, pageUrl);
+    appendHiddenLink(doc, 'mnr-69shu-index', indexUrl, '目录', pageUrl);
+    appendHiddenLink(doc, 'mnr-69shu-prev', prevUrl, '上一章', pageUrl);
+    appendHiddenLink(doc, 'mnr-69shu-next', nextUrl, '下一章', pageUrl);
 
     if (chapterTitle && !doc.querySelector('#mnr-69shu-title')) {
       const parent = doc.body || doc.documentElement;
@@ -74,17 +56,15 @@ export const shu69Rule: SiteRule = {
   content: {
     selector: '#txtcontent, .txtnav',
     remove:
-      'script, style, iframe, ins, .txtinfo.hide720, #txtright, .bottom-ad, .bottom-ad2, .page1, .readinline, .ad_content',
+      'ins, .txtinfo.hide720, #txtright, .bottom-ad, .bottom-ad2, .page1, .readinline, .ad_content',
     replace: [
       {
         pattern: '.*[6六].*[9九].*书.*吧.*',
         replacement: '',
-        flags: 'g',
       },
       {
         pattern: '请收藏本站.*?最新网址.*?(?:<br\\s*/?>)?',
         replacement: '',
-        flags: 'g',
       },
     ],
   },
@@ -99,9 +79,7 @@ export const shu69Rule: SiteRule = {
     bookSelector:
       '#mnr-69shu-book, .mytitle .bread a[href*="/book/"][href$=".htm"], .txtinfo a:first-child, .con_top a:nth-child(3)',
   },
-  hooks: {
-    beforeParse: shu69BeforeParse,
-  },
+  hooks: { beforeParse: shu69BeforeParse },
   advanced: {
     noSection: true,
     useIframe: true,

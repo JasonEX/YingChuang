@@ -7,44 +7,35 @@ export const twkanRule: SiteRule = {
   id: 'twkan',
   name: '台灣小說網',
   version: 1,
-  match: {
-    pattern: '^https?://twkan\\.com/txt/\\d+/\\d+/?(?:[?#].*)?$',
-  },
+  match: { pattern: '^https?://twkan\\.com/txt/\\d+/\\d+/?(?:[?#].*)?$' },
   content: {
     selector: '#txtcontent0, .txtnav',
-    remove:
-      'script, style, iframe, ins, .page1, .readinline, .read-link, .ad_content, .top-ad, .bottom-ad',
+    remove: 'ins, .page1, .readinline, .read-link, .ad_content, .top-ad, .bottom-ad',
     replace: [
       {
         pattern:
           '^[\\s\\u00a0\\u3000\\u2000-\\u200a]*第[一二三四五六七八九十百千\\d]+(?:章|节|節|回|话|話|篇|集|卷)[^<]{0,120}(?:<br\\s*/?>\\s*)+',
         replacement: '',
-        flags: 'g',
       },
       {
         pattern: '（?請記住臺灣小説網[^<\\n]*?）?',
         replacement: '',
-        flags: 'g',
       },
       {
         pattern: '（?请记住[臺台]湾小[説说]网[^<\\n]{0,160}(?:章节更新|網站|网站)[^<\\n]{0,40}）?',
         replacement: '',
-        flags: 'g',
       },
       {
         pattern: '〖[^〗]*分享[^〗]*運營[^〗]*〗',
         replacement: '',
-        flags: 'g',
       },
       {
         pattern: '【[^】]{0,100}(?:域名|[臺台]湾小[説说]网|[臺台]湾好书)[^】]{0,160}】',
         replacement: '',
-        flags: 'g',
       },
       {
         pattern: '本章完。?',
         replacement: '',
-        flags: 'g',
       },
     ],
   },
@@ -56,13 +47,10 @@ export const twkanRule: SiteRule = {
   title: {
     selector: '.txtnav > h1, h1',
     pattern: '^(.+?)-(.+?)-[^-]+-.*?台灣小說網$',
-    patternIndex: 1,
     bookPatternIndex: 2,
     bookSelector: 'a[href*="/book/"][href$="/index.html"]',
   },
-  advanced: {
-    useIframe: true,
-  },
+  advanced: { useIframe: true },
   meta: {
     source: 'builtin',
     exampleUrl: 'https://twkan.com/txt/93181/53052605',

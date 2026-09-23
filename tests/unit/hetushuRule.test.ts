@@ -181,7 +181,8 @@ describe('Hetushu rule', () => {
     const url = 'https://www.hetushu.com/book/9145/6567989.html';
     const dom = new JSDOM('', { url });
     const doc = new dom.window.DOMParser().parseFromString(
-      '<!doctype html><html><body data-randomtype="substep">' +
+      '<!doctype html><html><head><link rel="stylesheet" href="/unused.css"></head>' +
+        '<body data-randomtype="substep">' +
         '<div id="left"><h3>测试书名</h3></div><div id="content"><div class="mask"></div>' +
         '<h2>第一章</h2><div>第二段正文</div><div>第一段正文</div></div></body></html>',
       'text/html'
@@ -203,6 +204,29 @@ describe('Hetushu rule', () => {
       'https://www.hetushu.com/book/9145/r6567989.json',
       expect.objectContaining({ credentials: 'include' })
     );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(parsedContent).toContain('第一段正文');
+    expect(parsedContent).toContain('第二段正文');
     expect(parsedContent.indexOf('第一段正文')).toBeLessThan(parsedContent.indexOf('第二段正文'));
+  });
+
+  it('still loads visibility CSS when only some rows have an explicit mapping', async () => {
+    const doc = new DOMParser().parseFromString(
+      '<link rel="stylesheet" href="/visibility.css"><div id="content">' +
+        '<p data-mnr-hetushu-visible="true">映射确认的正文。</p>' +
+        '<div class="shown">依赖样式的正文。</div><div class="noise">隐藏干扰。</div></div>',
+      'text/html'
+    );
+    const fetchText = vi.fn(async () => {
+      // A live renderer may replace rows while the stylesheet request is pending.
+      doc.querySelector('.shown')!.outerHTML = '<div class="shown">等待期间更新的正文。</div>';
+      return '#content .shown{display:block}#content .noise{display:none}';
+    });
+    await hetushuRule.hooks!.beforeParse!(doc, 'https://www.hetushu.com/book/1/2.html', {
+      fetchText,
+      fetchJson: vi.fn(),
+    });
+    expect(fetchText).toHaveBeenCalledTimes(1);
+    expect(doc.querySelector('#content')?.textContent).toBe('映射确认的正文。等待期间更新的正文。');
   });
 });

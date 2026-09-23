@@ -253,7 +253,15 @@ const hetushuBeforeParse: BeforeParseHook = async (doc, url, helpers) => {
       return { block, none };
     };
 
-    const styleClasses = extractDisplayClasses(await collectStyleText());
+    // Mapped rows are explicitly visible; their visibility no longer depends on site CSS.
+    const needsVisibilityCss = Array.from(contentEl.children).some(
+      el =>
+        el !== titleEl &&
+        el.tagName !== 'SCRIPT' &&
+        el.tagName !== 'STYLE' &&
+        !el.hasAttribute(MAPPED_VISIBLE_ATTRIBUTE)
+    );
+    const styleClasses = extractDisplayClasses(needsVisibilityCss ? await collectStyleText() : '');
     const hasLayout = (el: Element) => {
       if (!win) return false;
       const rect = el.getBoundingClientRect();
@@ -327,9 +335,7 @@ export const hetushuRule: SiteRule = {
   id: 'hetushu',
   name: '和图书',
   version: 3,
-  match: {
-    pattern: '^https?://www\\.hetushu\\.com/book/\\d+/\\d+\\.html$',
-  },
+  match: { pattern: '^https?://www\\.hetushu\\.com/book/\\d+/\\d+\\.html$' },
   content: {
     selector: '#content',
     remove: 'h2, acronym, bdo, big, cite, code, dfn, kbd, q, s, samp, strike, tt, u, var, ins',
@@ -339,14 +345,8 @@ export const hetushuRule: SiteRule = {
     prev: 'a#pre',
     index: '#left h3 a',
   },
-  title: {
-    bookSelector: '#left h3',
-  },
-  hooks: {
-    beforeParse: hetushuBeforeParse,
-  },
-  advanced: {
-    useIframe: true,
-  },
+  title: { bookSelector: '#left h3' },
+  hooks: { beforeParse: hetushuBeforeParse },
+  advanced: { useIframe: true },
   meta: { source: 'builtin', exampleUrl: 'https://www.hetushu.com/book/9145/6567989.html' },
 };

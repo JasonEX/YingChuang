@@ -24,17 +24,14 @@ export const sto9Rule: SiteRule = {
   id: 'sto9',
   name: '思兔阅读',
   version: 2,
-  match: {
-    pattern: '^https?://(?:www\\.)?sto9\\.com/txt/\\d+/\\d+\\.html(?:[?#].*)?$',
-  },
+  match: { pattern: '^https?://(?:www\\.)?sto9\\.com/txt/\\d+/\\d+\\.html(?:[?#].*)?$' },
   content: {
     selector: '.txtnav',
-    remove: 'script, style, iframe, ins, .txtright, .txtad, .txtcenter',
+    remove: 'ins, .txtright, .txtad',
     replace: [
       {
         pattern: '[（(]\\s*還有更新耶\\s*[）)]',
         replacement: '',
-        flags: 'g',
       },
     ],
   },
@@ -47,9 +44,7 @@ export const sto9Rule: SiteRule = {
     selector: '.txtnav > h1',
     bookSelector: '.bread a[href*="/book/"][href$="/index.html"]',
   },
-  hooks: {
-    beforeParse: sto9BeforeParse,
-  },
+  hooks: { beforeParse: sto9BeforeParse },
   meta: {
     source: 'builtin',
     exampleUrl: 'https://sto9.com/txt/7974/7627078.html',

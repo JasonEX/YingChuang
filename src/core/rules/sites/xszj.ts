@@ -12,12 +12,10 @@ export const xszjRule: SiteRule = {
   id: 'xszj',
   name: '小说之家',
   version: 1,
-  match: {
-    pattern: '^https?://(?:m\\.)?xszj\\.org/b/\\d+/c/\\d+(?:[?#].*)?$',
-  },
+  match: { pattern: '^https?://(?:m\\.)?xszj\\.org/b/\\d+/c/\\d+(?:[?#].*)?$' },
   content: {
     selector: '#booktxt',
-    remove: 'script, style, iframe, ins',
+    remove: 'ins',
   },
   navigation: {
     prev: '.bottem1 a:contains("上一章"), .bottem1 a:contains("上一页"), .bottem1 a:contains("上一頁")',

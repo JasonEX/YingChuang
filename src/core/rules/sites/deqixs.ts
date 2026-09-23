@@ -67,10 +67,7 @@ const deqixsCoBeforeParse: BeforeParseHook = async (doc, url, helpers) => {
     if (payload.status !== 1 || typeof content !== 'string' || !content.trim()) return;
 
     const contentEl = doc.querySelector<HTMLElement>('#chapter-content');
-    if (contentEl) {
-      contentEl.innerHTML = content;
-      contentEl.setAttribute('data-mnr-deqixs-full', '1');
-    }
+    if (contentEl) contentEl.innerHTML = content;
   } catch (e) {
     console.warn('[YingChuang] Deqixs dynamic beforeParse error:', e);
   }
@@ -84,12 +81,10 @@ export const deqixsRule: SiteRule = {
   id: 'deqixs',
   name: '得奇小说网',
   version: 1,
-  match: {
-    pattern: '^https?://www\\.deqixs\\.org/\\d+/\\d+(?:_\\d+)?\\.html(?:[?#].*)?$',
-  },
+  match: { pattern: '^https?://www\\.deqixs\\.org/\\d+/\\d+(?:_\\d+)?\\.html(?:[?#].*)?$' },
   content: {
     selector: '.con',
-    remove: 'script, style, iframe, ins',
+    remove: 'ins',
   },
   navigation: {
     prev: '.prenext span:first-child a[href$=".html"]',
@@ -101,12 +96,8 @@ export const deqixsRule: SiteRule = {
     replace: '^.*?>\\s*',
     bookSelector: '.submenu h1 > a[href$="/"]',
   },
-  toc: {
-    excludeAncestors: '.new, .item, h1, h2',
-  },
-  advanced: {
-    checkSection: true,
-  },
+  toc: { excludeAncestors: '.new, .item, h1, h2' },
+  advanced: { checkSection: true },
   meta: {
     source: 'builtin',
     exampleUrl: 'https://www.deqixs.org/24/18442_6.html',
@@ -120,23 +111,19 @@ export const deqixsCoRule: SiteRule = {
   id: 'deqixs-co',
   name: '得奇小说网（动态版）',
   version: 3,
-  match: {
-    pattern: '^https?://www\\.deqixs\\.(?:co|cc)/books/\\d+/\\d+\\.html(?:[?#].*)?$',
-  },
+  match: { pattern: '^https?://www\\.deqixs\\.(?:co|cc)/books/\\d+/\\d+\\.html(?:[?#].*)?$' },
   content: {
     selector: '#chapter-content',
-    remove: 'script, style, iframe, ins, .loading, .error',
+    remove: 'ins, .loading, .error',
     replace: [
       {
         pattern:
           '当&前@章#节\\$内%容\\^不&完\\*整！要~查!看-完_整\\|章;节\\)请\\(退&出%阅#读\\|模\\*式！',
         replacement: '',
-        flags: 'g',
       },
       {
         pattern: '本章节未完.+?请订阅',
         replacement: '',
-        flags: 'g',
       },
     ],
   },
@@ -154,9 +141,7 @@ export const deqixsCoRule: SiteRule = {
     // The preceding list is a reverse-ordered latest-chapter preview.
     selector: '#list-chapterAll',
   },
-  hooks: {
-    beforeParse: deqixsCoBeforeParse,
-  },
+  hooks: { beforeParse: deqixsCoBeforeParse },
   meta: {
     source: 'builtin',
     exampleUrl: 'https://www.deqixs.cc/books/325/266271.html',

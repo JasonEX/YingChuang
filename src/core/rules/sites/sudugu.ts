@@ -8,12 +8,10 @@ export const suduguRule: SiteRule = {
   id: 'sudugu',
   name: '速读谷',
   version: 1,
-  match: {
-    pattern: '^https?://www\\.shudugu\\.org/\\d+/\\d+(?:-\\d+)?\\.html(?:[?#].*)?$',
-  },
+  match: { pattern: '^https?://www\\.shudugu\\.org/\\d+/\\d+(?:-\\d+)?\\.html(?:[?#].*)?$' },
   content: {
     selector: '.con',
-    remove: 'script, style, iframe, ins',
+    remove: 'ins',
   },
   navigation: {
     prev: '.prenext span:first-child a',
@@ -25,12 +23,8 @@ export const suduguRule: SiteRule = {
     replace: '^.*?>\\s*',
     bookSelector: '.submenu h1 > a[href^="/"][href$="/"]',
   },
-  toc: {
-    excludeAncestors: '.new, .item, h1, h2',
-  },
-  advanced: {
-    checkSection: true,
-  },
+  toc: { excludeAncestors: '.new, .item, h1, h2' },
+  advanced: { checkSection: true },
   meta: {
     source: 'builtin',
     exampleUrl: 'https://www.shudugu.org/109/1226047.html',

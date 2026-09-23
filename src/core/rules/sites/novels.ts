@@ -15,13 +15,11 @@ export const novelsRule: SiteRule = {
   id: 'novels',
   name: '繁體小說',
   version: 1,
-  match: {
-    pattern: CHAPTER_URL.source,
-  },
+  match: { pattern: CHAPTER_URL.source },
   content: {
     selector: '#article',
     // The rendered body consists of paragraphs; direct div children are ad slots.
-    remove: ':scope > div, script, style, iframe, ins',
+    remove: ':scope > div, ins',
   },
   navigation: { prev: '#prev_url', next: '#next_url', index: '#info_url' },
   title: {
@@ -29,9 +27,7 @@ export const novelsRule: SiteRule = {
     replace: '\\s*[（(]\\d+\\s*/\\s*\\d+[）)]\\s*$',
     bookSelector: '.text_info a:first-child',
   },
-  advanced: {
-    checkSection: true,
-  },
+  advanced: { checkSection: true },
   hooks: {
     normalizeChapterUrl: normalizeNovelsUrl,
     parseSectionUrl: url => {

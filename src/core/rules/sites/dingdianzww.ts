@@ -67,7 +67,6 @@ const dingdianzwwBeforeParse: BeforeParseHook = async (doc, url, helpers) => {
     if (payload.status !== 1 || typeof content !== 'string' || !content.trim()) return;
 
     contentEl.innerHTML = content;
-    contentEl.setAttribute('data-mnr-dingdianzww-full', '1');
   } catch (e) {
     console.warn('[YingChuang] Dingdianzww beforeParse error:', e);
   }
@@ -81,23 +80,19 @@ export const dingdianzwwRule: SiteRule = {
   id: 'dingdianzww',
   name: '顶点小说',
   version: 2,
-  match: {
-    pattern: '^https?://dingdianzww\\.org/\\d+/\\d+\\.html(?:[?#].*)?$',
-  },
+  match: { pattern: '^https?://dingdianzww\\.org/\\d+/\\d+\\.html(?:[?#].*)?$' },
   content: {
     selector: '.txtnav',
-    remove: 'script, style, iframe, ins, .txtinfo.hide720, .readinline, .ad_content',
+    remove: 'ins, .txtinfo.hide720, .readinline, .ad_content',
     replace: [
       {
         pattern: 'PC站点如章节文字不全请用手机访问dingdianzww\\.org',
         replacement: '',
-        flags: 'g',
       },
       {
         pattern:
           '当&前@章#节\\$内%容\\^不&完\\*整！要~查!看-完_整\\|章;节\\)请\\(退&出%阅#读\\|模\\*式！',
         replacement: '',
-        flags: 'g',
       },
     ],
   },
@@ -111,9 +106,7 @@ export const dingdianzwwRule: SiteRule = {
     replace: '\\(第[^)]*页\\)\\s*$',
     bookSelector: '.bread a[href^="/"]:not([href="/"]):not([href="/index.html"])[href$="/"]',
   },
-  hooks: {
-    beforeParse: dingdianzwwBeforeParse,
-  },
+  hooks: { beforeParse: dingdianzwwBeforeParse },
   advanced: {
     useIframe: true,
     noSection: true,

@@ -59,6 +59,16 @@ function makeDoc(options: { shortChapter?: boolean } = {}): Document {
 }
 
 describe('TTKS rule', () => {
+  it('preserves interior short paragraphs and formatting while removing a noisy tail', async () => {
+    const doc = makeDoc();
+    const content = doc.querySelector('.frame_body > .title + .content')!;
+    content.innerHTML =
+      '<p><em>开头。</em></p><p>福</p><p></p><p>正文。（本書首發天天看小說）</p>' +
+      '<p>福</p><p> </p><p>（本書首發天天看小說）</p><p>&gt;</p>';
+    await ttksRule.hooks!.beforeParse!(doc, url);
+    expect(content.innerHTML).toBe('<p><em>开头。</em></p><p>福</p><p></p><p>正文。</p>');
+  });
+
   it('is auto-discovered and matches numeric chapter pages only', () => {
     expect(builtInRules).toContain(ttksRule);
     expect(ttksRule.version).toBe(1);

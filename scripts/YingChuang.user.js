@@ -3198,6 +3198,7 @@
 		ciweimaoRule: () => ciweimaoRule,
 		ciweimaoWapRule: () => ciweimaoWapRule
 	});
+	var DECRYPTED_CHAPTER_ATTRIBUTE = "data-mnr-ciweimao-chapter";
 	function asRecord(value) {
 		return value && typeof value === "object" ? value : null;
 	}
@@ -3312,12 +3313,12 @@
 		return decryptCiweimaoContent(chapterContent, encryptedKeys, accessKey, crypto);
 	}
 	async function decryptCiweimaoIfNeeded(doc, contentEl, pageUrl, helpers) {
+		const chapterId = doc.querySelector("#J_BookCnt")?.getAttribute("data-id") || getCiweimaoChapterId(pageUrl);
+		if (!chapterId || contentEl.getAttribute(DECRYPTED_CHAPTER_ATTRIBUTE) === chapterId) return;
 		const hasWatermark = !!contentEl.querySelector("#J_BookRead_WaterMark, .watermark");
 		const text = (contentEl.textContent || "").replace(/\s+/g, "").trim();
 		const chapterParas = contentEl.querySelectorAll("p.chapter").length;
 		if (!(hasWatermark || text.length < 200 || chapterParas < 3)) return;
-		const chapterId = doc.querySelector("#J_BookCnt")?.getAttribute("data-id") || (pageUrl.match(/chapter\/(\d+)/) || [])[1];
-		if (!chapterId) return;
 		const html = await fetchCiweimaoContent(chapterId, pageUrl, helpers);
 		if (html) contentEl.innerHTML = html;
 	}
@@ -3476,6 +3477,7 @@
 		content.className = "read-bd";
 		content.id = "J_BookRead";
 		content.innerHTML = options.contentHtml;
+		content.setAttribute(DECRYPTED_CHAPTER_ATTRIBUTE, getCiweimaoChapterId(options.url));
 		const nav = doc.createElement("div");
 		nav.className = "book-read-page";
 		if (options.prevUrl) {
@@ -3508,16 +3510,16 @@
 			const chapterId = getCiweimaoChapterId(targetUrl);
 			if (!chapterId || !/\/\/(?:www|wap)\.ciweimao\.com\/chapter\//.test(targetUrl)) return null;
 			const indexUrl = refChapter.indexUrl || "";
-			const toc = indexUrl ? await getCiweimaoToc(indexUrl, refChapter.url, refChapter.bookTitle || "") : null;
-			const normalizedTargetUrl = normalizeCiweimaoUrl(targetUrl, refChapter.url);
-			const tocIndex = toc?.entries.findIndex((entry) => normalizeCiweimaoUrl(entry.url, refChapter.url) === normalizedTargetUrl) ?? -1;
+			const toc = indexUrl ? await getCiweimaoToc(indexUrl, refChapter.refererUrl, refChapter.bookTitle || "") : null;
+			const normalizedTargetUrl = normalizeCiweimaoUrl(targetUrl, refChapter.refererUrl);
+			const tocIndex = toc?.entries.findIndex((entry) => normalizeCiweimaoUrl(entry.url, refChapter.refererUrl) === normalizedTargetUrl) ?? -1;
 			if (!toc || tocIndex < 0) return null;
 			const entry = toc.entries[tocIndex];
 			const prevUrl = toc.entries[tocIndex - 1]?.url || "";
 			const nextUrl = toc.entries[tocIndex + 1]?.url || "";
 			const html = await fetchCiweimaoContent(chapterId, normalizedTargetUrl);
 			if (!html) return null;
-			const doc = createCiweimaoApiDocument({
+			return createCiweimaoApiDocument({
 				bookTitle: toc.bookTitle || refChapter.bookTitle || "",
 				contentHtml: html,
 				indexUrl,
@@ -3526,9 +3528,6 @@
 				title: entry.title,
 				url: normalizedTargetUrl
 			});
-			const contentEl = doc.querySelector("#J_BookRead");
-			if (contentEl) cleanupCiweimaoWatermarks(doc, contentEl);
-			return doc;
 		} catch (e) {
 			console.warn("[YingChuang] Ciweimao API document error:", e);
 			return null;
@@ -3561,18 +3560,19 @@
 			return doc.querySelector("#J_BookCnt, #J_BookRead") ? false : null;
 		},
 		beforeParse: ciweimaoBeforeParse,
-		fetchDocument: (url, context) => fetchCiweimaoApiDocument(url, {
-			bookTitle: context.bookTitle,
-			indexUrl: context.indexUrl,
-			url: context.refererUrl
-		})
+		fetchDocument: fetchCiweimaoApiDocument
+	};
+	var ciweimaoAdvanced = {
+		mutationSelector: "#J_BookRead",
+		mutationChildCount: 2,
+		timeout: 3e3
 	};
 	var ciweimaoRule = {
 		id: "ciweimao",
 		name: "刺猬猫",
 		version: 2,
 		match: { pattern: "^https?://www\\.ciweimao\\.com/chapter/\\d+" },
-		content: { ...ciweimaoContent },
+		content: ciweimaoContent,
 		navigation: {
 			prev: "#J_BtnPagePrev[href^=\"http\"]",
 			index: ".book-read-page a[href*=\"/chapter-list/\"]",
@@ -3582,12 +3582,8 @@
 			selector: ".read-hd .chapter",
 			bookSelector: ".breadcrumb > a:last()"
 		},
-		hooks: { ...ciweimaoHooks },
-		advanced: {
-			mutationSelector: "#J_BookRead",
-			mutationChildCount: 2,
-			timeout: 3e3
-		},
+		hooks: ciweimaoHooks,
+		advanced: ciweimaoAdvanced,
 		meta: {
 			source: "builtin",
 			exampleUrl: "https://www.ciweimao.com/chapter/113909523"
@@ -3598,19 +3594,15 @@
 		name: "刺猬猫(移动端)",
 		version: 2,
 		match: { pattern: "^https?://wap\\.ciweimao\\.com/chapter/\\d+/?(?:[?#].*)?$" },
-		content: { ...ciweimaoContent },
+		content: ciweimaoContent,
 		navigation: {
 			prev: ".J_BtnPagePrev[href^=\"http\"]",
 			index: ".book-read-page .btn-list[href*=\"/chapter/\"]",
 			next: ".J_BtnPageNext[href^=\"http\"]"
 		},
 		title: { selector: "h1.read-hd" },
-		hooks: { ...ciweimaoHooks },
-		advanced: {
-			mutationSelector: "#J_BookRead",
-			mutationChildCount: 2,
-			timeout: 3e3
-		},
+		hooks: ciweimaoHooks,
+		advanced: ciweimaoAdvanced,
 		meta: {
 			source: "builtin",
 			exampleUrl: "https://wap.ciweimao.com/chapter/113489050"
@@ -3627,7 +3619,7 @@
 			link.href = new URL(href, base).toString();
 			link.textContent = text;
 			link.style.display = "none";
-			doc.body?.appendChild(link);
+			(doc.body || doc.documentElement)?.appendChild(link);
 		} catch {}
 	}
 	function extractChapterNav(scriptText) {
@@ -3690,10 +3682,7 @@
 			const content = payload.data?.content;
 			if (payload.status !== 1 || typeof content !== "string" || !content.trim()) return;
 			const contentEl = doc.querySelector("#chapter-content");
-			if (contentEl) {
-				contentEl.innerHTML = content;
-				contentEl.setAttribute("data-mnr-deqixs-full", "1");
-			}
+			if (contentEl) contentEl.innerHTML = content;
 		} catch (e) {
 			console.warn("[YingChuang] Deqixs dynamic beforeParse error:", e);
 		}
@@ -3705,7 +3694,7 @@
 		match: { pattern: "^https?://www\\.deqixs\\.org/\\d+/\\d+(?:_\\d+)?\\.html(?:[?#].*)?$" },
 		content: {
 			selector: ".con",
-			remove: "script, style, iframe, ins"
+			remove: "ins"
 		},
 		navigation: {
 			prev: ".prenext span:first-child a[href$=\".html\"]",
@@ -3731,15 +3720,13 @@
 		match: { pattern: "^https?://www\\.deqixs\\.(?:co|cc)/books/\\d+/\\d+\\.html(?:[?#].*)?$" },
 		content: {
 			selector: "#chapter-content",
-			remove: "script, style, iframe, ins, .loading, .error",
+			remove: "ins, .loading, .error",
 			replace: [{
 				pattern: "当&前@章#节\\$内%容\\^不&完\\*整！要~查!看-完_整\\|章;节\\)请\\(退&出%阅#读\\|模\\*式！",
-				replacement: "",
-				flags: "g"
+				replacement: ""
 			}, {
 				pattern: "本章节未完.+?请订阅",
-				replacement: "",
-				flags: "g"
+				replacement: ""
 			}]
 		},
 		navigation: {
@@ -3807,7 +3794,6 @@
 			const content = payload.data?.content;
 			if (payload.status !== 1 || typeof content !== "string" || !content.trim()) return;
 			contentEl.innerHTML = content;
-			contentEl.setAttribute("data-mnr-dingdianzww-full", "1");
 		} catch (e) {
 			console.warn("[YingChuang] Dingdianzww beforeParse error:", e);
 		}
@@ -3819,15 +3805,13 @@
 		match: { pattern: "^https?://dingdianzww\\.org/\\d+/\\d+\\.html(?:[?#].*)?$" },
 		content: {
 			selector: ".txtnav",
-			remove: "script, style, iframe, ins, .txtinfo.hide720, .readinline, .ad_content",
+			remove: "ins, .txtinfo.hide720, .readinline, .ad_content",
 			replace: [{
 				pattern: "PC站点如章节文字不全请用手机访问dingdianzww\\.org",
-				replacement: "",
-				flags: "g"
+				replacement: ""
 			}, {
 				pattern: "当&前@章#节\\$内%容\\^不&完\\*整！要~查!看-完_整\\|章;节\\)请\\(退&出%阅#读\\|模\\*式！",
-				replacement: "",
-				flags: "g"
+				replacement: ""
 			}]
 		},
 		navigation: {
@@ -3856,14 +3840,7 @@
 			const fallbackUrl = typeof location !== "undefined" && typeof location.href === "string" ? location.href : "";
 			const pageUrl = url || doc.location?.href || fallbackUrl;
 			const match = (pageUrl ? new URL(pageUrl).pathname : "").match(/^\/gb_(\d+)\/(\d+)\/\d+/);
-			if (match && !doc.querySelector("#mnr-goboo-index")) {
-				const index = doc.createElement("a");
-				index.id = "mnr-goboo-index";
-				index.href = `/ml_${match[1]}/${match[2]}`;
-				index.textContent = "目录";
-				index.style.display = "none";
-				doc.body.appendChild(index);
-			}
+			if (match) appendHiddenLink(doc, "mnr-goboo-index", `/ml_${match[1]}/${match[2]}`, "目录", pageUrl);
 			const hasEncodedContent = Array.from(doc.scripts).some((script) => /p_key\s*=\s*['"][A-Za-z0-9+/=]{80,}['"]/.test(script.textContent || ""));
 			doc.querySelectorAll(".content p").forEach((p) => {
 				const text = (p.textContent || "").replace(/\s+/g, "");
@@ -3882,22 +3859,19 @@
 		match: { pattern: "^https?://m\\.goboo\\.cc/gb_\\d+/\\d+/\\d+(?:/\\d+)?/?$" },
 		content: {
 			selector: ".content",
-			remove: "script, iframe, ins, .page, .emgoouqv_b",
+			remove: "ins, .page, .emgoouqv_b",
 			replace: [
 				{
 					pattern: "【[^】]+】小说免费阅读，请收藏\\s*钢笔小说【goboo\\.cc】",
-					replacement: "",
-					flags: "g"
+					replacement: ""
 				},
 				{
 					pattern: "阅\\|读\\|模\\|式\\|或\\|畅\\|读\\|模\\|式\\|下，?无\\|法\\|显\\|示\\|本\\|章\\|节\\|全\\|部\\|内\\|容，请\\|返\\|回\\|原\\|网\\|页阅\\|读。?加\\|载\\|更\\|多",
-					replacement: "",
-					flags: "g"
+					replacement: ""
 				},
 				{
 					pattern: "本章未完，点击\\[下一页\\]继续阅读-->",
-					replacement: "",
-					flags: "g"
+					replacement: ""
 				}
 			]
 		},
@@ -3908,7 +3882,6 @@
 		},
 		title: {
 			pattern: "^(.+?)(?:\\(\\d+/\\d+\\))?\\s+-\\s+(.+?)小说\\s+-\\s+钢笔小说$",
-			patternIndex: 1,
 			bookPatternIndex: 2
 		},
 		hooks: { beforeParse: gobooBeforeParse },
@@ -4109,7 +4082,7 @@
 					none
 				};
 			};
-			const styleClasses = extractDisplayClasses(await collectStyleText());
+			const styleClasses = extractDisplayClasses(Array.from(contentEl.children).some((el) => el !== titleEl && el.tagName !== "SCRIPT" && el.tagName !== "STYLE" && !el.hasAttribute(MAPPED_VISIBLE_ATTRIBUTE)) ? await collectStyleText() : "");
 			const hasLayout = (el) => {
 				if (!win) return false;
 				const rect = el.getBoundingClientRect();
@@ -4229,8 +4202,7 @@
 			remove: ".style3",
 			replace: [{
 				pattern: "[（(]?\\s*苦读书\\s*www\\.kudushu\\.org\\s*[）)]?",
-				replacement: "",
-				flags: "g"
+				replacement: ""
 			}]
 		},
 		navigation: {
@@ -4310,7 +4282,7 @@
 		match: { pattern: CHAPTER_URL.source },
 		content: {
 			selector: "#article",
-			remove: ":scope > div, script, style, iframe, ins"
+			remove: ":scope > div, ins"
 		},
 		navigation: {
 			prev: "#prev_url",
@@ -4451,32 +4423,18 @@
 			const prevChapterId = chapterInfo?.prev;
 			let nextChapterId = chapterInfo?.next;
 			if (!hasQidianChapterId(nextChapterId) && currentChapterId && hasQidianChapterId(firstChapterId) && String(firstChapterId) === currentChapterId) nextChapterId = resolveQidianNextPreviewChapterId(data);
-			const host = url ? new URL(url).hostname : location.hostname;
-			const navContainer = doc.createElement("div");
-			navContainer.id = "mnr-qidian-nav";
-			navContainer.style.display = "none";
-			if (bookId && hasQidianChapterId(prevChapterId)) {
-				const prev = doc.createElement("a");
-				prev.id = "mnr-qidian-prev";
-				prev.href = `//${host}/chapter/${bookId}/${prevChapterId}/`;
-				prev.textContent = "上一章";
-				navContainer.appendChild(prev);
-			}
-			if (bookId && hasQidianChapterId(nextChapterId)) {
-				const next = doc.createElement("a");
-				next.id = "mnr-qidian-next";
-				next.href = `//${host}/chapter/${bookId}/${nextChapterId}/`;
-				next.textContent = "下一章";
-				navContainer.appendChild(next);
-			}
-			if (bookId) {
-				const index = doc.createElement("a");
-				index.id = "mnr-qidian-index";
-				index.href = `//${host}/book/${bookId}/`;
-				index.textContent = "目录";
-				navContainer.appendChild(index);
-			}
-			doc.body.appendChild(navContainer);
+			if (!bookId) return;
+			const pageUrl = url || location.href;
+			for (const [direction, id, text] of [[
+				"prev",
+				prevChapterId,
+				"上一章"
+			], [
+				"next",
+				nextChapterId,
+				"下一章"
+			]]) if (hasQidianChapterId(id)) appendHiddenLink(doc, `mnr-qidian-${direction}`, `/chapter/${bookId}/${id}/`, text, pageUrl);
+			appendHiddenLink(doc, "mnr-qidian-index", `/book/${bookId}/`, "目录", pageUrl);
 		} catch (e) {
 			console.warn("[YingChuang] Qidian beforeParse error:", e);
 		}
@@ -4497,17 +4455,14 @@
 		name: "起点中文网手机版",
 		version: 1,
 		match: { pattern: "^https?://m\\.qidian\\.com/chapter/.*" },
-		content: { ...qidianContent },
-		navigation: { ...qidianNavigation },
-		title: { ...qidianTitle },
+		content: qidianContent,
+		navigation: qidianNavigation,
+		title: qidianTitle,
 		hooks: {
 			...qidianHooks,
 			resolveEntryUrl: resolveQidianMobileBookPreviewChapterUrl
 		},
-		advanced: {
-			mutationSelector: "main[id^=\"c-\"]",
-			mutationChildCount: 0
-		},
+		advanced: { mutationSelector: "main[id^=\"c-\"]" },
 		meta: { source: "builtin" }
 	};
 	var qidianRule = {
@@ -4515,14 +4470,13 @@
 		name: "起点中文网",
 		version: 9,
 		match: { pattern: "^https?://www\\.qidian\\.com/chapter/.*" },
-		content: { ...qidianContent },
-		navigation: { ...qidianNavigation },
-		title: { ...qidianTitle },
-		hooks: { ...qidianHooks },
+		content: qidianContent,
+		navigation: qidianNavigation,
+		title: qidianTitle,
+		hooks: qidianHooks,
 		advanced: {
 			useIframe: true,
-			mutationSelector: "main[id^=\"c-\"]",
-			mutationChildCount: 0
+			mutationSelector: "main[id^=\"c-\"]"
 		},
 		meta: { source: "builtin" }
 	};
@@ -4536,34 +4490,15 @@
 			const extractString = (key) => {
 				return text.match(new RegExp(`${key}\\s*:\\s*(["'])([^"'\\r\\n]{1,300})\\1`, "i"))?.[2]?.trim() || "";
 			};
-			const normalizeUrl = (value) => {
-				if (!value) return "";
-				try {
-					return new URL(value, pageUrl).href;
-				} catch {
-					return value;
-				}
-			};
-			const ensureAnchor = (id, href, label) => {
-				if (!href || doc.querySelector(`#${id}`)) return;
-				const parent = doc.body || doc.documentElement;
-				if (!parent) return;
-				const anchor = doc.createElement("a");
-				anchor.id = id;
-				anchor.href = normalizeUrl(href);
-				anchor.textContent = label;
-				anchor.style.display = "none";
-				parent.appendChild(anchor);
-			};
 			const bookTitle = extractString("articlename");
 			const chapterTitle = extractString("chaptername");
 			const indexUrl = extractString("index_page");
 			const prevUrl = extractString("preview_page");
 			const nextUrl = extractString("next_page");
-			ensureAnchor("mnr-69shu-book", indexUrl || prevUrl, bookTitle);
-			ensureAnchor("mnr-69shu-index", indexUrl, "目录");
-			ensureAnchor("mnr-69shu-prev", prevUrl, "上一章");
-			ensureAnchor("mnr-69shu-next", nextUrl, "下一章");
+			appendHiddenLink(doc, "mnr-69shu-book", indexUrl || prevUrl, bookTitle, pageUrl);
+			appendHiddenLink(doc, "mnr-69shu-index", indexUrl, "目录", pageUrl);
+			appendHiddenLink(doc, "mnr-69shu-prev", prevUrl, "上一章", pageUrl);
+			appendHiddenLink(doc, "mnr-69shu-next", nextUrl, "下一章", pageUrl);
 			if (chapterTitle && !doc.querySelector("#mnr-69shu-title")) {
 				const parent = doc.body || doc.documentElement;
 				if (!parent) return;
@@ -4584,15 +4519,13 @@
 		match: { pattern: "^https?://(?:www\\.)?69(?:shu|yuedu)[a-z0-9]*?\\.(?:pro|top|com|cx|net|co|me|biz)/(?:txt|c|r)/\\d+/\\d+/?(?:[?#].*)?$" },
 		content: {
 			selector: "#txtcontent, .txtnav",
-			remove: "script, style, iframe, ins, .txtinfo.hide720, #txtright, .bottom-ad, .bottom-ad2, .page1, .readinline, .ad_content",
+			remove: "ins, .txtinfo.hide720, #txtright, .bottom-ad, .bottom-ad2, .page1, .readinline, .ad_content",
 			replace: [{
 				pattern: ".*[6六].*[9九].*书.*吧.*",
-				replacement: "",
-				flags: "g"
+				replacement: ""
 			}, {
 				pattern: "请收藏本站.*?最新网址.*?(?:<br\\s*/?>)?",
-				replacement: "",
-				flags: "g"
+				replacement: ""
 			}]
 		},
 		navigation: {
@@ -4630,11 +4563,10 @@
 		match: { pattern: "^https?://(?:www\\.)?sto9\\.com/txt/\\d+/\\d+\\.html(?:[?#].*)?$" },
 		content: {
 			selector: ".txtnav",
-			remove: "script, style, iframe, ins, .txtright, .txtad, .txtcenter",
+			remove: "ins, .txtright, .txtad",
 			replace: [{
 				pattern: "[（(]\\s*還有更新耶\\s*[）)]",
-				replacement: "",
-				flags: "g"
+				replacement: ""
 			}]
 		},
 		navigation: {
@@ -4660,7 +4592,7 @@
 		match: { pattern: "^https?://www\\.shudugu\\.org/\\d+/\\d+(?:-\\d+)?\\.html(?:[?#].*)?$" },
 		content: {
 			selector: ".con",
-			remove: "script, style, iframe, ins"
+			remove: "ins"
 		},
 		navigation: {
 			prev: ".prenext span:first-child a",
@@ -4702,27 +4634,19 @@
 		const content = doc.querySelector(".frame_body > .title + .content");
 		if (!content) return;
 		const paragraphs = Array.from(content.querySelectorAll(":scope > p"));
-		for (const paragraph of paragraphs) {
+		let trailing = true;
+		for (const paragraph of paragraphs.reverse()) {
 			const text = paragraph.textContent || "";
 			const cleaned = text.replace(WATERMARK_TAIL_PATTERN, "").trimEnd();
 			if (cleaned !== text) {
 				if (cleaned) paragraph.textContent = cleaned;
-				else paragraph.remove();
+				else {
+					paragraph.remove();
+					continue;
+				}
 			}
-		}
-		const trailingParagraphs = Array.from(content.querySelectorAll(":scope > p"));
-		for (let index = trailingParagraphs.length - 1; index >= 0; index--) {
-			const paragraph = trailingParagraphs[index];
-			const text = (paragraph.textContent || "").replace(/\s+/g, "").trim();
-			if (!text) {
-				paragraph.remove();
-				continue;
-			}
-			if (/^(?:>|福)$/.test(text)) {
-				paragraph.remove();
-				continue;
-			}
-			break;
+			if (trailing && /^(?:>|福)?$/.test(cleaned.replace(/\s+/g, ""))) paragraph.remove();
+			else trailing = false;
 		}
 	};
 	var ttksRule = {
@@ -4758,37 +4682,31 @@
 		match: { pattern: "^https?://twkan\\.com/txt/\\d+/\\d+/?(?:[?#].*)?$" },
 		content: {
 			selector: "#txtcontent0, .txtnav",
-			remove: "script, style, iframe, ins, .page1, .readinline, .read-link, .ad_content, .top-ad, .bottom-ad",
+			remove: "ins, .page1, .readinline, .read-link, .ad_content, .top-ad, .bottom-ad",
 			replace: [
 				{
 					pattern: "^[\\s\\u00a0\\u3000\\u2000-\\u200a]*第[一二三四五六七八九十百千\\d]+(?:章|节|節|回|话|話|篇|集|卷)[^<]{0,120}(?:<br\\s*/?>\\s*)+",
-					replacement: "",
-					flags: "g"
+					replacement: ""
 				},
 				{
 					pattern: "（?請記住臺灣小説網[^<\\n]*?）?",
-					replacement: "",
-					flags: "g"
+					replacement: ""
 				},
 				{
 					pattern: "（?请记住[臺台]湾小[説说]网[^<\\n]{0,160}(?:章节更新|網站|网站)[^<\\n]{0,40}）?",
-					replacement: "",
-					flags: "g"
+					replacement: ""
 				},
 				{
 					pattern: "〖[^〗]*分享[^〗]*運營[^〗]*〗",
-					replacement: "",
-					flags: "g"
+					replacement: ""
 				},
 				{
 					pattern: "【[^】]{0,100}(?:域名|[臺台]湾小[説说]网|[臺台]湾好书)[^】]{0,160}】",
-					replacement: "",
-					flags: "g"
+					replacement: ""
 				},
 				{
 					pattern: "本章完。?",
-					replacement: "",
-					flags: "g"
+					replacement: ""
 				}
 			]
 		},
@@ -4800,7 +4718,6 @@
 		title: {
 			selector: ".txtnav > h1, h1",
 			pattern: "^(.+?)-(.+?)-[^-]+-.*?台灣小說網$",
-			patternIndex: 1,
 			bookPatternIndex: 2,
 			bookSelector: "a[href*=\"/book/\"][href$=\"/index.html\"]"
 		},
@@ -4854,7 +4771,7 @@
 		match: { pattern: "^https?://(?:m\\.)?xszj\\.org/b/\\d+/c/\\d+(?:[?#].*)?$" },
 		content: {
 			selector: "#booktxt",
-			remove: "script, style, iframe, ins"
+			remove: "ins"
 		},
 		navigation: {
 			prev: ".bottem1 a:contains(\"上一章\"), .bottem1 a:contains(\"上一页\"), .bottem1 a:contains(\"上一頁\")",
@@ -4901,30 +4818,30 @@
 		return typeof maybe.id === "string" && typeof maybe.version === "number" && !!maybe.match && typeof maybe.match.pattern === "string" && !!maybe.content && typeof maybe.content.selector === "string";
 	}
 	var siteRules = Object.keys(modules$1).sort().flatMap((path) => Object.values(modules$1[path]).filter(isSiteRule));
-	var specialRules = [{
-		id: "gongzicp",
-		name: "长佩文学网",
-		version: 1,
-		match: { pattern: "^https?://www\\.gongzicp\\.com/read-\\d+\\.html" },
-		content: {
-			selector: ".content",
-			replace: [{
-				pattern: "来源长佩文学网（https://www\\.gongzicp\\.com）",
-				replacement: ""
-			}]
+	var inlineRules = [
+		{
+			id: "gongzicp",
+			name: "长佩文学网",
+			version: 1,
+			match: { pattern: "^https?://www\\.gongzicp\\.com/read-\\d+\\.html" },
+			content: {
+				selector: ".content",
+				replace: [{
+					pattern: "来源长佩文学网（https://www\\.gongzicp\\.com）",
+					replacement: ""
+				}]
+			},
+			title: { bookSelector: ".novel" },
+			advanced: {
+				useIframe: true,
+				mutationSelector: ".novel",
+				mutationChildCount: 2
+			},
+			meta: {
+				source: "builtin",
+				exampleUrl: "https://www.gongzicp.com/read-246381.html"
+			}
 		},
-		title: { bookSelector: ".novel" },
-		advanced: {
-			useIframe: true,
-			mutationSelector: ".novel",
-			mutationChildCount: 2
-		},
-		meta: {
-			source: "builtin",
-			exampleUrl: "https://www.gongzicp.com/read-246381.html"
-		}
-	}];
-	var simplifiedRules = [
 		{
 			id: "ldks-2baoe",
 			name: "零点看书（ldks）",
@@ -4932,7 +4849,7 @@
 			match: { pattern: "^https?://(?:23\\.225\\.121\\.247|www\\.2baoe\\.com)/ldks/\\d+/\\d+(?:[_-]\\d+)?\\.html$" },
 			content: {
 				selector: "#content",
-				remove: "h1.title, script"
+				remove: "h1.title"
 			},
 			navigation: {
 				prev: ".section-opt a:contains(\"上一章\"), .section-opt a:contains(\"上一页\")",
@@ -4958,8 +4875,7 @@
 			},
 			advanced: {
 				useIframe: true,
-				mutationSelector: "#partContent",
-				mutationChildCount: 0
+				mutationSelector: "#partContent"
 			},
 			meta: { source: "builtin" }
 		},
@@ -5115,11 +5031,7 @@
 			}
 		}
 	];
-	var builtInRules = [
-		...siteRules,
-		...specialRules,
-		...simplifiedRules
-	];
+	var builtInRules = [...siteRules, ...inlineRules];
 	function globToRegex(glob) {
 		const escaped = glob.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".");
 		return new RegExp(`^${escaped}$`, "i");

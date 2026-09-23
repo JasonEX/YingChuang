@@ -34,9 +34,7 @@ export const novel543Rule: SiteRule = {
     replace: '\\s*[（(]\\d+\\s*/\\s*\\d+[）)]\\s*$',
     bookSelector: '.header .nav li:last-child a',
   },
-  toc: {
-    excludeAncestors: '.chaplist > ul:not(.all)',
-  },
+  toc: { excludeAncestors: '.chaplist > ul:not(.all)' },
   hooks: {
     parseSectionUrl: parseNovel543Url,
     beforeParse: doc => {

@@ -8,28 +8,22 @@ const ttksBeforeParse: BeforeParseHook = doc => {
   if (!content) return;
 
   const paragraphs = Array.from(content.querySelectorAll(':scope > p'));
-  for (const paragraph of paragraphs) {
+  let trailing = true;
+  for (const paragraph of paragraphs.reverse()) {
     const text = paragraph.textContent || '';
     const cleaned = text.replace(WATERMARK_TAIL_PATTERN, '').trimEnd();
     if (cleaned !== text) {
       if (cleaned) paragraph.textContent = cleaned;
-      else paragraph.remove();
+      else {
+        paragraph.remove();
+        continue;
+      }
     }
-  }
-
-  const trailingParagraphs = Array.from(content.querySelectorAll(':scope > p'));
-  for (let index = trailingParagraphs.length - 1; index >= 0; index--) {
-    const paragraph = trailingParagraphs[index];
-    const text = (paragraph.textContent || '').replace(/\s+/g, '').trim();
-    if (!text) {
+    if (trailing && /^(?:>|福)?$/.test(cleaned.replace(/\s+/g, ''))) {
       paragraph.remove();
-      continue;
+    } else {
+      trailing = false;
     }
-    if (/^(?:>|福)$/.test(text)) {
-      paragraph.remove();
-      continue;
-    }
-    break;
   }
 };
 
@@ -41,9 +35,7 @@ export const ttksRule: SiteRule = {
   match: {
     pattern: '^https?://(?:www\\.)?ttks\\.tw/novel/chapters/[^/?#]+/\\d+\\.html(?:[?#].*)?$',
   },
-  content: {
-    selector: '.frame_body > .title + .content',
-  },
+  content: { selector: '.frame_body > .title + .content' },
   navigation: {
     prev: '#linkPrev',
     index: '.breadcrumb_nav a[href$="/index.html"]',
@@ -53,9 +45,7 @@ export const ttksRule: SiteRule = {
     selector: '.frame_body > .title h1, .frame_body > .title',
     bookSelector: '.breadcrumb_nav a[href$="/index.html"]',
   },
-  hooks: {
-    beforeParse: ttksBeforeParse,
-  },
+  hooks: { beforeParse: ttksBeforeParse },
   advanced: {
     noSection: true,
     useIframe: true,

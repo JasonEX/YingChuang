@@ -305,6 +305,153 @@ test('Ciweimao keeps short closing prose across initial parsing and chapter navi
   }
 });
 
+test('Ciweimao fetches a complete short API chapter only once', async ({ page, context }) => {
+  const origin = 'https://www.ciweimao.com';
+  const requests: string[] = [];
+  const shortContent = '<p class="chapter">他们终于走出了山谷。</p><p class="chapter">回家。</p>';
+  await context.route(`${origin}/**`, async route => {
+    const path = new URL(route.request().url()).pathname;
+    requests.push(path);
+    if (path === '/chapter-list/1001') {
+      await route.fulfill({
+        contentType: 'text/html',
+        body: '<a href="/chapter/120">第一章 出发</a><a href="/chapter/121">第二章 归途</a>',
+      });
+    } else if (path === '/chapter/ajax_get_session_code') {
+      await route.fulfill({ json: { code: 100000, chapter_access_key: 'abc' } });
+    } else if (path === '/chapter/get_book_chapter_detail_info') {
+      await route.fulfill({
+        json: {
+          code: 100000,
+          chapter_content: Buffer.from('1234567890123456first-pass').toString('base64'),
+          encryt_keys: ['a', 'b', 'c'],
+        },
+      });
+    } else {
+      await route.fulfill({
+        contentType: 'text/html; charset=utf-8',
+        body: `<!doctype html><title>第一章 出发</title>
+          <div class="breadcrumb"><a href="/book/1001">山谷归途</a></div>
+          <div class="read-hd"><h1 class="chapter">第一章 出发</h1></div>
+          <div class="book-read-page"><a href="/chapter-list/1001">目录</a>
+            <a id="J_BtnPageNext" href="/chapter/121">下一章</a></div>
+          <div id="J_BookCnt" data-id="120"></div><div id="J_BookRead">
+          ${`<p class="chapter">${'队员们继续沿着山谷寻找同伴。'.repeat(30)}</p>`.repeat(5)}</div>`,
+      });
+    }
+  });
+  const script = fs.readFileSync(getMnrE2eConfig().userScriptPath, 'utf8');
+  await context.addInitScript({
+    content: `${createGmMockScript()}
+      GM_setValue('mnr-config', {behavior:{preloadNext:false}});
+      (() => {
+        let passes = 0;
+        window.CryptoJS = {
+          AES: {decrypt: () => ({toString: () => ++passes % 2
+            ? btoa(btoa('1234567890123456second-pass')) : ${JSON.stringify(shortContent)}})},
+          enc: {Base64: {parse: value => value}, Utf8: {}},
+          format: {OpenSSL: {parse: value => value}}
+        };
+      })();
+      ${script}`,
+  });
+  await page.goto(`${origin}/chapter/120`);
+  await waitForMnrReader(page);
+  await page.keyboard.press('ArrowRight');
+  await expect(page).toHaveURL(`${origin}/chapter/121`);
+  const chapter = page.locator('#mnr-reader-root article[data-chapter-url$="/121"]');
+  await expect(chapter).toContainText('第二章 归途');
+  await expect(chapter).toContainText('他们终于走出了山谷。');
+  await expect(chapter).toContainText('回家。');
+  expect(requests.filter(path => path === '/chapter/ajax_get_session_code')).toHaveLength(1);
+  expect(requests.filter(path => path === '/chapter/get_book_chapter_detail_info')).toHaveLength(1);
+  expect(requests).not.toContain('/chapter/121');
+});
+
+for (const host of ['www.qidian.com', 'm.qidian.com', 'www.69shuba.com']) {
+  test(`keeps script-supplied navigation and titles on ${host}`, async ({ page, context }) => {
+    const qidian = host.endsWith('qidian.com');
+    const path = (id: number) => (qidian ? `/chapter/1001/${id}/` : `/txt/1001/${id}`);
+    const origin = `https://${host}`;
+    await context.route(`${origin}/**`, async route => {
+      const id = Number(new URL(route.request().url()).pathname.match(/\/(\d+)\/?$/)?.[1]);
+      const title = `第${id}章 山谷归途`;
+      const data = qidian
+        ? `<script id="vite-plugin-ssr_pageContext" type="application/json">${JSON.stringify({
+            pageContext: {
+              pageProps: {
+                pageData: {
+                  bookInfo: { bookId: 1001 },
+                  chapterInfo: { prev: id - 1, next: id + 1 },
+                },
+              },
+            },
+          })}</script>`
+        : `<script>var bookinfo = {
+            articlename: '山谷归途', chaptername: ${JSON.stringify(title)},
+            index_page: '/book/1001/', preview_page: ${JSON.stringify(path(id - 1))},
+            next_page: ${JSON.stringify(path(id + 1))}
+          };</script>`;
+      await route.fulfill({
+        contentType: 'text/html; charset=utf-8',
+        body: `<!doctype html><title>${title} - 山谷归途</title>${data}
+          <h1 class="title">${title}</h1><main id="c-${id}" class="txtnav">
+          ${'<p>他们沿着河岸继续赶路，山中的天色渐渐明亮。</p>'.repeat(90)}</main>`,
+      });
+    });
+    await addYingChuangUserscript(context);
+    await page.goto(origin + path(120));
+    await waitForMnrReader(page);
+    const root = page.locator('#mnr-reader-root');
+    await expect(root.locator('.mnr-chapter-title').first()).toHaveText('第120章 山谷归途');
+    await page.keyboard.press('ArrowRight');
+    await expect(page).toHaveURL(origin + path(121));
+    await expect(root.locator(`article[data-chapter-url="${origin + path(121)}"]`)).toContainText(
+      '第121章 山谷归途'
+    );
+    await expect(page.locator('body > a[id^="mnr-"]')).toHaveCount(qidian ? 3 : 4);
+  });
+}
+
+test('Hetushu skips stylesheet refetch after mapping every paragraph', async ({
+  page,
+  context,
+}) => {
+  const origin = 'https://www.hetushu.com';
+  let stylesheetRequests = 0;
+  let mappingRequests = 0;
+  await context.route(`${origin}/**`, async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/layout.css') {
+      stylesheetRequests++;
+      await route.fulfill({ contentType: 'text/css', body: '#content { color: black }' });
+    } else if (path === '/book/1/r2.json') {
+      mappingRequests++;
+      await route.fulfill({
+        status: 204,
+        headers: { token: Buffer.from('1A%0A%2A%3A%4').toString('base64') },
+      });
+    } else {
+      await route.fulfill({
+        contentType: 'text/html; charset=utf-8',
+        body: `<!doctype html><title>测试小说_第一章 山谷_和图书</title>
+          <link rel="stylesheet" href="/layout.css"><body data-randomtype="substep">
+          <div id="left"><h3><a href="/book/1/">测试小说</a></h3></div><div id="content"><h2>第一章 山谷</h2>
+          ${[2, 1, 3, 4, 5].map(n => `<div>段落${n}：${'他们沿着河流继续前行，观察山里的动静。'.repeat(40)}</div>`).join('')}</div>`,
+      });
+    }
+  });
+  await addYingChuangUserscript(context);
+  await page.goto(`${origin}/book/1/2.html`);
+  await waitForMnrReader(page);
+  const texts = await page.locator('#mnr-reader-root article p').allTextContents();
+  expect(texts.filter(text => text.startsWith('段落')).map(text => text.slice(0, 4))).toEqual(
+    [1, 2, 3, 4, 5].map(n => `段落${n}：`)
+  );
+  expect(mappingRequests).toBe(1);
+  expect(stylesheetRequests).toBe(1); // The browser loads it; the adapter does not refetch it.
+});
+
 test('ixdzs loads its complete API catalog and navigates within the book', async ({
   page,
   context,

@@ -16,7 +16,6 @@ describe('RuleManager', () => {
     processing: overrides.processing,
     advanced: overrides.advanced,
     hooks: overrides.hooks,
-    style: overrides.style,
     toc: overrides.toc,
   });
 

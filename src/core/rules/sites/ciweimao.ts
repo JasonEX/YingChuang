@@ -1,10 +1,6 @@
-import type { BeforeParseHook, HookHelpers, SiteRule } from '../types';
+import type { BeforeParseHook, FetchDocumentContext, HookHelpers, SiteRule } from '../types';
 
-type CiweimaoRefChapter = {
-  bookTitle?: string;
-  indexUrl?: string;
-  url: string;
-};
+const DECRYPTED_CHAPTER_ATTRIBUTE = 'data-mnr-ciweimao-chapter';
 
 type CiweimaoTocEntry = {
   title: string;
@@ -230,16 +226,15 @@ async function decryptCiweimaoIfNeeded(
   pageUrl: string,
   helpers?: HookHelpers
 ): Promise<void> {
+  const chapterId =
+    doc.querySelector('#J_BookCnt')?.getAttribute('data-id') || getCiweimaoChapterId(pageUrl);
+  if (!chapterId || contentEl.getAttribute(DECRYPTED_CHAPTER_ATTRIBUTE) === chapterId) return;
+
   const hasWatermark = !!contentEl.querySelector('#J_BookRead_WaterMark, .watermark');
   const text = (contentEl.textContent || '').replace(/\s+/g, '').trim();
   const chapterParas = contentEl.querySelectorAll('p.chapter').length;
   const shouldDecrypt = hasWatermark || text.length < 200 || chapterParas < 3;
   if (!shouldDecrypt) return;
-
-  const chapterId =
-    doc.querySelector('#J_BookCnt')?.getAttribute('data-id') ||
-    (pageUrl.match(/chapter\/(\d+)/) || [])[1];
-  if (!chapterId) return;
 
   const html = await fetchCiweimaoContent(chapterId, pageUrl, helpers);
   if (html) {
@@ -461,6 +456,8 @@ function createCiweimaoApiDocument(options: {
   content.className = 'read-bd';
   content.id = 'J_BookRead';
   content.innerHTML = options.contentHtml;
+  // This detached API document has no host renderer that can replace the prepared body.
+  content.setAttribute(DECRYPTED_CHAPTER_ATTRIBUTE, getCiweimaoChapterId(options.url));
 
   const nav = doc.createElement('div');
   nav.className = 'book-read-page';
@@ -493,7 +490,7 @@ function createCiweimaoApiDocument(options: {
 
 async function fetchCiweimaoApiDocument(
   targetUrl: string,
-  refChapter: CiweimaoRefChapter
+  refChapter: FetchDocumentContext
 ): Promise<Document | null> {
   try {
     const chapterId = getCiweimaoChapterId(targetUrl);
@@ -501,12 +498,12 @@ async function fetchCiweimaoApiDocument(
 
     const indexUrl = refChapter.indexUrl || '';
     const toc = indexUrl
-      ? await getCiweimaoToc(indexUrl, refChapter.url, refChapter.bookTitle || '')
+      ? await getCiweimaoToc(indexUrl, refChapter.refererUrl, refChapter.bookTitle || '')
       : null;
-    const normalizedTargetUrl = normalizeCiweimaoUrl(targetUrl, refChapter.url);
+    const normalizedTargetUrl = normalizeCiweimaoUrl(targetUrl, refChapter.refererUrl);
     const tocIndex =
       toc?.entries.findIndex(
-        entry => normalizeCiweimaoUrl(entry.url, refChapter.url) === normalizedTargetUrl
+        entry => normalizeCiweimaoUrl(entry.url, refChapter.refererUrl) === normalizedTargetUrl
       ) ?? -1;
     if (!toc || tocIndex < 0) return null;
 
@@ -516,7 +513,7 @@ async function fetchCiweimaoApiDocument(
     const html = await fetchCiweimaoContent(chapterId, normalizedTargetUrl);
     if (!html) return null;
 
-    const doc = createCiweimaoApiDocument({
+    return createCiweimaoApiDocument({
       bookTitle: toc.bookTitle || refChapter.bookTitle || '',
       contentHtml: html,
       indexUrl,
@@ -525,9 +522,6 @@ async function fetchCiweimaoApiDocument(
       title: entry.title,
       url: normalizedTargetUrl,
     });
-    const contentEl = doc.querySelector('#J_BookRead');
-    if (contentEl) cleanupCiweimaoWatermarks(doc, contentEl);
-    return doc;
   } catch (e) {
     console.warn('[YingChuang] Ciweimao API document error:', e);
     return null;
@@ -570,24 +564,21 @@ const ciweimaoHooks: SiteRule['hooks'] = {
     return doc.querySelector('#J_BookCnt, #J_BookRead') ? false : null;
   },
   beforeParse: ciweimaoBeforeParse,
-  fetchDocument: (url, context) =>
-    fetchCiweimaoApiDocument(url, {
-      bookTitle: context.bookTitle,
-      indexUrl: context.indexUrl,
-      url: context.refererUrl,
-    }),
+  fetchDocument: fetchCiweimaoApiDocument,
+};
+
+const ciweimaoAdvanced: SiteRule['advanced'] = {
+  mutationSelector: '#J_BookRead',
+  mutationChildCount: 2,
+  timeout: 3000,
 };
 
 export const ciweimaoRule: SiteRule = {
   id: 'ciweimao',
   name: '刺猬猫',
   version: 2,
-  match: {
-    pattern: '^https?://www\\.ciweimao\\.com/chapter/\\d+',
-  },
-  content: {
-    ...ciweimaoContent,
-  },
+  match: { pattern: '^https?://www\\.ciweimao\\.com/chapter/\\d+' },
+  content: ciweimaoContent,
   navigation: {
     prev: '#J_BtnPagePrev[href^="http"]',
     index: '.book-read-page a[href*="/chapter-list/"]',
@@ -597,14 +588,8 @@ export const ciweimaoRule: SiteRule = {
     selector: '.read-hd .chapter',
     bookSelector: '.breadcrumb > a:last()',
   },
-  hooks: {
-    ...ciweimaoHooks,
-  },
-  advanced: {
-    mutationSelector: '#J_BookRead',
-    mutationChildCount: 2,
-    timeout: 3000,
-  },
+  hooks: ciweimaoHooks,
+  advanced: ciweimaoAdvanced,
   meta: { source: 'builtin', exampleUrl: 'https://www.ciweimao.com/chapter/113909523' },
 };
 
@@ -612,27 +597,15 @@ export const ciweimaoWapRule: SiteRule = {
   id: 'ciweimao-wap',
   name: '刺猬猫(移动端)',
   version: 2,
-  match: {
-    pattern: '^https?://wap\\.ciweimao\\.com/chapter/\\d+/?(?:[?#].*)?$',
-  },
-  content: {
-    ...ciweimaoContent,
-  },
+  match: { pattern: '^https?://wap\\.ciweimao\\.com/chapter/\\d+/?(?:[?#].*)?$' },
+  content: ciweimaoContent,
   navigation: {
     prev: '.J_BtnPagePrev[href^="http"]',
     index: '.book-read-page .btn-list[href*="/chapter/"]',
     next: '.J_BtnPageNext[href^="http"]',
   },
-  title: {
-    selector: 'h1.read-hd',
-  },
-  hooks: {
-    ...ciweimaoHooks,
-  },
-  advanced: {
-    mutationSelector: '#J_BookRead',
-    mutationChildCount: 2,
-    timeout: 3000,
-  },
+  title: { selector: 'h1.read-hd' },
+  hooks: ciweimaoHooks,
+  advanced: ciweimaoAdvanced,
   meta: { source: 'builtin', exampleUrl: 'https://wap.ciweimao.com/chapter/113489050' },
 };

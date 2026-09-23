@@ -4,9 +4,7 @@ export const wxslRule: SiteRule = {
   id: 'wxsl',
   name: '森林文学',
   version: 1,
-  match: {
-    pattern: '^https?://www\\.2wxsl\\.com/book/\\d+/\\d+(?:_\\d+)?\\.html(?:[?#].*)?$',
-  },
+  match: { pattern: '^https?://www\\.2wxsl\\.com/book/\\d+/\\d+(?:_\\d+)?\\.html(?:[?#].*)?$' },
   content: { selector: '#content' },
   toc: {
     // Desktop and narrow layouts share this DOM. The latest-chapter preview
