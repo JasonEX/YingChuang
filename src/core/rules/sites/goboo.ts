@@ -82,7 +82,6 @@ export const gobooRule: SiteRule = {
   },
   advanced: {
     checkSection: true,
-    sectionDelayMs: 1200,
   },
   meta: {
     source: 'builtin',

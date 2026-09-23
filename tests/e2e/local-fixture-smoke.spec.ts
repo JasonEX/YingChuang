@@ -2382,7 +2382,7 @@ test('keeps the first-page DOM and selection while merging an 80-page Xszj chapt
   context,
   page,
 }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(150_000);
   const url = 'https://xszj.org/b/490346/c/1534359';
   const pages: number[] = [];
   const times: number[] = [];
@@ -2451,7 +2451,7 @@ test('keeps the first-page DOM and selection while merging an 80-page Xszj chapt
     });
   await expect(root.locator('article')).toContainText('第2页正文');
   expect((await retained()).sameNode).toBe(true);
-  await expect(root.locator('.mnr-section-progress')).toHaveCount(0, { timeout: 100_000 });
+  await expect(root.locator('.mnr-section-progress')).toHaveCount(0, { timeout: 130_000 });
   const final = await retained();
   expect(final.sameNode).toBe(true);
   expect(final.selection).toBe(final.expected);
@@ -2633,6 +2633,60 @@ for (const width of [1280, 390]) {
       .click();
     await expect(page).toHaveURL(novelsUrl(22).split('?')[0]);
     await expect(next).toHaveCount(1);
+  });
+}
+
+for (const width of [1280, 390]) {
+  test(`novels stops after one unread chapter at ${width}px`, async ({ context, page }) => {
+    await page.setViewportSize({ width, height: 844 });
+    const url = (chapter: number, section = 1) => novelsUrl(chapter, section).split('?')[0];
+    const requests: string[] = [];
+    await context.route(`${novelsOrigin}/**`, async route => {
+      const requested = new URL(route.request().url());
+      requests.push(requested.href);
+      const match = requested.pathname.match(/\/(\d+)(?:_(\d+))?\.html$/);
+      await route.fulfill({
+        contentType: 'text/html; charset=utf-8',
+        body: match
+          ? makeNovelsChapter(
+              Number(match[1]) - 199107734,
+              Number(match[2] || 1),
+              Number(match[1]) === 199107783 ? 5 : 3
+            ).replaceAll('?aid=1092650', '')
+          : '<p>書頁/目錄</p>',
+      });
+    });
+    await addYingChuangUserscript(context);
+    await page.goto(url(48));
+    const root = page.locator('#mnr-reader-root');
+    const current = root.locator(`article[data-chapter-url="${url(48)}"]`);
+    const unread = root.locator(`article[data-chapter-url="${url(49)}"]`);
+    if (width === 390) {
+      await expect(current).toContainText('第1頁終點');
+      await root.locator('.mnr-reader-main').evaluate(el => {
+        el.scrollTop = el.scrollHeight;
+      });
+    }
+    await expect(current).toContainText('第3頁終點');
+    await expect(unread).toContainText('第5頁終點');
+    await expect(root.locator('.mnr-section-progress')).toHaveCount(0);
+    await expect(current.locator('h1')).toHaveText('第48章 山間行旅');
+    await expect(unread.locator('h1')).toHaveText('第49章 山間行旅');
+    // Observe beyond the maximum five-second preload grace period. Waiting for content
+    // alone misses a scheduler that keeps fetching more chapters after each merge ends.
+    await page.waitForTimeout(6000);
+    expect(requests).toEqual([
+      url(48),
+      url(48, 2),
+      url(48, 3),
+      url(49),
+      url(49, 2),
+      url(49, 3),
+      url(49, 4),
+      url(49, 5),
+    ]);
+    await expect(root.locator('article')).toHaveCount(2);
+    await expect(page).toHaveURL(url(48));
   });
 }
 
@@ -2925,5 +2979,70 @@ for (const touch of [false, true]) {
       await expect(drawer).toHaveAttribute('inert', '');
       await expect(root.locator('.mnr-reader-main')).not.toHaveAttribute('inert');
     });
+  });
+}
+
+for (const scenario of ['recover', 'background', 'exit'] as const) {
+  test(`novels rate limiting: ${scenario}`, async ({ context, page }) => {
+    await page.setViewportSize({ width: 353, height: 693 });
+    if (scenario === 'exit') await page.clock.install();
+    const url = (chapter: number, section = 1) => novelsUrl(chapter, section).split('?')[0];
+    const target = scenario === 'background' ? url(49, 2) : url(48, 2);
+    const attempts: number[] = [];
+    const requests: string[] = [];
+    await context.route(`${novelsOrigin}/**`, async route => {
+      const requested = route.request().url();
+      requests.push(requested);
+      if (requested === target) {
+        attempts.push(Date.now());
+        if (scenario !== 'recover' || attempts.length === 1) {
+          await route.fulfill({
+            status: 429,
+            headers: { 'Retry-After': scenario === 'exit' ? '30' : '2' },
+            body: 'Too many requests',
+          });
+          return;
+        }
+      }
+      const match = new URL(requested).pathname.match(/\/(\d+)(?:_(\d+))?\.html$/);
+      await route.fulfill({
+        contentType: 'text/html; charset=utf-8',
+        body: match
+          ? makeNovelsChapter(Number(match[1]) - 199107734, Number(match[2] || 1)).replaceAll(
+              '?aid=1092650',
+              ''
+            )
+          : '<p>書頁/目錄</p>',
+      });
+    });
+    await addYingChuangUserscript(context);
+    await page.goto(url(48));
+    const root = page.locator('#mnr-reader-root');
+    await expect.poll(() => attempts.length).toBe(1);
+    if (scenario === 'exit') {
+      await root.getByRole('button', { name: '打开设置' }).click();
+      await root.getByRole('button', { name: '退出阅读模式' }).click();
+      await expect(root).toHaveCount(0);
+      await expect(page.locator('#article')).toBeVisible();
+      // Pass the full recovery deadline without making the browser test wait thirty seconds.
+      await page.clock.runFor(31_000);
+      expect(attempts).toHaveLength(1);
+      expect(requests).toEqual([url(48), target]);
+    } else if (scenario === 'recover') {
+      await expect(root.locator(`article[data-chapter-url="${url(48)}"]`)).toContainText(
+        '第3頁終點'
+      );
+      expect(attempts).toHaveLength(2);
+      expect(attempts[1] - attempts[0]).toBeGreaterThanOrEqual(1900);
+    } else {
+      await expect(root.locator('.mnr-section-progress')).toContainText('本章内容不完整');
+      await page.waitForTimeout(7000);
+      expect(attempts).toHaveLength(1);
+      expect(requests).toEqual([url(48), url(48, 2), url(48, 3), url(49), target]);
+      await expect(root.locator('article')).toHaveCount(2);
+      await expect(root.locator(`article[data-chapter-url="${url(49)}"]`)).toContainText(
+        '第1頁終點'
+      );
+    }
   });
 }

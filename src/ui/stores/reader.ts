@@ -74,7 +74,7 @@ export const useReaderStore = defineStore('reader', () => {
   const currentConversionMode = ref<ConversionMode>('none');
   const pendingNextAbort = ref<(() => void) | null>(null);
   const pendingPrevAbort = ref<(() => void) | null>(null);
-  const navFailures = new Map<string, { count: number; nextRetryAt: number }>();
+  const navFailures = new Map<string, { count: number; failedAt: number }>();
   const cacheProgress = ref<CacheProgressState>({ done: 0, total: 0, failed: 0, running: false });
   const cacheFailedUrls = ref<string[]>([]);
   const cacheAbort = ref<(() => void) | null>(null);
@@ -568,7 +568,7 @@ export const useReaderStore = defineStore('reader', () => {
             .map(([url, failure]) => ({
               url: redactUrl(url),
               count: failure.count,
-              retryInMs: Math.max(0, failure.nextRetryAt - Date.now()),
+              failedAt: failure.failedAt,
             })),
         },
       },

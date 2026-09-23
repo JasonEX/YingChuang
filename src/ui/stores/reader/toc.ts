@@ -96,7 +96,7 @@ export async function loadTocEntriesPaged(
       report({
         request: { url: pageUrl, finalUrl: null, status: null, transport: null, reason: 'pending' },
       });
-      const { promise, abort } = fetchAndParseUrl(pageUrl, referer);
+      const { promise, abort } = fetchAndParseUrl(pageUrl, referer, { retryRateLimit: false });
       currentAbort = abort;
       if (aborted) abort();
       const result = await promise;
@@ -298,16 +298,8 @@ export function createTocActions(ctx: TocActionContext) {
           update => Object.assign(diagnostic, update)
         );
       };
-      let entries = await fetchEntries();
+      const entries = await fetchEntries();
       if (ctx.runtime.isSessionStale(runId)) return;
-      if (entries.length === 0) {
-        // Preserve the existing one retry for empty / slow dynamic catalogs.
-        recordDebugEvent('toc.retry', diagnostic);
-        await new Promise<void>(resolve => window.setTimeout(resolve, 400));
-        if (ctx.runtime.isSessionStale(runId)) return;
-        entries = await fetchEntries();
-        if (ctx.runtime.isSessionStale(runId)) return;
-      }
       await setTocEntries(entries);
       if (ctx.runtime.isSessionStale(runId)) return;
       diagnostic.entries = entries.length;

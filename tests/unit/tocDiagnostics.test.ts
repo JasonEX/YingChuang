@@ -191,12 +191,12 @@ it('exports the API failure without enabling a forbidden GM fallback', async () 
   const loading = store.loadToc();
   await vi.advanceTimersByTimeAsync(400);
   await loading;
-  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(fetcher).toHaveBeenCalledTimes(1);
   expect(gm).not.toHaveBeenCalled();
   const info = buildDiagnosticInfo({ readerStore: store });
   expect((info.reader as Record<string, any>).toc.lastLoad).toMatchObject({
     loader: 'ixdzs',
-    attempt: 2,
+    attempt: 1,
     outcome: 'empty',
     request: {
       url: 'https://ixdzs8.com/novel/clist/',

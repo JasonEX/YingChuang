@@ -7,8 +7,10 @@ import {
 } from '@/ui/stores/reader/persistence';
 import { fetchAndParseUrl } from '@/core/utils/network';
 import { getParser } from '@/core/parser';
+import { loadDocumentInIframe } from '@/ui/stores/reader/chapterFetch';
 import { loadTocEntriesPaged } from '@/ui/stores/reader/toc';
 import { parseWithSectionMerge } from '@/ui/stores/reader/section';
+import { recordRequestCooldown } from '@/core/utils/requestPolicy';
 import type { SiteRule } from '@/core/rules/types';
 import { useReaderStore } from '@/ui/stores/reader';
 
@@ -52,6 +54,15 @@ vi.mock('@/ui/stores/reader/toc', async importOriginal => {
 });
 
 describe('ReaderStore - workflows', () => {
+  it('does not create an iframe while the request origin is cooling down', async () => {
+    const url = 'https://iframe-cooldown.test/chapter';
+    recordRequestCooldown(url, 429, '30');
+    const request = loadDocumentInIframe(url);
+    expect(await request.promise).toBeNull();
+    expect(document.querySelector('iframe')).toBeNull();
+    request.abort();
+  });
+
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
@@ -323,7 +334,7 @@ describe('ReaderStore - workflows', () => {
     expect(store.toc).toEqual([]);
   });
 
-  it('loadToc retries once when first attempt returns empty', async () => {
+  it('loadToc leaves another attempt to explicit user intent when the catalog is empty', async () => {
     vi.useFakeTimers();
 
     const store = useReaderStore();
@@ -355,6 +366,9 @@ describe('ReaderStore - workflows', () => {
     await vi.advanceTimersByTimeAsync(400);
     await p;
 
+    expect(loadTocEntriesPaged).toHaveBeenCalledTimes(1);
+    expect(store.toc).toEqual([]);
+    await store.loadToc();
     expect(loadTocEntriesPaged).toHaveBeenCalledTimes(2);
     expect(store.toc).toEqual([
       { title: '第1章', url: 'https://example.com/book/1/1.html' },
@@ -540,7 +554,9 @@ describe('ReaderStore - workflows', () => {
     await store.startCacheAll();
 
     expect(fetchAndParseUrl).toHaveBeenCalledTimes(1);
-    expect(fetchAndParseUrl).toHaveBeenCalledWith(readableUrl, expect.any(String));
+    expect(fetchAndParseUrl).toHaveBeenCalledWith(readableUrl, expect.any(String), {
+      retryRateLimit: false,
+    });
     expect(store.cacheProgress).toMatchObject({ done: 1, total: 1, failed: 0, running: false });
   });
 

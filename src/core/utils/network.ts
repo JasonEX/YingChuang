@@ -4,12 +4,15 @@
  * Handles HTTP requests, CORS (via GM_xmlhttpRequest), and basic parsing.
  */
 
+import { getRetryAfterHeader, runRequest } from './requestPolicy';
+
 import { normalizeCiwemaoChapterUrl, normalizeRedundantFirstPageParam } from './index';
 
 /** Result of fetchAndParseUrl operation */
 export interface FetchAndParseResult {
   doc: Document | null;
   status: number | null;
+  retryAfter?: string | null;
   finalUrl: string | null;
   error:
     'abort' | 'http' | 'network' | 'parse' | 'timeout' | 'missing-gm-xhr' | 'invalid-url' | null;
@@ -261,12 +264,12 @@ export function resolveAndValidateHttpUrl(url: string, base?: string): string | 
 export function fetchAndParseUrl(
   url: string,
   referer?: string,
-  options: { timeoutMs?: number; retries?: number } = {}
+  options: { timeoutMs?: number; retries?: number; retryRateLimit?: boolean } = {}
 ): { promise: Promise<FetchAndParseResult>; abort: () => void } {
   const gmXhr = getGmXhr();
   const requestUrl = resolveAndValidateHttpUrl(url, referer);
   const timeoutMs = options.timeoutMs ?? 15000;
-  const maxRetries = Math.max(0, options.retries ?? 1);
+  const controller = new AbortController();
 
   if (!requestUrl) {
     console.error('[MNR] Invalid or unsupported URL:', url);
@@ -378,6 +381,7 @@ export function fetchAndParseUrl(
               status: response.status,
               finalUrl,
               error: 'http',
+              retryAfter: getRetryAfterHeader(response.responseHeaders),
             });
           },
           onerror: () => {
@@ -451,6 +455,7 @@ export function fetchAndParseUrl(
           status,
           finalUrl,
           error: 'http',
+          retryAfter: response.headers?.get?.('Retry-After') ?? null,
         };
         return result;
       })
@@ -491,33 +496,21 @@ export function fetchAndParseUrl(
       });
   };
 
-  const shouldRetry = (res: FetchAndParseResult): boolean => {
-    if (aborted) return false;
-    if (res.error === 'timeout' || res.error === 'network') return true;
-    if (res.error === 'http' && res.status && (res.status >= 500 || res.status === 429)) {
-      return true;
-    }
-    return false;
-  };
-
-  const promise = (async (): Promise<FetchAndParseResult> => {
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      if (aborted) return { doc: null, status: null, finalUrl: null, error: 'abort' };
-
-      const res = await doRequest();
-      if (!shouldRetry(res) || attempt === maxRetries) {
-        return res;
-      }
-
-      const delay = Math.min(400 * Math.pow(2, attempt), 2000);
-      await new Promise<void>(resolve => globalThis.setTimeout(resolve, delay));
-    }
-
-    return { doc: null, status: null, finalUrl: null, error: 'network' };
-  })();
+  const promise = runRequest(requestUrl, {
+    signal: controller.signal,
+    attempt: doRequest,
+    retries: options.retries,
+    retryRateLimit: options.retryRateLimit,
+    stopped: (error, status) => ({ doc: null, status, finalUrl: null, error }),
+  });
 
   const abort = () => {
     aborted = true;
+    try {
+      controller.abort();
+    } catch (error) {
+      console.debug('[MNR] Request cancellation failed:', error);
+    }
     try {
       request?.abort();
     } catch {

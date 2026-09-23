@@ -5,6 +5,7 @@ import { parseWithSectionMerge, startProgressiveSectionMerge } from './section';
 import { createSectionMergeSink } from './sectionProgress';
 import { fetchAndParseUrl } from '@/core/utils/network';
 import { getChapterDocumentBlockReason } from '@/core/detection';
+import { getRequestCooldown } from '@/core/utils/requestPolicy';
 import { getRuleManager } from '@/core/rules/RuleManager';
 import type { LoadSource } from './types';
 import type { NavigationContext } from './navigationContext';
@@ -20,6 +21,7 @@ export function loadDocumentInIframe(
   url: string,
   timeoutMs: number = 15000
 ): { promise: Promise<{ doc: Document; cleanup: () => void } | null>; abort: () => void } {
+  if (getRequestCooldown(url)) return { promise: Promise.resolve(null), abort: () => {} };
   let iframe: HTMLIFrameElement | null = null;
   let timeoutId: number | null = null;
   let settled = false;
@@ -106,13 +108,16 @@ export async function loadFetchDocument(
   ctx: NavigationContext,
   load: PreparedChapterLoad,
   runId: number,
-  referer: string
+  referer: string,
+  source: LoadSource
 ): Promise<FetchDocumentResult> {
   const ruleDoc = await loadRuleApiDocument(load.targetUrl, load.refChapter.chapter);
   if (ctx.runtime.isViewStale(runId)) return 'abort';
   if (ruleDoc) return ruleDoc;
 
-  const fetchLoader = fetchAndParseUrl(load.targetUrl, referer);
+  const fetchLoader = fetchAndParseUrl(load.targetUrl, referer, {
+    retryRateLimit: source === 'manual',
+  });
   const abort = fetchLoader.abort;
   if (ctx.runtime.isViewStale(runId)) {
     abort();
@@ -209,6 +214,7 @@ export async function parseCandidateDocument(
     const { chapter, merge } = await startProgressiveSectionMerge(parser, doc, load.targetUrl, {
       controller,
       sink: createSectionMergeSink(ctx),
+      retryRateLimit: source === 'manual',
     });
     if (controller.signal.aborted || ctx.runtime.isViewStale(runId)) {
       merge?.reject();

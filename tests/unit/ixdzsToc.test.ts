@@ -63,7 +63,7 @@ describe('ixdzs TOC', () => {
     const fetchMock = vi.fn().mockResolvedValue(response);
     vi.stubGlobal('unsafeWindow', { fetch: fetchMock });
     expect(await loadTocEntriesPaged(indexUrl, currentUrl, undefined, vi.fn())).toEqual([]);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(response.status === 503 ? 3 : 1);
   });
 
   it('aborts the pending catalog request and clears its handle', async () => {

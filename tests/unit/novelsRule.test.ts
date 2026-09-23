@@ -87,6 +87,33 @@ describe('繁體小說 rule', () => {
     expect(parsed?.content).not.toContain('廣告干擾');
   });
 
+  it('streams only the current chapter and exposes the next chapter after its last page', async () => {
+    vi.stubGlobal('crypto', webcrypto);
+    const url = (chapter: number, page = 1) => novelsUrl(chapter, page).split('?')[0];
+    const fetcher = vi.fn(async (requested: string) => {
+      const page = [2, 3].find(page => requested === url(48, page));
+      if (!page) throw new Error(`Unexpected section request ${requested}`);
+      return doc(makeNovelsChapter(48, page).replaceAll('?aid=1092650', ''));
+    });
+    const onFirstPage = vi.fn();
+    const onSectionPage = vi.fn();
+    const onMergeEnd = vi.fn();
+    const parsed = await new SectionMerger(new Parser()).merge(
+      doc(makeNovelsChapter(48).replaceAll('?aid=1092650', '')),
+      url(48),
+      { fetcher, onFirstPage, onSectionPage, onMergeEnd }
+    );
+
+    expect(onFirstPage).toHaveBeenCalledWith(
+      expect.objectContaining({ url: url(48), nextUrl: undefined }),
+      { url: url(48), loaded: 1, total: 3 }
+    );
+    expect(fetcher.mock.calls.map(([requested]) => requested)).toEqual([url(48, 2), url(48, 3)]);
+    expect(onSectionPage.mock.calls.map(([delta]) => delta.nextUrl)).toEqual([undefined, url(49)]);
+    expect(onMergeEnd).toHaveBeenCalledWith({ loaded: 3, total: 3, truncated: false });
+    expect(parsed).toMatchObject({ url: url(48), nextUrl: url(49) });
+  });
+
   it('renders plain text without treating ampersands as markup', async () => {
     vi.stubGlobal('crypto', webcrypto);
     const document = doc(makeNovelsChapter());

@@ -2584,6 +2584,231 @@
 		}
 		return trimmed;
 	}
+	var SENSITIVE_QUERY_KEY = /(?:^|[_-])(?:token|auth|session|sid|key|sign|signature|ticket|password|passwd|pwd|jwt|credential|access|refresh|challenge|chl)(?:[_-]|$)|^__cf_|^_csrfToken$/i;
+	function redactUrl(url) {
+		if (!url) return null;
+		try {
+			const parsed = new URL(url, typeof window !== "undefined" ? window.location.href : void 0);
+			parsed.username = parsed.username ? "__redacted__" : "";
+			parsed.password = parsed.password ? "__redacted__" : "";
+			for (const key of Array.from(parsed.searchParams.keys())) if (SENSITIVE_QUERY_KEY.test(key)) parsed.searchParams.set(key, "__redacted__");
+			return parsed.toString();
+		} catch {
+			return truncateDebugString(url);
+		}
+	}
+	function truncateDebugString(value, limit = 500) {
+		if (value.length <= limit) return value;
+		return `${value.slice(0, limit)}...<truncated:${value.length - limit}>`;
+	}
+	function sanitizeDebugString(value, limit = 500) {
+		return truncateDebugString(value.replace(/https?:\/\/[^\s"'<>）)]+/gi, (match) => redactUrl(match) || match), limit);
+	}
+	function hashText(value) {
+		const text = value || "";
+		let hash = 2166136261;
+		for (let i = 0; i < text.length; i += 1) {
+			hash ^= text.charCodeAt(i);
+			hash = Math.imul(hash, 16777619);
+		}
+		return `fnv1a:${(hash >>> 0).toString(16).padStart(8, "0")}`;
+	}
+	function htmlTextLength(html) {
+		if (!html) return 0;
+		return html.replace(/<script[\s\S]*?<\/script>/gi, "").replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<[^>]+>/g, "").replace(/&nbsp;|&#160;/gi, " ").trim().length;
+	}
+	function tailStrings(values, limit = 8) {
+		return Array.from(values).slice(-limit).map((value) => redactUrl(value) || "");
+	}
+	function toDebugValue(value, depth = 3) {
+		return toDebugValueInternal(value, depth, new WeakSet());
+	}
+	function toDebugValueInternal(value, depth, seen) {
+		if (value === null || value === void 0) return null;
+		if (typeof value === "string") return looksLikeUrl(value) ? redactUrl(value) : sanitizeDebugString(value);
+		if (typeof value === "number") return Number.isFinite(value) ? value : String(value);
+		if (typeof value === "boolean") return value;
+		if (typeof value === "bigint") return value.toString();
+		if (typeof value === "function" || typeof value === "symbol") return null;
+		if (value instanceof Error) return {
+			name: value.name,
+			message: sanitizeDebugString(value.message),
+			stack: value.stack ? sanitizeDebugString(value.stack, 1200) : null
+		};
+		if (value instanceof URL) return redactUrl(value.toString());
+		if (typeof value !== "object") return truncateDebugString(String(value));
+		if (seen.has(value)) return "[Circular]";
+		if (depth <= 0) return `[${Object.prototype.toString.call(value).slice(8, -1)}]`;
+		seen.add(value);
+		if (Array.isArray(value)) {
+			const result = value.slice(0, 30).map((item) => toDebugValueInternal(item, depth - 1, seen));
+			if (value.length > 30) result.push(`...<truncated:${value.length - 30}>`);
+			seen.delete(value);
+			return result;
+		}
+		if (value instanceof Map) {
+			const result = {};
+			let count = 0;
+			for (const [key, item] of value) {
+				if (count >= 30) break;
+				result[String(key)] = toDebugValueInternal(item, depth - 1, seen);
+				count += 1;
+			}
+			seen.delete(value);
+			return result;
+		}
+		if (value instanceof Set) {
+			const result = Array.from(value).slice(0, 30).map((item) => toDebugValueInternal(item, depth - 1, seen));
+			seen.delete(value);
+			return result;
+		}
+		const result = {};
+		let count = 0;
+		for (const [key, item] of Object.entries(value)) {
+			if (count >= 40) {
+				result.__truncated__ = "true";
+				break;
+			}
+			result[key] = toDebugValueInternal(item, depth - 1, seen);
+			count += 1;
+		}
+		seen.delete(value);
+		return result;
+	}
+	function looksLikeUrl(value) {
+		return /^https?:\/\//i.test(value) || /^\/[^\s]*\?/.test(value);
+	}
+	var MAX_DEBUG_EVENTS = 50;
+	var events = [];
+	function recordDebugEvent(type, detail, level = "info") {
+		events.push({
+			at: new Date().toISOString(),
+			t: Date.now(),
+			level,
+			type,
+			detail: detail === void 0 ? void 0 : toDebugValue(detail)
+		});
+		if (events.length > MAX_DEBUG_EVENTS) events.splice(0, events.length - MAX_DEBUG_EVENTS);
+	}
+	function getDebugEvents() {
+		return events.map((event) => ({ ...event }));
+	}
+	function installGlobalDebugErrorListeners() {
+		if (typeof window === "undefined") return;
+		const marker = "__mnrDebugErrorListenersInstalled__";
+		const target = window;
+		if (target[marker]) return;
+		target[marker] = true;
+		window.addEventListener("error", (event) => {
+			recordDebugEvent("window.error", {
+				message: event.message,
+				filename: event.filename,
+				lineno: event.lineno,
+				colno: event.colno,
+				error: event.error instanceof Error ? event.error.message : null
+			}, "error");
+		});
+		window.addEventListener("unhandledrejection", (event) => {
+			recordDebugEvent("window.unhandledrejection", { reason: event.reason instanceof Error ? event.reason.message : event.reason }, "error");
+		});
+	}
+	var cooldowns = new Map();
+	function getRequestCooldown(url) {
+		const origin = new URL(url).origin;
+		const cooldown = cooldowns.get(origin);
+		if (cooldown && cooldown.until <= Date.now()) {
+			cooldowns.delete(origin);
+			return;
+		}
+		return cooldown;
+	}
+	function recordRequestCooldown(url, status, retryAfter, fallbackMs = 3e4) {
+		if (status !== 429 && status !== 503) return void 0;
+		const raw = retryAfter?.trim();
+		const requested = raw ? /^\d+$/.test(raw) ? Date.now() + Number(raw) * 1e3 : Date.parse(raw) : NaN;
+		if (status !== 429 && !Number.isFinite(requested)) return void 0;
+		const until = Math.max(Date.now(), Number.isFinite(requested) ? requested : Date.now() + fallbackMs, getRequestCooldown(url)?.until ?? 0);
+		const cooldown = {
+			status,
+			until
+		};
+		cooldowns.set(new URL(url).origin, cooldown);
+		recordDebugEvent("request.cooldown", {
+			url,
+			status,
+			retryAt: until
+		});
+		return cooldown;
+	}
+	function getRetryAfterHeader(headers) {
+		return headers?.match(/^retry-after\s*:\s*(.+)$/im)?.[1].trim() ?? null;
+	}
+	function waitForRequestDelay(ms, signal) {
+		if (signal?.aborted) return Promise.resolve(false);
+		return new Promise((resolve) => {
+			const finish = (ready) => {
+				clearTimeout(timer);
+				signal?.removeEventListener("abort", abort);
+				resolve(ready);
+			};
+			const abort = () => finish(false);
+			const timer = setTimeout(() => finish(true), ms);
+			signal?.addEventListener("abort", abort, { once: true });
+		});
+	}
+	async function runRequest(url, options) {
+		const { signal, stopped } = options;
+		const retries = Math.min(2, Math.max(0, options.retries ?? 2));
+		let rateLimited = false;
+		for (let attempt = 0;; attempt++) {
+			if (signal.aborted) return stopped("abort", null);
+			const cooling = getRequestCooldown(url);
+			if (cooling) {
+				recordDebugEvent("request.blocked", {
+					url,
+					status: cooling.status,
+					retryAt: cooling.until
+				});
+				return stopped("http", cooling.status);
+			}
+			let abort;
+			const cancelled = new Promise((resolve) => {
+				abort = () => resolve(stopped("abort", null));
+				signal.addEventListener("abort", abort, { once: true });
+			});
+			let result;
+			try {
+				result = await Promise.race([options.attempt(), cancelled]);
+			} finally {
+				signal.removeEventListener("abort", abort);
+			}
+			if (signal.aborted) return stopped("abort", null);
+			const cooldown = recordRequestCooldown(url, result.status, result.retryAfter, rateLimited ? 6e4 : 3e4);
+			let delay;
+			if (result.status === 429) {
+				if (rateLimited || options.retryRateLimit === false) return result;
+				rateLimited = true;
+				delay = cooldown.until - Date.now();
+			} else if (result.error === "network" || result.error === "timeout" || result.error === "fallback" || result.error === "http" && [
+				500,
+				502,
+				503,
+				504
+			].includes(result.status ?? 0)) {
+				delay = result.error === "fallback" ? 0 : 2e3 * 2 ** attempt * (1 + Math.random() * .2);
+				if (cooldown) delay = Math.max(delay, cooldown.until - Date.now());
+			} else return result;
+			if (attempt >= retries || delay > 6e4) return result;
+			recordDebugEvent("request.retry", {
+				url,
+				attempt: attempt + 2,
+				status: result.status,
+				reason: result.error,
+				delayMs: Math.ceil(delay)
+			});
+			if (delay > 0 && !await waitForRequestDelay(delay, signal)) return stopped("abort", null);
+		}
+	}
 	function getGmXhr() {
 		if (typeof GM_xmlhttpRequest === "function") return GM_xmlhttpRequest;
 		return null;
@@ -2736,7 +2961,7 @@
 		const gmXhr = getGmXhr();
 		const requestUrl = resolveAndValidateHttpUrl(url, referer);
 		const timeoutMs = options.timeoutMs ?? 15e3;
-		const maxRetries = Math.max(0, options.retries ?? 1);
+		const controller = new AbortController();
 		if (!requestUrl) {
 			console.error("[MNR] Invalid or unsupported URL:", url);
 			return {
@@ -2821,7 +3046,8 @@
 								doc: null,
 								status: response.status,
 								finalUrl,
-								error: "http"
+								error: "http",
+								retryAfter: getRetryAfterHeader(response.responseHeaders)
 							});
 						},
 						onerror: () => {
@@ -2898,7 +3124,8 @@
 					doc: null,
 					status,
 					finalUrl,
-					error: "http"
+					error: "http",
+					retryAfter: response.headers?.get?.("Retry-After") ?? null
 				};
 			}).catch((err) => {
 				if (aborted) return {
@@ -2930,34 +3157,25 @@
 				}
 			});
 		};
-		const shouldRetry = (res) => {
-			if (aborted) return false;
-			if (res.error === "timeout" || res.error === "network") return true;
-			if (res.error === "http" && res.status && (res.status >= 500 || res.status === 429)) return true;
-			return false;
-		};
-		const promise = (async () => {
-			for (let attempt = 0; attempt <= maxRetries; attempt++) {
-				if (aborted) return {
-					doc: null,
-					status: null,
-					finalUrl: null,
-					error: "abort"
-				};
-				const res = await doRequest();
-				if (!shouldRetry(res) || attempt === maxRetries) return res;
-				const delay = Math.min(400 * Math.pow(2, attempt), 2e3);
-				await new Promise((resolve) => globalThis.setTimeout(resolve, delay));
-			}
-			return {
+		const promise = runRequest(requestUrl, {
+			signal: controller.signal,
+			attempt: doRequest,
+			retries: options.retries,
+			retryRateLimit: options.retryRateLimit,
+			stopped: (error, status) => ({
 				doc: null,
-				status: null,
+				status,
 				finalUrl: null,
-				error: "network"
-			};
-		})();
+				error
+			})
+		});
 		const abort = () => {
 			aborted = true;
+			try {
+				controller.abort();
+			} catch (error) {
+				console.debug("[MNR] Request cancellation failed:", error);
+			}
 			try {
 				request?.abort();
 			} catch {}
@@ -3498,10 +3716,7 @@
 			bookSelector: ".submenu h1 > a[href$=\"/\"]"
 		},
 		toc: { excludeAncestors: ".new, .item, h1, h2" },
-		advanced: {
-			checkSection: true,
-			sectionDelayMs: 800
-		},
+		advanced: { checkSection: true },
 		meta: {
 			source: "builtin",
 			exampleUrl: "https://www.deqixs.org/24/18442_6.html"
@@ -3694,10 +3909,7 @@
 			bookPatternIndex: 2
 		},
 		hooks: { beforeParse: gobooBeforeParse },
-		advanced: {
-			checkSection: true,
-			sectionDelayMs: 1200
-		},
+		advanced: { checkSection: true },
 		meta: {
 			source: "builtin",
 			exampleUrl: "https://m.goboo.cc/gb_1/94443/1"
@@ -3815,14 +4027,17 @@
 		}
 		const chapterId = parsedUrl.pathname.match(/\/(\d+)\.html$/)?.[1];
 		if (!chapterId || parsedUrl.hostname !== "www.hetushu.com") return false;
+		const requestUrl = new URL(`r${chapterId}.json`, parsedUrl).href;
+		if (getRequestCooldown(requestUrl)) return false;
 		const controller = new AbortController();
 		const timeoutId = setTimeout(() => controller.abort(), SUBSTEP_READY_TIMEOUT_MS);
 		try {
-			const response = await fetch(new URL(`r${chapterId}.json`, parsedUrl).href, {
+			const response = await fetch(requestUrl, {
 				credentials: "include",
 				headers: { "X-Requested-With": "XMLHttpRequest" },
 				signal: controller.signal
 			});
+			recordRequestCooldown(requestUrl, response.status, response.headers?.get?.("Retry-After"));
 			if (!response.ok) return false;
 			const token = response.headers.get("token");
 			const mapping = token ? decodeSubstepMapping(token) : null;
@@ -4000,10 +4215,7 @@
 		},
 		title: { selector: "#chaptertitle" },
 		toc: { selector: ".info_menu1 .list_xm:has(> .listpage) > ul" },
-		advanced: {
-			checkSection: true,
-			sectionDelayMs: 800
-		},
+		advanced: { checkSection: true },
 		meta: {
 			source: "builtin",
 			exampleUrl: "https://m.kudushu.org/html/1088392/146537150/"
@@ -4112,10 +4324,7 @@
 			replace: "\\s*[（(]\\d+\\s*/\\s*\\d+[）)]\\s*$",
 			bookSelector: ".text_info a:first-child"
 		},
-		advanced: {
-			checkSection: true,
-			sectionDelayMs: 1e3
-		},
+		advanced: { checkSection: true },
 		hooks: {
 			normalizeChapterUrl: normalizeNovelsUrl,
 			parseSectionUrl: (url) => {
@@ -4466,10 +4675,7 @@
 			bookSelector: ".submenu h1 > a[href^=\"/\"][href$=\"/\"]"
 		},
 		toc: { excludeAncestors: ".new, .item, h1, h2" },
-		advanced: {
-			checkSection: true,
-			sectionDelayMs: 800
-		},
+		advanced: { checkSection: true },
 		meta: {
 			source: "builtin",
 			exampleUrl: "https://www.shudugu.org/109/1226047.html"
@@ -4667,8 +4873,7 @@
 		},
 		advanced: {
 			checkSection: true,
-			sectionMaxPages: 99,
-			sectionDelayMs: 800
+			sectionMaxPages: 99
 		},
 		meta: {
 			source: "builtin",
@@ -5046,7 +5251,7 @@
 			const knownDocs = new Map([[getDocumentKey(url, url), doc]]);
 			const baseUrl = getSectionBaseUrl(url, parseSectionUrl);
 			if (baseUrl && baseUrl !== url) {
-				const baseDoc = await this.fetchUrl(baseUrl, url, options.fetcher, options.signal);
+				const baseDoc = await this.fetchUrl(baseUrl, url, options.fetcher, options.signal, options.retryRateLimit);
 				if (options.signal?.aborted) return null;
 				if (baseDoc) {
 					startUrl = baseUrl;
@@ -5090,7 +5295,7 @@
 				chapterUrl: this.getChapterUrl(startPage.url, nextSectionUrl),
 				nextSectionUrl,
 				nextChapterUrl: section?.nextChapterUrl || (first.nextUrl && !isSectionLikeUrl(startPage.url, first.nextUrl, parseSectionUrl) ? first.nextUrl : null),
-				sectionDelayMs: hasCustomFetcher ? 0 : Math.max(0, first.rule?.advanced?.sectionDelayMs ?? 0)
+				sectionDelayMs: hasCustomFetcher ? 0 : Math.max(0, first.rule?.advanced?.sectionDelayMs ?? 1200)
 			};
 		}
 		readSectionMarker(doc) {
@@ -5129,12 +5334,12 @@
 			while (cursor.remainingPages > 0 && cursor.nextSectionUrl) {
 				if (signal?.aborted) break;
 				if (state.sectionDelayMs > 0) {
-					await this.sleep(state.sectionDelayMs, signal);
+					await waitForRequestDelay(state.sectionDelayMs, signal);
 					if (signal?.aborted) break;
 				}
-				const page = await this.loadNextSectionPage(cursor, startPage.knownDocs, fetcher, signal);
+				const page = await this.loadNextSectionPage(cursor, startPage.knownDocs, fetcher, signal, options.retryRateLimit);
 				if (!page) break;
-				const nextParsed = await this.parseLoadedSection(page, cursor.lastUrl, startPage.knownDocs, fetcher, signal);
+				const nextParsed = await this.parseLoadedSection(page, cursor.lastUrl, startPage.knownDocs, fetcher, signal, options.retryRateLimit);
 				if (signal?.aborted || !nextParsed) break;
 				const marker = this.readSectionMarker(page.doc);
 				if (marker && (marker.page !== cursor.loadedPages + 1 || cursor.totalPages !== void 0 && marker.total !== cursor.totalPages)) break;
@@ -5175,7 +5380,7 @@
 				sourceScript: first.sourceScript
 			};
 		}
-		async loadNextSectionPage(cursor, knownDocs, fetcher, signal) {
+		async loadNextSectionPage(cursor, knownDocs, fetcher, signal, retryRateLimit) {
 			if (signal?.aborted || !cursor.nextSectionUrl) return null;
 			const url = normalizeAbsoluteUrl(cursor.nextSectionUrl, cursor.lastUrl);
 			const key = getDocumentKey(url, cursor.lastUrl);
@@ -5187,7 +5392,7 @@
 				url,
 				fromCache: true
 			};
-			const doc = await this.fetchUrl(url, cursor.lastUrl, fetcher, signal);
+			const doc = await this.fetchUrl(url, cursor.lastUrl, fetcher, signal, retryRateLimit);
 			if (!doc) return null;
 			knownDocs.set(key, doc);
 			return {
@@ -5196,10 +5401,10 @@
 				fromCache: false
 			};
 		}
-		async parseLoadedSection(page, referrer, knownDocs, fetcher, signal) {
+		async parseLoadedSection(page, referrer, knownDocs, fetcher, signal, retryRateLimit) {
 			let parsed = await this.parser.parse(page.doc, page.url);
 			if (parsed || !page.fromCache || signal?.aborted) return parsed;
-			const doc = await this.fetchUrl(page.url, referrer, fetcher, signal);
+			const doc = await this.fetchUrl(page.url, referrer, fetcher, signal, retryRateLimit);
 			if (!doc) return null;
 			knownDocs.set(getDocumentKey(page.url, referrer), doc);
 			page.doc = doc;
@@ -5234,21 +5439,10 @@
 			if (current === next) return current;
 			return "mixed";
 		}
-		async sleep(ms, signal) {
-			if (ms <= 0 || signal?.aborted) return;
-			await new Promise((resolve) => {
-				const timer = globalThis.setTimeout(resolve, ms);
-				if (!signal) return;
-				signal.addEventListener("abort", () => {
-					globalThis.clearTimeout(timer);
-					resolve();
-				}, { once: true });
-			});
-		}
-		async fetchUrl(url, referrer, customFetcher, signal) {
+		async fetchUrl(url, referrer, customFetcher, signal, retryRateLimit) {
 			if (signal?.aborted) return null;
 			if (customFetcher) return await customFetcher(url, referrer);
-			const { promise, abort } = fetchAndParseUrl(url, referrer);
+			const { promise, abort } = fetchAndParseUrl(url, referrer, { retryRateLimit });
 			if (!signal) return (await promise).doc;
 			if (signal.aborted) {
 				abort();
@@ -5312,12 +5506,13 @@
 	function createSectionMerger(parser) {
 		return new SectionMerger(parser);
 	}
-	async function streamSectionMerge(merger, doc, url, signal, first) {
+	async function streamSectionMerge(merger, doc, url, signal, first, retryRateLimit = true) {
 		const target = {};
 		let truncated = false;
 		try {
 			const chapter = await merger.merge(doc, url, {
 				signal,
+				retryRateLimit,
 				onFirstPage: async (chapter, progress) => {
 					target.delivery = await first(chapter, progress) || void 0;
 				},
@@ -8621,6 +8816,7 @@
 				console.warn("[Parser] Fetch blocked: invalid or unsafe URL:", url);
 				return null;
 			}
+			if (getRequestCooldown(resolved)) return null;
 			const resolvedUrl = new URL(resolved);
 			const timeoutMs = options.timeoutMs ?? 4e3;
 			const headers = options.headers ?? {};
@@ -8636,7 +8832,10 @@
 					headers: gmHeaders,
 					timeout: timeoutMs,
 					withCredentials,
-					onload: (resp) => resolve(resp.status >= 200 && resp.status < 300 ? resp.responseText || null : null),
+					onload: (resp) => {
+						recordRequestCooldown(resolved, resp.status, getRetryAfterHeader(resp.responseHeaders));
+						resolve(resp.status >= 200 && resp.status < 300 ? resp.responseText || null : null);
+					},
 					onerror: () => resolve(null),
 					ontimeout: () => resolve(null)
 				});
@@ -8653,6 +8852,7 @@
 					signal: controller.signal
 				});
 				window.clearTimeout(timer);
+				recordRequestCooldown(resolved, resp.status, resp.headers?.get?.("Retry-After"));
 				if (!resp.ok) return null;
 				return await resp.text();
 			} catch {
@@ -8966,134 +9166,6 @@
 	}
 	var VERSION = "1.0.7";
 	var BUILD_DATE = "2026-09-21";
-	var SENSITIVE_QUERY_KEY = /(?:^|[_-])(?:token|auth|session|sid|key|sign|signature|ticket|password|passwd|pwd|jwt|credential|access|refresh|challenge|chl)(?:[_-]|$)|^__cf_|^_csrfToken$/i;
-	function redactUrl(url) {
-		if (!url) return null;
-		try {
-			const parsed = new URL(url, typeof window !== "undefined" ? window.location.href : void 0);
-			parsed.username = parsed.username ? "__redacted__" : "";
-			parsed.password = parsed.password ? "__redacted__" : "";
-			for (const key of Array.from(parsed.searchParams.keys())) if (SENSITIVE_QUERY_KEY.test(key)) parsed.searchParams.set(key, "__redacted__");
-			return parsed.toString();
-		} catch {
-			return truncateDebugString(url);
-		}
-	}
-	function truncateDebugString(value, limit = 500) {
-		if (value.length <= limit) return value;
-		return `${value.slice(0, limit)}...<truncated:${value.length - limit}>`;
-	}
-	function sanitizeDebugString(value, limit = 500) {
-		return truncateDebugString(value.replace(/https?:\/\/[^\s"'<>）)]+/gi, (match) => redactUrl(match) || match), limit);
-	}
-	function hashText(value) {
-		const text = value || "";
-		let hash = 2166136261;
-		for (let i = 0; i < text.length; i += 1) {
-			hash ^= text.charCodeAt(i);
-			hash = Math.imul(hash, 16777619);
-		}
-		return `fnv1a:${(hash >>> 0).toString(16).padStart(8, "0")}`;
-	}
-	function htmlTextLength(html) {
-		if (!html) return 0;
-		return html.replace(/<script[\s\S]*?<\/script>/gi, "").replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<[^>]+>/g, "").replace(/&nbsp;|&#160;/gi, " ").trim().length;
-	}
-	function tailStrings(values, limit = 8) {
-		return Array.from(values).slice(-limit).map((value) => redactUrl(value) || "");
-	}
-	function toDebugValue(value, depth = 3) {
-		return toDebugValueInternal(value, depth, new WeakSet());
-	}
-	function toDebugValueInternal(value, depth, seen) {
-		if (value === null || value === void 0) return null;
-		if (typeof value === "string") return looksLikeUrl(value) ? redactUrl(value) : sanitizeDebugString(value);
-		if (typeof value === "number") return Number.isFinite(value) ? value : String(value);
-		if (typeof value === "boolean") return value;
-		if (typeof value === "bigint") return value.toString();
-		if (typeof value === "function" || typeof value === "symbol") return null;
-		if (value instanceof Error) return {
-			name: value.name,
-			message: sanitizeDebugString(value.message),
-			stack: value.stack ? sanitizeDebugString(value.stack, 1200) : null
-		};
-		if (value instanceof URL) return redactUrl(value.toString());
-		if (typeof value !== "object") return truncateDebugString(String(value));
-		if (seen.has(value)) return "[Circular]";
-		if (depth <= 0) return `[${Object.prototype.toString.call(value).slice(8, -1)}]`;
-		seen.add(value);
-		if (Array.isArray(value)) {
-			const result = value.slice(0, 30).map((item) => toDebugValueInternal(item, depth - 1, seen));
-			if (value.length > 30) result.push(`...<truncated:${value.length - 30}>`);
-			seen.delete(value);
-			return result;
-		}
-		if (value instanceof Map) {
-			const result = {};
-			let count = 0;
-			for (const [key, item] of value) {
-				if (count >= 30) break;
-				result[String(key)] = toDebugValueInternal(item, depth - 1, seen);
-				count += 1;
-			}
-			seen.delete(value);
-			return result;
-		}
-		if (value instanceof Set) {
-			const result = Array.from(value).slice(0, 30).map((item) => toDebugValueInternal(item, depth - 1, seen));
-			seen.delete(value);
-			return result;
-		}
-		const result = {};
-		let count = 0;
-		for (const [key, item] of Object.entries(value)) {
-			if (count >= 40) {
-				result.__truncated__ = "true";
-				break;
-			}
-			result[key] = toDebugValueInternal(item, depth - 1, seen);
-			count += 1;
-		}
-		seen.delete(value);
-		return result;
-	}
-	function looksLikeUrl(value) {
-		return /^https?:\/\//i.test(value) || /^\/[^\s]*\?/.test(value);
-	}
-	var MAX_DEBUG_EVENTS = 50;
-	var events = [];
-	function recordDebugEvent(type, detail, level = "info") {
-		events.push({
-			at: new Date().toISOString(),
-			t: Date.now(),
-			level,
-			type,
-			detail: detail === void 0 ? void 0 : toDebugValue(detail)
-		});
-		if (events.length > MAX_DEBUG_EVENTS) events.splice(0, events.length - MAX_DEBUG_EVENTS);
-	}
-	function getDebugEvents() {
-		return events.map((event) => ({ ...event }));
-	}
-	function installGlobalDebugErrorListeners() {
-		if (typeof window === "undefined") return;
-		const marker = "__mnrDebugErrorListenersInstalled__";
-		const target = window;
-		if (target[marker]) return;
-		target[marker] = true;
-		window.addEventListener("error", (event) => {
-			recordDebugEvent("window.error", {
-				message: event.message,
-				filename: event.filename,
-				lineno: event.lineno,
-				colno: event.colno,
-				error: event.error instanceof Error ? event.error.message : null
-			}, "error");
-		});
-		window.addEventListener("unhandledrejection", (event) => {
-			recordDebugEvent("window.unhandledrejection", { reason: event.reason instanceof Error ? event.reason.message : event.reason }, "error");
-		});
-	}
 	function buildDiagnosticInfo(options = {}) {
 		return {
 			schema: "mnr-debug-v1",
@@ -18177,101 +18249,78 @@ ul, ol {
 			return false;
 		}
 	}
-	function calculateBackoff(failureCount, baseMs = 1500, maxMs = 3e4) {
-		return Math.min(baseMs * Math.pow(2, failureCount - 1), maxMs);
-	}
 	function getPageFetch() {
 		if (typeof unsafeWindow !== "undefined" && typeof unsafeWindow.fetch === "function") return unsafeWindow.fetch.bind(unsafeWindow);
 		if (typeof window !== "undefined" && typeof window.fetch === "function") return window.fetch.bind(window);
 		return typeof fetch === "function" ? fetch : null;
 	}
-	function requestSiteData(url, options) {
-		return new Promise((resolve) => {
-			const controller = new AbortController();
+	async function requestSiteData(url, options) {
+		const controller = new AbortController();
+		const fetcher = getPageFetch();
+		const gmXhr = typeof GM_xmlhttpRequest === "function" ? GM_xmlhttpRequest : null;
+		let useGm = !fetcher;
+		let lastResult;
+		const stopped = (error, status) => ({
+			...lastResult,
+			value: null,
+			finalUrl: null,
+			transport: lastResult?.transport ?? null,
+			error,
+			status
+		});
+		options.setAbort(() => controller.abort());
+		const attempt = () => new Promise((resolve) => {
+			const transportController = new AbortController();
 			let gmRequest;
 			let settled = false;
-			const timeoutMs = options.timeoutMs ?? 1e4;
-			const diagnostic = {
-				url,
-				finalUrl: null,
-				transport: null,
-				status: null,
-				reason: "unavailable"
+			const result = {
+				...stopped("network", null),
+				transport: useGm ? "gm" : "fetch"
 			};
-			const finish = (value) => {
+			lastResult = result;
+			const finish = () => {
 				if (settled) return;
 				settled = true;
 				clearTimeout(timer);
-				options.setAbort(null);
-				options.onResult?.({
-					...diagnostic,
-					reason: value === null ? diagnostic.reason : "success"
-				});
-				resolve(value);
+				controller.signal.removeEventListener("abort", abort);
+				resolve(result);
 			};
-			const cancel = (reason = "cancelled") => {
+			const cancel = (error) => {
 				if (settled) return;
-				diagnostic.reason = reason;
-				finish(null);
-				controller.abort();
+				result.error = error;
+				finish();
+				transportController.abort();
 				try {
 					gmRequest?.abort();
 				} catch (error) {
 					console.debug("[MNR] Site request abort failed:", error);
 				}
 			};
-			const timer = setTimeout(() => cancel("timeout"), timeoutMs);
-			options.setAbort(cancel);
+			const abort = () => cancel("abort");
+			const timer = setTimeout(() => cancel("timeout"), options.timeoutMs ?? 1e4);
+			controller.signal.addEventListener("abort", abort, { once: true });
 			const parse = (data) => {
 				try {
-					return options.parse(data);
+					result.value = options.parse(data);
 				} catch (error) {
 					console.debug("[MNR] Invalid site response:", error);
-					return null;
 				}
+				result.error = result.value === null ? "parse" : null;
 			};
-			(async () => {
+			const fallback = () => {
+				if (!useGm && gmXhr && options.gmFallback !== false && (result.error === "network" || result.error === "parse" || result.status === 403)) {
+					useGm = true;
+					result.error = "fallback";
+				}
+				finish();
+			};
+			if (useGm) {
+				if (!gmXhr) {
+					result.error = "unavailable";
+					finish();
+					return;
+				}
 				try {
-					if (settled) return;
-					const fetcher = getPageFetch();
-					if (fetcher) {
-						diagnostic.transport = "fetch";
-						diagnostic.reason = "network";
-						try {
-							const response = await fetcher(url, {
-								method: options.method ?? "GET",
-								credentials: "include",
-								headers: options.headers,
-								...options.body === void 0 ? {} : { body: options.body },
-								signal: controller.signal
-							});
-							if (settled) return;
-							diagnostic.status = response.status;
-							diagnostic.finalUrl = response.url || url;
-							diagnostic.reason = response.ok ? "parse" : "http";
-							if (response.ok) {
-								const data = await response[options.responseType]();
-								if (settled) return;
-								const value = parse(data);
-								if (value !== null) {
-									finish(value);
-									return;
-								}
-							}
-						} catch (error) {
-							if (!settled) console.debug("[MNR] Native site request failed:", error);
-						}
-					}
-					if (settled) return;
-					const gmXhr = typeof GM_xmlhttpRequest === "function" ? GM_xmlhttpRequest : null;
-					if (options.gmFallback === false || !gmXhr) {
-						finish(null);
-						return;
-					}
-					diagnostic.transport = "gm";
-					diagnostic.status = null;
-					diagnostic.finalUrl = null;
-					diagnostic.reason = "network";
 					gmRequest = gmXhr({
 						method: options.method ?? "GET",
 						url,
@@ -18280,39 +18329,82 @@ ul, ol {
 							...options.headers,
 							...options.referrer ? { Referer: options.referrer } : {}
 						},
-						timeout: timeoutMs,
+						timeout: options.timeoutMs ?? 1e4,
 						withCredentials: true,
 						onload: (response) => {
 							if (settled) return;
-							diagnostic.status = response.status;
-							diagnostic.finalUrl = response.finalUrl || url;
-							diagnostic.reason = "http";
-							if (response.status < 200 || response.status >= 300) {
-								finish(null);
-								return;
-							}
-							diagnostic.reason = "parse";
-							try {
-								const data = options.responseType === "json" ? JSON.parse(response.responseText) : response.responseText;
-								finish(parse(data));
+							result.status = response.status;
+							result.finalUrl = response.finalUrl || url;
+							result.retryAfter = getRetryAfterHeader(response.responseHeaders);
+							result.error = "http";
+							if (response.status >= 200 && response.status < 300) try {
+								parse(options.responseType === "json" ? JSON.parse(response.responseText) : response.responseText);
 							} catch (error) {
+								result.error = "parse";
 								console.debug("[MNR] Invalid GM site response:", error);
-								finish(null);
 							}
+							finish();
 						},
-						onerror: () => finish(null),
-						onabort: () => {
-							diagnostic.reason = "cancelled";
-							finish(null);
-						},
+						onerror: () => finish(),
+						onabort: () => cancel("abort"),
 						ontimeout: () => cancel("timeout")
 					});
 				} catch (error) {
 					console.warn("[MNR] Site request failed:", error);
-					finish(null);
+					finish();
 				}
+				return;
+			}
+			(async () => {
+				try {
+					const response = await fetcher(url, {
+						method: options.method ?? "GET",
+						credentials: "include",
+						headers: options.headers,
+						...options.body === void 0 ? {} : { body: options.body },
+						signal: transportController.signal
+					});
+					if (settled) return;
+					result.status = response.status ?? (response.ok ? 200 : null);
+					result.finalUrl = response.url || url;
+					result.retryAfter = response.headers?.get?.("Retry-After") ?? null;
+					result.error = "http";
+					if (response.ok) try {
+						const data = await response[options.responseType]();
+						if (settled) return;
+						parse(data);
+					} catch (error) {
+						if (settled) return;
+						result.error = "parse";
+						console.debug("[MNR] Invalid native site response:", error);
+					}
+				} catch (error) {
+					if (settled) return;
+					result.error = "network";
+					console.debug("[MNR] Native site request failed:", error);
+				}
+				fallback();
 			})();
 		});
+		try {
+			const result = await runRequest(url, {
+				signal: controller.signal,
+				attempt,
+				stopped,
+				retries: options.retries,
+				retryRateLimit: false
+			});
+			options.onResult?.({
+				url,
+				finalUrl: result.finalUrl,
+				transport: result.transport,
+				status: result.status,
+				reason: result.error === "abort" ? "cancelled" : result.error ?? "success"
+			});
+			return result.value;
+		} finally {
+			options.setAbort(null);
+		}
 	}
 	var ajaxChapterList_exports = __exportAll({ createAjaxChapterListLoader: () => createAjaxChapterListLoader });
 	function resolvePageUrl(indexUrl, currentUrl, options) {
@@ -18885,7 +18977,7 @@ ul, ol {
 					transport: null,
 					reason: "pending"
 				} });
-				const { promise, abort } = fetchAndParseUrl(pageUrl, referer);
+				const { promise, abort } = fetchAndParseUrl(pageUrl, referer, { retryRateLimit: false });
 				currentAbort = abort;
 				if (aborted) abort();
 				const result = await promise;
@@ -19025,15 +19117,8 @@ ul, ol {
 						else abort?.();
 					}, (update) => Object.assign(diagnostic, update));
 				};
-				let entries = await fetchEntries();
+				const entries = await fetchEntries();
 				if (ctx.runtime.isSessionStale(runId)) return;
-				if (entries.length === 0) {
-					recordDebugEvent("toc.retry", diagnostic);
-					await new Promise((resolve) => window.setTimeout(resolve, 400));
-					if (ctx.runtime.isSessionStale(runId)) return;
-					entries = await fetchEntries();
-					if (ctx.runtime.isSessionStale(runId)) return;
-				}
 				await setTocEntries(entries);
 				if (ctx.runtime.isSessionStale(runId)) return;
 				diagnostic.entries = entries.length;
@@ -19090,7 +19175,7 @@ ul, ol {
 			};
 			resolveFirst(chapter);
 			return gate;
-		}).then(resolveFirst).catch((error) => {
+		}, options.retryRateLimit).then(resolveFirst).catch((error) => {
 			console.error("[MNR] Background section merge failed:", error);
 			resolveFirst(null);
 		});
@@ -19123,7 +19208,7 @@ ul, ol {
 	function trimNavFailures(navFailures, maxNavFailures) {
 		const limit = Math.max(0, maxNavFailures);
 		if (navFailures.size <= limit) return;
-		const entries = Array.from(navFailures.entries()).sort((a, b) => a[1].nextRetryAt - b[1].nextRetryAt);
+		const entries = Array.from(navFailures.entries()).sort((a, b) => a[1].failedAt - b[1].failedAt);
 		const toDeleteCount = Math.min(entries.length, navFailures.size - limit);
 		for (let i = 0; i < toDeleteCount; i++) navFailures.delete(entries[i][0]);
 	}
@@ -19277,10 +19362,9 @@ ul, ol {
 	}
 	function recordNavFailure(failures, key, opts) {
 		const count = (failures.get(key)?.count || 0) + 1;
-		const backoffMs = calculateBackoff(count);
 		failures.set(key, {
 			count,
-			nextRetryAt: Date.now() + backoffMs
+			failedAt: Date.now()
 		});
 		trimNavFailures(failures, opts.maxFailures);
 		return count;
@@ -19289,6 +19373,10 @@ ul, ol {
 		failures.delete(key);
 	}
 	function loadDocumentInIframe(url, timeoutMs = 15e3) {
+		if (getRequestCooldown(url)) return {
+			promise: Promise.resolve(null),
+			abort: () => {}
+		};
 		let iframe = null;
 		let timeoutId = null;
 		let settled = false;
@@ -19361,11 +19449,11 @@ ul, ol {
 			}
 		};
 	}
-	async function loadFetchDocument(ctx, load, runId, referer) {
+	async function loadFetchDocument(ctx, load, runId, referer, source) {
 		const ruleDoc = await loadRuleApiDocument(load.targetUrl, load.refChapter.chapter);
 		if (ctx.runtime.isViewStale(runId)) return "abort";
 		if (ruleDoc) return ruleDoc;
-		const fetchLoader = fetchAndParseUrl(load.targetUrl, referer);
+		const fetchLoader = fetchAndParseUrl(load.targetUrl, referer, { retryRateLimit: source === "manual" });
 		const abort = fetchLoader.abort;
 		if (ctx.runtime.isViewStale(runId)) {
 			abort();
@@ -19423,7 +19511,8 @@ ul, ol {
 			}
 			const { chapter, merge } = await startProgressiveSectionMerge(parser, doc, load.targetUrl, {
 				controller,
-				sink: createSectionMergeSink(ctx)
+				sink: createSectionMergeSink(ctx),
+				retryRateLimit: source === "manual"
 			});
 			if (controller.signal.aborted || ctx.runtime.isViewStale(runId)) {
 				merge?.reject();
@@ -19542,6 +19631,10 @@ ul, ol {
 		async function startCacheAll(urls) {
 			const runId = ctx.runtime.sessionId();
 			if (ctx.cacheProgress.value.running) return;
+			if (ctx.chapters.value.some((entry) => entry.sectionProgress)) {
+				ctx.showToast("请等待正在加载的章节完成后再缓存", "info");
+				return;
+			}
 			const task = {
 				chapterUrl: ctx.chapter.value?.url ?? null,
 				requested: 0,
@@ -19617,6 +19710,7 @@ ul, ol {
 					failed: 0,
 					running: true
 				};
+				let stoppedByRateLimit = false;
 				let nextUrl = taskList.shift();
 				let referer = ctx.chapters.value[ctx.chapters.value.length - 1]?.chapter.url || ctx.chapter.value?.url;
 				let persistedSinceIndexWrite = 0;
@@ -19643,7 +19737,10 @@ ul, ol {
 							};
 							ctx.cacheAbort.value = abortMerge;
 							try {
-								const parsed = await parseWithSectionMerge(getParser(), doc, targetUrl, { signal: controller.signal });
+								const parsed = await parseWithSectionMerge(getParser(), doc, targetUrl, {
+									signal: controller.signal,
+									retryRateLimit: false
+								});
 								return controller.signal.aborted || !isCurrent() ? null : parsed;
 							} finally {
 								if (ctx.cacheAbort.value === abortMerge) ctx.cacheAbort.value = null;
@@ -19672,12 +19769,13 @@ ul, ol {
 							if (!isCurrent()) break;
 							let doc = apiDoc;
 							if (!doc) {
-								const { promise, abort } = fetchAndParseUrl(targetUrl, referer);
+								const { promise, abort } = fetchAndParseUrl(targetUrl, referer, { retryRateLimit: false });
 								ctx.cacheAbort.value = abort;
 								const result = await promise;
 								if (!isCurrent()) break;
 								ctx.cacheAbort.value = null;
 								if (result.error === "abort") break;
+								stoppedByRateLimit = result.status === 429 || !!getRequestCooldown(targetUrl);
 								doc = result.doc;
 								if (!doc) recordDebugEvent("cache.chapter.failed", {
 									url: targetUrl,
@@ -19703,6 +19801,8 @@ ul, ol {
 								done: ctx.cacheProgress.value.done + 1,
 								failed: ctx.cacheProgress.value.failed + (blockReason === "vip" ? 0 : 1)
 							};
+							stoppedByRateLimit ||= !!getRequestCooldown(targetUrl);
+							if (stoppedByRateLimit) break;
 							nextUrl = taskList.shift() ?? null;
 							continue;
 						}
@@ -19748,7 +19848,8 @@ ul, ol {
 				if (!isCurrent() || !ctx.cacheProgress.value.running) return;
 				if (cacheBook && persistedSet.size > 0) ctx.persistedUrls.value = persistedSet;
 				ctx.persistCache(writtenUrls);
-				if (ctx.cacheProgress.value.failed > 0) ctx.showToast(`缓存完成，${ctx.cacheProgress.value.failed} 章失败`, "error", 3500);
+				if (stoppedByRateLimit) ctx.showToast("站点限制请求频率，缓存已停止，已完成内容已保留", "info", 4e3);
+				else if (ctx.cacheProgress.value.failed > 0) ctx.showToast(`缓存完成，${ctx.cacheProgress.value.failed} 章失败`, "error", 3500);
 				else ctx.showToast("离线缓存完成", "info", 2500);
 			} catch (error) {
 				if (isCurrent()) {
@@ -19949,9 +20050,6 @@ ul, ol {
 	function shouldPersistNavigationBlock(source) {
 		return source === "manual";
 	}
-	function shouldUseNavigationFailureCooldown(source) {
-		return source === "auto";
-	}
 	function createNavigation(ctx) {
 		async function loadChapter(direction, source) {
 			const runId = ctx.runtime.viewId();
@@ -19980,9 +20078,8 @@ ul, ol {
 						return false;
 					}
 				}
-				const failure = ctx.navFailures.get(load.navKey);
-				if (shouldUseNavigationFailureCooldown(source) && failure && Date.now() < failure.nextRetryAt) {
-					outcome = "cooldown";
+				if (source === "auto" && ctx.navFailures.has(load.navKey)) {
+					outcome = "failed-auto-load";
 					return false;
 				}
 				if (load.pendingAbortRef.value) {
@@ -20030,7 +20127,7 @@ ul, ol {
 				}
 				cleanupIframe?.();
 				if (!parsed) {
-					const fetchDoc = await loadFetchDocument(ctx, load, runId, referer);
+					const fetchDoc = await loadFetchDocument(ctx, load, runId, referer, source);
 					if (fetchDoc === "abort") {
 						outcome = "abort";
 						return false;
@@ -20654,7 +20751,7 @@ ul, ol {
 						tail: Array.from(navFailures.entries()).slice(-8).map(([url, failure]) => ({
 							url: redactUrl(url),
 							count: failure.count,
-							retryInMs: Math.max(0, failure.nextRetryAt - Date.now())
+							failedAt: failure.failedAt
 						}))
 					}
 				},
@@ -21170,13 +21267,6 @@ ul, ol {
 			type: "schedule",
 			dueAt: input.graceUntil
 		};
-		if (input.now < input.failureCooldownUntil) return shouldRetryAfterCooldown(reason) ? {
-			type: "schedule",
-			dueAt: input.failureCooldownUntil
-		} : {
-			type: "idle",
-			clearTimer: false
-		};
 		if (requiresNearBottom(reason) && !input.isNearBottom) return {
 			type: "idle",
 			clearTimer: false
@@ -21186,16 +21276,11 @@ ul, ol {
 	function canAutoLoadBase(input) {
 		return input.enabled && input.hasChapter && !input.currentChapterMerging && input.hasNext && !input.isLoadingNext && !input.isLoadingPrev && !input.isNavigating && !input.autoLoadInFlight && !input.pageHidden && (input.unreadBufferState === "empty" || input.unreadBufferState === "short");
 	}
-	function shouldRetryAfterCooldown(reason) {
-		return reason !== "state";
-	}
 	function requiresNearBottom(reason) {
 		return reason === "settled" || reason === "sentinel";
 	}
 	var PRELOAD_DELAY_MIN_MS = 3e3;
 	var PRELOAD_DELAY_MAX_MS = 5e3;
-	var FAILURE_COOLDOWN_MIN_MS = 6e3;
-	var FAILURE_COOLDOWN_MAX_MS = 1e4;
 	function useReaderAutoLoad(options) {
 		const { mainRef, chapterRefs, readerStore, configStore, isNavigating } = options;
 		let autoLoadTimer = null;
@@ -21203,7 +21288,7 @@ ul, ol {
 		let autoLoadInFlight = false;
 		let sessionKey = "";
 		let graceUntil = 0;
-		let failureCooldownUntil = 0;
+		let failedTailId;
 		let layoutRevision = 0;
 		let layoutInvalidationFrame = null;
 		let bottomObserver = null;
@@ -21228,7 +21313,6 @@ ul, ol {
 			if (nextSessionKey !== sessionKey) {
 				sessionKey = nextSessionKey;
 				graceUntil = Date.now() + getRandomDelayMs(PRELOAD_DELAY_MIN_MS, PRELOAD_DELAY_MAX_MS);
-				failureCooldownUntil = 0;
 				lastBufferState = "";
 				clearAutoLoadTimer();
 				recordDebugEvent("autoload.session", {
@@ -21240,7 +21324,7 @@ ul, ol {
 			return true;
 		}
 		function getChapterViewportState(entry, mainEl) {
-			if (entry.sectionProgress) {
+			if (entry.sectionProgress || entry.sectionsIncomplete) {
 				chapterScreenCache.delete(entry.id);
 				return "pending";
 			}
@@ -21335,7 +21419,7 @@ ul, ol {
 				return;
 			}
 			if (ok) {
-				failureCooldownUntil = 0;
+				failedTailId = void 0;
 				await nextTick();
 				autoLoadInFlight = false;
 				const mainEl = mainRef.value;
@@ -21353,7 +21437,8 @@ ul, ol {
 				return;
 			}
 			autoLoadInFlight = false;
-			failureCooldownUntil = Date.now() + getRandomDelayMs(FAILURE_COOLDOWN_MIN_MS, FAILURE_COOLDOWN_MAX_MS);
+			failedTailId = startedTailId;
+			clearAutoLoadTimer();
 		}
 		function startAutoLoad() {
 			if (!mainRef.value) return;
@@ -21371,14 +21456,17 @@ ul, ol {
 		function scheduleAutoLoadNext(reason = "state") {
 			const mainEl = mainRef.value;
 			if (!mainEl || !ensureSession()) return;
+			if (readerStore.cacheProgress.running || failedTailId !== void 0 && readerStore.chapters[readerStore.chapters.length - 1]?.id === failedTailId) {
+				clearAutoLoadTimer();
+				return;
+			}
 			const currentTime = Date.now();
 			const unreadBufferState = getUnreadBufferState(mainEl);
 			recordBufferState(unreadBufferState);
 			const decision = decideAutoLoadNext(reason, {
 				autoLoadInFlight,
-				currentChapterMerging: !!readerStore.chapters[getCurrentIndex()]?.sectionProgress,
+				currentChapterMerging: !!(readerStore.chapters[getCurrentIndex()]?.sectionProgress || readerStore.chapters[getCurrentIndex()]?.sectionsIncomplete),
 				enabled: configStore.behavior.preloadNext,
-				failureCooldownUntil,
 				graceUntil,
 				hasChapter: readerStore.chapters.length > 0,
 				hasNext: readerStore.hasNext,
@@ -21432,10 +21520,10 @@ ul, ol {
 			if (loadingNext || loadingPrev || navigating) return;
 			scheduleAutoLoadNext("state");
 		});
+		watch(() => readerStore.cacheProgress.running, () => scheduleAutoLoadNext("state"));
 		watch(() => configStore.behavior.preloadNext, (enabled) => {
 			if (!enabled) {
 				clearAutoLoadTimer();
-				failureCooldownUntil = 0;
 				return;
 			}
 			scheduleAutoLoadNext("state");

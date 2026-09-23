@@ -14,6 +14,7 @@ import type { ChineseScript } from '@/core/converter/scriptProfile';
 import { fetchAndParseUrl } from '@/core/utils/network';
 import { getRuleManager } from '@/core/rules/RuleManager';
 import type { SiteRule } from '@/core/rules/types';
+import { waitForRequestDelay } from '@/core/utils/requestPolicy';
 
 const parseSectionUrl = (url: string) => getRuleManager().parseSectionUrl(url);
 // Reuse documents by site-declared identity while retaining the actual URL for requests.
@@ -70,6 +71,8 @@ export interface SectionMergeOptions {
   maxPages?: number;
   /** Confidence threshold for auto-detection (default: 0.8) */
   confidenceThreshold?: number;
+  /** Speculative loads stop on rate limiting instead of occupying the recovery attempt. */
+  retryRateLimit?: boolean;
   /** Signal to abort fetching/merging */
   signal?: AbortSignal;
   /** Custom fetcher function */
@@ -207,7 +210,13 @@ export class SectionMerger {
     const baseUrl = getSectionBaseUrl(url, parseSectionUrl);
 
     if (baseUrl && baseUrl !== url) {
-      const baseDoc = await this.fetchUrl(baseUrl, url, options.fetcher, options.signal);
+      const baseDoc = await this.fetchUrl(
+        baseUrl,
+        url,
+        options.fetcher,
+        options.signal,
+        options.retryRateLimit
+      );
       if (options.signal?.aborted) return null;
       if (baseDoc) {
         startUrl = baseUrl;
@@ -263,7 +272,9 @@ export class SectionMerger {
         (first.nextUrl && !isSectionLikeUrl(startPage.url, first.nextUrl, parseSectionUrl)
           ? first.nextUrl
           : null),
-      sectionDelayMs: hasCustomFetcher ? 0 : Math.max(0, first.rule?.advanced?.sectionDelayMs ?? 0),
+      sectionDelayMs: hasCustomFetcher
+        ? 0
+        : Math.max(0, first.rule?.advanced?.sectionDelayMs ?? 1200),
     };
   }
 
@@ -336,11 +347,17 @@ export class SectionMerger {
       if (signal?.aborted) break;
 
       if (state.sectionDelayMs > 0) {
-        await this.sleep(state.sectionDelayMs, signal);
+        await waitForRequestDelay(state.sectionDelayMs, signal);
         if (signal?.aborted) break;
       }
 
-      const page = await this.loadNextSectionPage(cursor, startPage.knownDocs, fetcher, signal);
+      const page = await this.loadNextSectionPage(
+        cursor,
+        startPage.knownDocs,
+        fetcher,
+        signal,
+        options.retryRateLimit
+      );
       if (!page) break;
 
       const nextParsed = await this.parseLoadedSection(
@@ -348,7 +365,8 @@ export class SectionMerger {
         cursor.lastUrl,
         startPage.knownDocs,
         fetcher,
-        signal
+        signal,
+        options.retryRateLimit
       );
       if (signal?.aborted || !nextParsed) break;
 
@@ -415,7 +433,8 @@ export class SectionMerger {
     cursor: MergeCursor,
     knownDocs: Map<string, Document>,
     fetcher?: SectionMergeOptions['fetcher'],
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    retryRateLimit?: boolean
   ): Promise<LoadedSectionPage | null> {
     if (signal?.aborted || !cursor.nextSectionUrl) return null;
 
@@ -429,7 +448,7 @@ export class SectionMerger {
       return { doc: cachedDoc, url, fromCache: true };
     }
 
-    const doc = await this.fetchUrl(url, cursor.lastUrl, fetcher, signal);
+    const doc = await this.fetchUrl(url, cursor.lastUrl, fetcher, signal, retryRateLimit);
     if (!doc) return null;
 
     knownDocs.set(key, doc);
@@ -441,12 +460,13 @@ export class SectionMerger {
     referrer: string,
     knownDocs: Map<string, Document>,
     fetcher?: SectionMergeOptions['fetcher'],
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    retryRateLimit?: boolean
   ): Promise<ParsedChapter | null> {
     let parsed = await this.parser.parse(page.doc, page.url);
     if (parsed || !page.fromCache || signal?.aborted) return parsed;
 
-    const doc = await this.fetchUrl(page.url, referrer, fetcher, signal);
+    const doc = await this.fetchUrl(page.url, referrer, fetcher, signal, retryRateLimit);
     if (!doc) return null;
 
     knownDocs.set(getDocumentKey(page.url, referrer), doc);
@@ -500,24 +520,6 @@ export class SectionMerger {
     return 'mixed';
   }
 
-  private async sleep(ms: number, signal?: AbortSignal): Promise<void> {
-    if (ms <= 0 || signal?.aborted) return;
-
-    await new Promise<void>(resolve => {
-      const timer = globalThis.setTimeout(resolve, ms);
-      if (!signal) return;
-
-      signal.addEventListener(
-        'abort',
-        () => {
-          globalThis.clearTimeout(timer);
-          resolve();
-        },
-        { once: true }
-      );
-    });
-  }
-
   /**
    * Internal fetch helper
    */
@@ -525,7 +527,8 @@ export class SectionMerger {
     url: string,
     referrer: string,
     customFetcher?: SectionMergeOptions['fetcher'],
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    retryRateLimit?: boolean
   ): Promise<Document | null> {
     if (signal?.aborted) {
       return null;
@@ -535,7 +538,7 @@ export class SectionMerger {
       return await customFetcher(url, referrer);
     }
 
-    const { promise, abort } = fetchAndParseUrl(url, referrer);
+    const { promise, abort } = fetchAndParseUrl(url, referrer, { retryRateLimit });
     if (!signal) {
       const result = await promise;
       return result.doc;
@@ -654,13 +657,15 @@ export async function streamSectionMerge(
   first: (
     chapter: ParsedChapter,
     progress: SectionMergeProgress
-  ) => SectionDelivery | void | Promise<SectionDelivery | void>
+  ) => SectionDelivery | void | Promise<SectionDelivery | void>,
+  retryRateLimit = true
 ): Promise<ParsedChapter | null> {
   const target: { delivery?: SectionDelivery } = {};
   let truncated = false;
   try {
     const chapter = await merger.merge(doc, url, {
       signal,
+      retryRateLimit,
       onFirstPage: async (chapter, progress) => {
         target.delivery = (await first(chapter, progress)) || undefined;
       },

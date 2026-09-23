@@ -19,7 +19,7 @@ export interface NavigationContext {
   originalContents: Ref<Map<string, string>>;
   originalTitles: Ref<Map<string, { title: string; bookTitle?: string }>>;
   currentConversionMode: Ref<ConversionMode>;
-  navFailures: Map<string, { count: number; nextRetryAt: number }>;
+  navFailures: Map<string, { count: number; failedAt: number }>;
 
   runtime: {
     bumpView: () => number;

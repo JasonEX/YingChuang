@@ -106,5 +106,5 @@ export interface CachedChapter {
 /** Navigation failure record */
 export interface NavFailureRecord {
   count: number;
-  nextRetryAt: number;
+  failedAt: number;
 }

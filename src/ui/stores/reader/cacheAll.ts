@@ -3,11 +3,12 @@
  * Handles caching all chapters from TOC sequentially with persistence.
  */
 
-import type { CachedChapter, CacheProgressState, TocEntry } from './types';
+import type { CachedChapter, CacheProgressState, SectionProgressState, TocEntry } from './types';
 import type { ComputedRef, Ref } from 'vue';
 import { fetchAndParseUrl } from '@/core/utils/network';
 import { getChapterDocumentBlockReason } from '@/core/detection';
 import { getParser } from '@/core/parser';
+import { getRequestCooldown } from '@/core/utils/requestPolicy';
 import type { ParsedChapter } from '@/core/parser';
 import type { SiteRule } from '@/core/rules/types';
 
@@ -42,7 +43,7 @@ export interface CacheAllContext {
   // Computed
   chapter: ComputedRef<ParsedChapter | null>;
   rule: ComputedRef<SiteRule | null>;
-  chapters: Ref<Array<{ chapter: ParsedChapter }>>;
+  chapters: Ref<Array<{ chapter: ParsedChapter; sectionProgress?: SectionProgressState }>>;
 
   // Session management
   runtime: {
@@ -76,6 +77,10 @@ export function createCacheAll(ctx: CacheAllContext) {
   async function startCacheAll(urls?: string[]): Promise<void> {
     const runId = ctx.runtime.sessionId();
     if (ctx.cacheProgress.value.running) return;
+    if (ctx.chapters.value.some(entry => entry.sectionProgress)) {
+      ctx.showToast('请等待正在加载的章节完成后再缓存', 'info');
+      return;
+    }
 
     const task = {
       chapterUrl: ctx.chapter.value?.url ?? null,
@@ -161,6 +166,7 @@ export function createCacheAll(ctx: CacheAllContext) {
       }
       ctx.cacheProgress.value = { done: 0, total: estimatedTotal, failed: 0, running: true };
 
+      let stoppedByRateLimit = false;
       let nextUrl: string | undefined | null = taskList.shift();
       let referer =
         ctx.chapters.value[ctx.chapters.value.length - 1]?.chapter.url || ctx.chapter.value?.url;
@@ -199,6 +205,7 @@ export function createCacheAll(ctx: CacheAllContext) {
             try {
               const parsed = await parseWithSectionMerge(getParser(), doc, targetUrl, {
                 signal: controller.signal,
+                retryRateLimit: false,
               });
               return controller.signal.aborted || !isCurrent() ? null : parsed;
             } finally {
@@ -229,12 +236,15 @@ export function createCacheAll(ctx: CacheAllContext) {
             if (!isCurrent()) break;
             let doc = apiDoc;
             if (!doc) {
-              const { promise, abort } = fetchAndParseUrl(targetUrl, referer);
+              const { promise, abort } = fetchAndParseUrl(targetUrl, referer, {
+                retryRateLimit: false,
+              });
               ctx.cacheAbort.value = abort;
               const result = await promise;
               if (!isCurrent()) break;
               ctx.cacheAbort.value = null;
               if (result.error === 'abort') break;
+              stoppedByRateLimit = result.status === 429 || !!getRequestCooldown(targetUrl);
               doc = result.doc;
               if (!doc)
                 recordDebugEvent('cache.chapter.failed', {
@@ -262,6 +272,8 @@ export function createCacheAll(ctx: CacheAllContext) {
               done: ctx.cacheProgress.value.done + 1,
               failed: ctx.cacheProgress.value.failed + (blockReason === 'vip' ? 0 : 1),
             };
+            stoppedByRateLimit ||= !!getRequestCooldown(targetUrl);
+            if (stoppedByRateLimit) break;
             nextUrl = taskList.shift() ?? null;
             continue;
           }
@@ -341,7 +353,9 @@ export function createCacheAll(ctx: CacheAllContext) {
       }
       ctx.persistCache(writtenUrls);
 
-      if (ctx.cacheProgress.value.failed > 0) {
+      if (stoppedByRateLimit) {
+        ctx.showToast('站点限制请求频率，缓存已停止，已完成内容已保留', 'info', 4000);
+      } else if (ctx.cacheProgress.value.failed > 0) {
         ctx.showToast(`缓存完成，${ctx.cacheProgress.value.failed} 章失败`, 'error', 3500);
       } else {
         ctx.showToast('离线缓存完成', 'info', 2500);

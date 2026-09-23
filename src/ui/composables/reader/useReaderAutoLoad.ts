@@ -21,8 +21,6 @@ import type { useConfigStore } from '@/ui/stores/config';
 const PRELOAD_DELAY_MIN_MS = 3000;
 const PRELOAD_DELAY_MAX_MS = 5000;
 export const SHORT_CHAPTER_PRELOAD_DELAY_MS = 300;
-const FAILURE_COOLDOWN_MIN_MS = 6000;
-const FAILURE_COOLDOWN_MAX_MS = 10000;
 
 export type ScheduleAutoLoadNext = (reason?: AutoLoadReason) => void;
 
@@ -42,7 +40,7 @@ export function useReaderAutoLoad(options: UseReaderAutoLoadOptions) {
   let autoLoadInFlight = false;
   let sessionKey = '';
   let graceUntil = 0;
-  let failureCooldownUntil = 0;
+  let failedTailId: string | undefined;
   let layoutRevision = 0;
   let layoutInvalidationFrame: number | null = null;
   let bottomObserver: globalThis.IntersectionObserver | null = null;
@@ -75,7 +73,6 @@ export function useReaderAutoLoad(options: UseReaderAutoLoadOptions) {
     if (nextSessionKey !== sessionKey) {
       sessionKey = nextSessionKey;
       graceUntil = Date.now() + getRandomDelayMs(PRELOAD_DELAY_MIN_MS, PRELOAD_DELAY_MAX_MS);
-      failureCooldownUntil = 0;
       lastBufferState = '';
       clearAutoLoadTimer();
       recordDebugEvent('autoload.session', {
@@ -93,7 +90,7 @@ export function useReaderAutoLoad(options: UseReaderAutoLoadOptions) {
   ): 'pending' | 'short' | 'sufficient' {
     // A chapter still merging sections has no final height yet. Measuring it would cache a
     // "short" verdict that nothing later invalidates, and that verdict keeps preloading.
-    if (entry.sectionProgress) {
+    if (entry.sectionProgress || entry.sectionsIncomplete) {
       chapterScreenCache.delete(entry.id);
       return 'pending';
     }
@@ -218,7 +215,7 @@ export function useReaderAutoLoad(options: UseReaderAutoLoadOptions) {
     }
 
     if (ok) {
-      failureCooldownUntil = 0;
+      failedTailId = undefined;
       await nextTick();
       autoLoadInFlight = false;
       const mainEl = mainRef.value;
@@ -240,8 +237,8 @@ export function useReaderAutoLoad(options: UseReaderAutoLoadOptions) {
     }
 
     autoLoadInFlight = false;
-    failureCooldownUntil =
-      Date.now() + getRandomDelayMs(FAILURE_COOLDOWN_MIN_MS, FAILURE_COOLDOWN_MAX_MS);
+    failedTailId = startedTailId;
+    clearAutoLoadTimer();
   }
 
   function startAutoLoad(): void {
@@ -266,14 +263,24 @@ export function useReaderAutoLoad(options: UseReaderAutoLoadOptions) {
     const mainEl = mainRef.value;
     if (!mainEl || !ensureSession()) return;
 
+    if (
+      readerStore.cacheProgress.running ||
+      (failedTailId !== undefined &&
+        readerStore.chapters[readerStore.chapters.length - 1]?.id === failedTailId)
+    ) {
+      clearAutoLoadTimer();
+      return;
+    }
     const currentTime = Date.now();
     const unreadBufferState = getUnreadBufferState(mainEl);
     recordBufferState(unreadBufferState);
     const decision = decideAutoLoadNext(reason, {
       autoLoadInFlight,
-      currentChapterMerging: !!readerStore.chapters[getCurrentIndex()]?.sectionProgress,
+      currentChapterMerging: !!(
+        readerStore.chapters[getCurrentIndex()]?.sectionProgress ||
+        readerStore.chapters[getCurrentIndex()]?.sectionsIncomplete
+      ),
       enabled: configStore.behavior.preloadNext,
-      failureCooldownUntil,
       graceUntil,
       hasChapter: readerStore.chapters.length > 0,
       hasNext: readerStore.hasNext,
@@ -362,11 +369,15 @@ export function useReaderAutoLoad(options: UseReaderAutoLoadOptions) {
   );
 
   watch(
+    () => readerStore.cacheProgress.running,
+    () => scheduleAutoLoadNext('state')
+  );
+
+  watch(
     () => configStore.behavior.preloadNext,
     enabled => {
       if (!enabled) {
         clearAutoLoadTimer();
-        failureCooldownUntil = 0;
         return;
       }
       scheduleAutoLoadNext('state');

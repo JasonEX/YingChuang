@@ -23,7 +23,7 @@ export async function parseWithSectionMerge(
   parser: ReturnType<typeof getParser>,
   initialDoc: Document,
   url: string,
-  options: { signal?: AbortSignal } = {}
+  options: { signal?: AbortSignal; retryRateLimit?: boolean } = {}
 ): Promise<ParsedChapter | null> {
   const merger = createSectionMerger(parser);
   let truncated = false;
@@ -50,6 +50,7 @@ export interface PendingSectionMerge {
 export interface StartProgressiveSectionMergeOptions {
   controller: AbortController;
   sink: SectionMergeSink;
+  retryRateLimit?: boolean;
 }
 
 /**
@@ -91,7 +92,8 @@ export async function startProgressiveSectionMerge(
       progress = { loaded: info.loaded, total: info.total };
       resolveFirst(chapter);
       return gate;
-    }
+    },
+    options.retryRateLimit
   )
     .then(resolveFirst)
     .catch(error => {

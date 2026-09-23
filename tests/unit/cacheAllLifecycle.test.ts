@@ -197,7 +197,7 @@ describe('cache task ownership', () => {
     await createCacheAll(ctx).startCacheAll();
 
     expect(mocks.fetch).toHaveBeenCalledTimes(1);
-    expect(mocks.fetch).toHaveBeenCalledWith(target, target);
+    expect(mocks.fetch).toHaveBeenCalledWith(target, target, { retryRateLimit: false });
     expect(ctx.cacheProgress.value).toMatchObject({ done: 1, total: 1, failed: 0 });
     expect(ctx.cacheFailedUrls.value).toEqual([]);
   });
@@ -372,4 +372,27 @@ it('keeps only a bounded task sample for diagnostics and follows the active targ
     currentUrl: urls.at(-1),
   });
   expect(ctx.cacheProgress.value.done).toBe(200);
+});
+
+it('stops a rate-limited cache task without marking the untouched queue as failed', async () => {
+  const ctx = makeContext();
+  mocks.fetch.mockReturnValue({
+    promise: Promise.resolve({ doc: null, status: 429, error: 'http' }),
+    abort: vi.fn(),
+  });
+  await createCacheAll(ctx).startCacheAll([target, target + '?next=1']);
+  expect(mocks.fetch).toHaveBeenCalledTimes(1);
+  expect(ctx.cacheProgress.value).toEqual({ running: false, done: 1, total: 2, failed: 1 });
+  expect(ctx.cacheFailedUrls.value).toEqual([target]);
+  expect(ctx.showToast).toHaveBeenCalledWith(expect.stringContaining('缓存已停止'), 'info', 4000);
+  expect(ctx.persistCache).toHaveBeenCalled();
+});
+
+it('leaves current chapter merges ahead of a new cache task', async () => {
+  const ctx = makeContext();
+  ctx.chapters.value = [{ chapter, sectionProgress: { loaded: 1, total: 3 } }];
+  await createCacheAll(ctx).startCacheAll([target]);
+  expect(mocks.fetch).not.toHaveBeenCalled();
+  expect(ctx.cacheProgress.value.running).toBe(false);
+  expect(ctx.showToast).toHaveBeenCalledWith(expect.stringContaining('正在加载'), 'info');
 });

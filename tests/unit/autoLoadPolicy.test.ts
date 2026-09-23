@@ -12,7 +12,6 @@ function makeInput(overrides: Partial<AutoLoadPolicyInput> = {}): AutoLoadPolicy
     autoLoadInFlight: false,
     currentChapterMerging: false,
     enabled: true,
-    failureCooldownUntil: 0,
     graceUntil: 0,
     hasChapter: true,
     hasNext: true,
@@ -62,21 +61,6 @@ describe('autoLoadPolicy', () => {
     });
     expect(decideAutoLoadNext('visibility', makeInput({ isNearBottom: false }))).toEqual({
       type: 'start',
-    });
-  });
-
-  it('retries a failed auto preload only after a later trigger reaches cooldown', () => {
-    expect(
-      decideAutoLoadNext('state', makeInput({ now: 1000, failureCooldownUntil: 6000 }))
-    ).toEqual({
-      type: 'idle',
-      clearTimer: false,
-    });
-    expect(
-      decideAutoLoadNext('sentinel', makeInput({ now: 1000, failureCooldownUntil: 6000 }))
-    ).toEqual({
-      type: 'schedule',
-      dueAt: 6000,
     });
   });
 

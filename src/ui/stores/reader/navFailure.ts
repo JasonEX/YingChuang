@@ -1,15 +1,14 @@
 /**
- * Reader Store - Navigation Failure Backoff
- * Unified retry/backoff logic for chapter navigation failures.
+ * Reader Store - Navigation Failures
+ * Records exhausted loads so speculative navigation cannot restart them.
  */
 
-import { calculateBackoff } from './utils';
 import { trimNavFailures } from './trim';
 
-type NavFailureMap = Map<string, { count: number; nextRetryAt: number }>;
+type NavFailureMap = Map<string, { count: number; failedAt: number }>;
 
 /**
- * Record a navigation failure with exponential backoff.
+ * Record a failed load; only an explicit navigation may try again.
  * Returns the updated failure count.
  */
 export function recordNavFailure(
@@ -19,8 +18,7 @@ export function recordNavFailure(
 ): number {
   const prev = failures.get(key);
   const count = (prev?.count || 0) + 1;
-  const backoffMs = calculateBackoff(count);
-  failures.set(key, { count, nextRetryAt: Date.now() + backoffMs });
+  failures.set(key, { count, failedAt: Date.now() });
   trimNavFailures(failures, opts.maxFailures);
   return count;
 }
