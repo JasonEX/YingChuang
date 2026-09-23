@@ -72,7 +72,7 @@ const deqixsCoBeforeParse: BeforeParseHook = async (doc, url, helpers) => {
       contentEl.setAttribute('data-mnr-deqixs-full', '1');
     }
   } catch (e) {
-    console.warn('[YingChuang] Deqixs.co beforeParse error:', e);
+    console.warn('[YingChuang] Deqixs dynamic beforeParse error:', e);
   }
 };
 
@@ -113,15 +113,15 @@ export const deqixsRule: SiteRule = {
   },
 };
 
-// 得奇小说网新版动态页
+// 得奇小说网新版动态页（.co 跳转至 .cc）
 // - 章节页：/books/{bookId}/{chapterId}.html
 // - 正文由 /modules/article/ajax2.php 动态返回，hook 会写回 #chapter-content
 export const deqixsCoRule: SiteRule = {
   id: 'deqixs-co',
-  name: '得奇小说网(.co)',
-  version: 2,
+  name: '得奇小说网（动态版）',
+  version: 3,
   match: {
-    pattern: '^https?://www\\.deqixs\\.co/books/\\d+/\\d+\\.html(?:[?#].*)?$',
+    pattern: '^https?://www\\.deqixs\\.(?:co|cc)/books/\\d+/\\d+\\.html(?:[?#].*)?$',
   },
   content: {
     selector: '#chapter-content',
@@ -150,11 +150,15 @@ export const deqixsCoRule: SiteRule = {
     replace: '\\(第[^)]*页\\)\\s*$',
     bookSelector: '.breadcrumb a[href*="/books/"][href$="/"]',
   },
+  toc: {
+    // The preceding list is a reverse-ordered latest-chapter preview.
+    selector: '#list-chapterAll',
+  },
   hooks: {
     beforeParse: deqixsCoBeforeParse,
   },
   meta: {
     source: 'builtin',
-    exampleUrl: 'https://www.deqixs.co/books/325/266271.html',
+    exampleUrl: 'https://www.deqixs.cc/books/325/266271.html',
   },
 };

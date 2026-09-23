@@ -42,6 +42,11 @@ describe('userscript meta', () => {
     expect(config).not.toHaveProperty('build-date');
   });
 
+  it('includes the current deqixs host in userscript matching', () => {
+    const meta = createMeta({ version: '9.9.9' });
+    expect(meta.matches).toContain('*://www.deqixs.cc/*');
+  });
+
   it('keeps the generated userscript artifact header aligned with source metadata', () => {
     const packageJson = JSON.parse(
       readFileSync(resolve(process.cwd(), 'package.json'), 'utf8')

@@ -98,6 +98,8 @@ const META_BASE = {
     '*://www.deqixs.org/*',
     '*://deqixs.co/*',
     '*://www.deqixs.co/*',
+    '*://deqixs.cc/*',
+    '*://www.deqixs.cc/*',
     '*://xszj.org/*',
     '*://m.xszj.org/*',
     '*://m.kudushu.org/html/*/*',

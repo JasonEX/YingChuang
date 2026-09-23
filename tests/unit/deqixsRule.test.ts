@@ -203,11 +203,16 @@ describe('Deqixs rule', () => {
     expect(new RegExp(deqixsRule.match.pattern, 'i').test(page6Url)).toBe(true);
   });
 
-  it('is auto-discovered as a deqixs.co dynamic site rule', () => {
+  it('matches the .co and .cc dynamic chapter routes', () => {
     expect(builtInRules).toContain(deqixsCoRule);
-    expect(deqixsCoRule.version).toBe(2);
+    expect(deqixsCoRule.version).toBe(3);
     expect(deqixsCoRule.hooks?.beforeParse).toBeTypeOf('function');
     expect(new RegExp(deqixsCoRule.match.pattern, 'i').test(coChapterUrl)).toBe(true);
+    expect(
+      new RegExp(deqixsCoRule.match.pattern, 'i').test(
+        'https://www.deqixs.cc/books/325/266271.html'
+      )
+    ).toBe(true);
   });
 
   it('parses title, book title, navigation and content from a section page', async () => {
@@ -280,7 +285,12 @@ describe('Deqixs rule', () => {
     ]);
   });
 
-  it('loads full deqixs.co dynamic content and extracts hidden navigation', async () => {
+  it.each(['co', 'cc'])('loads full deqixs.%s content and navigation', async domain => {
+    const chapterUrl = coChapterUrl.replace('.co/', `.${domain}/`);
+    const prevChapterUrl = coPrevChapterUrl.replace('.co/', `.${domain}/`);
+    const nextChapterUrl = coNextChapterUrl.replace('.co/', `.${domain}/`);
+    const bookIndexUrl = coIndexUrl.replace('.co/', `.${domain}/`);
+    const html = deqixsCoHtml.replaceAll('www.deqixs.co', `www.deqixs.${domain}`);
     const tokenScript = `
       var chapterToken = 'token-abc';
       var timestamp = 1782205800000;
@@ -309,29 +319,67 @@ describe('Deqixs rule', () => {
     });
     vi.stubGlobal('GM_xmlhttpRequest', gm);
 
-    const chapter = await new Parser().parse(makeDoc(deqixsCoHtml, coChapterUrl), coChapterUrl);
+    const chapter = await new Parser().parse(makeDoc(html, chapterUrl), chapterUrl);
 
     expect(chapter?.rule?.id).toBe('deqixs-co');
     expect(chapter?.title).toBe('第1477章 特种金属缺货了（4k）');
     expect(chapter?.bookTitle).toBe('四合院里的大国宗师');
-    expect(chapter?.prevUrl).toBe(coPrevChapterUrl);
-    expect(chapter?.indexUrl).toBe(coIndexUrl);
-    expect(chapter?.nextUrl).toBe(coNextChapterUrl);
+    expect(chapter?.prevUrl).toBe(prevChapterUrl);
+    expect(chapter?.indexUrl).toBe(bookIndexUrl);
+    expect(chapter?.nextUrl).toBe(nextChapterUrl);
     expect(chapter?.rawContent).toContain('第1481章 特种金属缺货了（4k）');
     expect(chapter?.content).toContain('完整正文');
     expect(chapter?.content.length).toBeGreaterThan(1000);
     expect(requests).toHaveLength(2);
     expect(requests[0].url).toContain('/scripts/chapter.js.php');
-    expect(requests[0].headers).toEqual(expect.objectContaining({ Referer: coChapterUrl }));
+    expect(requests[0].headers).toEqual(expect.objectContaining({ Referer: chapterUrl }));
     expect(requests[1].url).toContain('/modules/article/ajax2.php?');
     expect(requests[1].url).toContain('token=token-abc');
     expect(requests[1].url).toContain('timestamp=1782205800000');
     expect(requests[1].url).toContain('nonce=nonce-xyz');
     expect(requests[1].headers).toEqual(
       expect.objectContaining({
-        Referer: coChapterUrl,
+        Referer: chapterUrl,
         'X-Requested-With': 'XMLHttpRequest',
       })
     );
+  });
+
+  it('reads the complete .cc catalog after the reverse-ordered latest preview', async () => {
+    const chapterUrl = 'https://www.deqixs.cc/books/325/266271.html';
+    const bookIndexUrl = 'https://www.deqixs.cc/books/325/';
+    const catalog = `<!doctype html><dl class="book chapterlist">
+      <h2>最新章节</h2>
+      <dd><a href="${bookIndexUrl}266273.html">第3章 新章预览</a></dd>
+      <dd><a href="${bookIndexUrl}266272.html">第2章 新章预览</a></dd>
+      <div id="list-chapterAll">
+        <h2>全部章节目录</h2>
+        <dd><a href="${bookIndexUrl}266271.html">第1章 起点</a></dd>
+        <dd><a href="${bookIndexUrl}266272.html">第2章 继续</a></dd>
+        <dd><a href="${bookIndexUrl}266273.html">第3章 终点</a></dd>
+      </div>
+    </dl>`;
+    const gm = vi.fn((opts: GM_xmlhttpRequestOptions) => {
+      opts.onload?.({
+        readyState: 4,
+        responseHeaders: '',
+        responseText: catalog,
+        status: 200,
+        statusText: 'OK',
+        finalUrl: opts.url,
+      });
+      return { abort: vi.fn() };
+    });
+    vi.stubGlobal('GM_xmlhttpRequest', gm);
+
+    const entries = await loadTocEntriesPaged(bookIndexUrl, chapterUrl, deqixsCoRule, vi.fn());
+
+    expect(gm).toHaveBeenCalledTimes(1);
+    expect(entries.map(entry => entry.title)).toEqual(['第1章 起点', '第2章 继续', '第3章 终点']);
+    expect(entries.map(entry => entry.url)).toEqual([
+      `${bookIndexUrl}266271.html`,
+      `${bookIndexUrl}266272.html`,
+      `${bookIndexUrl}266273.html`,
+    ]);
   });
 });

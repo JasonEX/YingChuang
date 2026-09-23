@@ -3,7 +3,7 @@
 // @name:zh-CN         萤窗
 // @name:zh-TW         螢窗
 // @namespace          https://github.com/JasonEX
-// @version            1.0.8
+// @version            1.0.9
 // @author             JasonEX
 // @description        萤窗：小说阅读脚本，智能正文识别、连续阅读、阅读位置恢复、简繁转换
 // @description:zh-CN  萤窗：小说阅读脚本，智能正文识别、连续阅读、阅读位置恢复、简繁转换
@@ -46,6 +46,8 @@
 // @match              *://www.deqixs.org/*
 // @match              *://deqixs.co/*
 // @match              *://www.deqixs.co/*
+// @match              *://deqixs.cc/*
+// @match              *://www.deqixs.cc/*
 // @match              *://xszj.org/*
 // @match              *://m.xszj.org/*
 // @match              *://m.kudushu.org/html/*/*
@@ -3693,7 +3695,7 @@
 				contentEl.setAttribute("data-mnr-deqixs-full", "1");
 			}
 		} catch (e) {
-			console.warn("[YingChuang] Deqixs.co beforeParse error:", e);
+			console.warn("[YingChuang] Deqixs dynamic beforeParse error:", e);
 		}
 	};
 	var deqixsRule = {
@@ -3724,9 +3726,9 @@
 	};
 	var deqixsCoRule = {
 		id: "deqixs-co",
-		name: "得奇小说网(.co)",
-		version: 2,
-		match: { pattern: "^https?://www\\.deqixs\\.co/books/\\d+/\\d+\\.html(?:[?#].*)?$" },
+		name: "得奇小说网（动态版）",
+		version: 3,
+		match: { pattern: "^https?://www\\.deqixs\\.(?:co|cc)/books/\\d+/\\d+\\.html(?:[?#].*)?$" },
 		content: {
 			selector: "#chapter-content",
 			remove: "script, style, iframe, ins, .loading, .error",
@@ -3750,10 +3752,11 @@
 			replace: "\\(第[^)]*页\\)\\s*$",
 			bookSelector: ".breadcrumb a[href*=\"/books/\"][href$=\"/\"]"
 		},
+		toc: { selector: "#list-chapterAll" },
 		hooks: { beforeParse: deqixsCoBeforeParse },
 		meta: {
 			source: "builtin",
-			exampleUrl: "https://www.deqixs.co/books/325/266271.html"
+			exampleUrl: "https://www.deqixs.cc/books/325/266271.html"
 		}
 	};
 	var dingdianzww_exports = __exportAll({ dingdianzwwRule: () => dingdianzwwRule });
@@ -9164,7 +9167,7 @@
 		else if (options) managerInstance.updateOptions(options);
 		return managerInstance;
 	}
-	var VERSION = "1.0.8";
+	var VERSION = "1.0.9";
 	var BUILD_DATE = "2026-09-22";
 	function buildDiagnosticInfo(options = {}) {
 		return {
