@@ -303,15 +303,12 @@ describe('AutoEnableManager', () => {
     const { AutoEnableManager } = await import('@/core/AutoEnableManager');
     const manager = new AutoEnableManager({ skipPatterns: [/./] });
 
-    const promptCallback = vi.fn();
     const launchCallback = vi.fn();
-    manager.setPromptCallback(promptCallback);
     manager.setLaunchCallback(launchCallback);
 
     const doc = createDoc('https://example.com/anything');
     await manager.execute(doc);
 
-    expect(promptCallback).not.toHaveBeenCalled();
     expect(launchCallback).not.toHaveBeenCalled();
   });
 
@@ -426,55 +423,38 @@ describe('AutoEnableManager', () => {
     });
   });
 
-  it('execute prompts, remembers site preference, then launches for medium-confidence detection', async () => {
+  it('leaves medium-confidence detection to the manual entry without parsing or protection', async () => {
     const { AutoEnableManager } = await import('@/core/AutoEnableManager');
     const manager = new AutoEnableManager({
       confidenceThreshold: 0.6,
       autoLaunchThreshold: 0.9,
-      enableProtection: false,
+      enableProtection: true,
     });
-
-    const m = manager as unknown as { detectionEngine: MockDetectionEngine };
-    const detectionResult = {
-      results: { mocked: true },
-      confidence: { overall: 0.7, reasons: ['ok'] },
-    };
-    m.detectionEngine.detect.mockReturnValue(detectionResult);
-
-    const promptCallback = vi.fn(async () => ({ accepted: true, rememberForSite: true }));
-    const launchCallback = vi.fn();
-    manager.setPromptCallback(promptCallback);
-    manager.setLaunchCallback(launchCallback);
-
-    const doc = createDoc('https://example.com/chapter/1');
-    await manager.execute(doc);
-
-    expect(promptCallback).toHaveBeenCalledTimes(1);
-    expect(mockedSectionMerger.merge).toHaveBeenCalledTimes(1);
-    expect(mockedRuleStorage.setSitePreference).toHaveBeenCalledWith('example.com', {
-      enabled: true,
-      timestamp: expect.any(Number),
-    });
-    expect(launchCallback).toHaveBeenCalledTimes(1);
-  });
-
-  it('keeps protection inactive when the prompt is declined', async () => {
-    const { AutoEnableManager } = await import('@/core/AutoEnableManager');
-    const manager = new AutoEnableManager({ enableProtection: true });
     const detectionEngine = manager as unknown as { detectionEngine: MockDetectionEngine };
     detectionEngine.detectionEngine.detect.mockReturnValue({
       results: {},
       confidence: { overall: 0.7, reasons: ['ok'] },
     });
+    const launchCallback = vi.fn();
+    manager.setLaunchCallback(launchCallback);
 
-    manager.setPromptCallback(vi.fn(async () => ({ accepted: false, rememberForSite: false })));
-    manager.setLaunchCallback(vi.fn());
+    const doc = createDoc('https://example.com/chapter/1');
+    expect(manager.check(doc)).toMatchObject({ shouldEnable: true, method: 'detection' });
+    await manager.execute(doc);
 
-    await manager.execute(createDoc('https://example.com/chapter/1'));
-
+    expect(launchCallback).not.toHaveBeenCalled();
+    expect(mockedSectionMerger.merge).not.toHaveBeenCalled();
     expect(mockedProtection.activate).not.toHaveBeenCalled();
     expect(mockedProtection.deactivate).toHaveBeenCalledTimes(1);
-    expect(mockedSectionMerger.merge).not.toHaveBeenCalled();
+    expect(mockedRuleStorage.setSitePreference).not.toHaveBeenCalled();
+
+    // Entering through the manual entry is what remembers the site.
+    await manager.manualEnable(doc);
+    expect(launchCallback).toHaveBeenCalledTimes(1);
+    expect(mockedRuleStorage.setSitePreference).toHaveBeenCalledWith('example.com', {
+      enabled: true,
+      timestamp: expect.any(Number),
+    });
   });
 
   it('logs and swallows launch errors', async () => {
@@ -701,25 +681,6 @@ describe('AutoEnableManager', () => {
     await manager.manualEnable(doc);
     expect(mockedSectionMerger.merge).toHaveBeenCalledTimes(2);
     expect(launch).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not restart parsing when an older prompt responds after manual entry', async () => {
-    const { AutoEnableManager } = await import('@/core/AutoEnableManager');
-    const manager = new AutoEnableManager();
-    const doc = createDoc();
-    let respond!: (value: { accepted: boolean; rememberForSite: boolean }) => void;
-    manager.setPromptCallback(
-      () =>
-        new Promise(resolve => {
-          respond = resolve;
-        })
-    );
-    manager.setLaunchCallback(vi.fn());
-    const auto = manager.execute(doc);
-    await manager.manualEnable(doc);
-    respond({ accepted: true, rememberForSite: false });
-    await auto;
-    expect(mockedSectionMerger.merge).toHaveBeenCalledTimes(1);
   });
 
   it('manualEnable logs and swallows merge errors', async () => {

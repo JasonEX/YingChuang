@@ -144,7 +144,7 @@ async function openDrawer(page: Page): Promise<TwkanDeepState> {
     return true;
   });
   if (!clicked) {
-    await page.keyboard.press('Tab');
+    await page.keyboard.press('c');
   }
   await page.waitForFunction(
     () => {

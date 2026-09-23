@@ -50,6 +50,7 @@
       :persisted-count="readerStore.persistedUrls.size"
       @close="closeDrawer"
       @select="handleChapterSelect"
+      @reload-toc="readerStore.loadToc"
       @cache-all="handleCacheAll"
       @retry-cache="readerStore.retryFailedCache"
       @clear-cache="handleClearCache"
@@ -356,34 +357,17 @@ function handleContentClick(e: MouseEvent) {
   }
 }
 
+/** The drawer confirms inline and only offers cache-all once the TOC has chapters. */
 function handleCacheAll() {
   if (readerStore.cacheProgress.running) {
     readerStore.cancelCacheAll();
     readerStore.showToast('已取消离线缓存', 'info');
     return;
   }
-  if (readerStore.tocLoading) return;
-
-  // A failed or empty TOC can be retried without queuing a cache intent behind the request.
-  if (readerStore.toc.length === 0) {
-    void readerStore.loadToc();
-    return;
-  }
-
-  const remaining = readerStore.tocWithStatus.filter(
-    entry => entry.access !== 'locked' && !entry.isPersisted
-  ).length;
-  if (
-    remaining > 0 &&
-    !window.confirm(`预计缓存 ${remaining} 章，过程可能需要一些时间。是否继续？`)
-  ) {
-    return;
-  }
   void readerStore.startCacheAll();
 }
 
 function handleClearCache() {
-  if (!window.confirm('确定要清除本书的离线缓存吗？')) return;
   readerStore.clearPersistedCache();
   readerStore.showToast('离线缓存已清除', 'info');
 }
@@ -391,7 +375,7 @@ function handleClearCache() {
 function handleSiteAutoEnableChange(enabled: boolean) {
   siteAutoEnableValue.value = enabled;
   emit('siteAutoEnableChange', enabled);
-  readerStore.showToast(enabled ? '已开启本站自动阅读' : '已关闭本站自动阅读', 'info');
+  readerStore.showToast(enabled ? '已开启本站自动进入' : '已关闭本站自动进入', 'info');
 }
 
 /** Label the background section merge, falling back to a bare count when no total is known. */
@@ -423,7 +407,8 @@ const readerShortcutsEnabled = computed(
 
 useKeyboardShortcuts(
   [
-    { key: 'tab', handler: toggleDrawer, preventDefault: true, allowRepeat: false },
+    // Tab stays native focus navigation; C (catalog) opens the directory.
+    { key: 'c', handler: toggleDrawer, preventDefault: true, allowRepeat: false },
     {
       key: 'enter',
       handler: () => {

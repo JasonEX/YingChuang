@@ -35,7 +35,6 @@ export interface MnrPageState {
   originalHidden: boolean;
   pageTitle: string;
   paragraphCount: number;
-  entryPromptRoot: boolean;
   readerMounted: boolean;
   readerRoot: boolean;
   hostPageStyles: boolean;
@@ -151,20 +150,10 @@ export async function getFirstPage(context: BrowserContext): Promise<Page> {
   return context.pages()[0] || context.newPage();
 }
 
-async function acceptPromptOrReaderEntry(page: Page): Promise<void> {
+async function clickReaderEntry(page: Page): Promise<void> {
   await page.waitForTimeout(300);
 
   const clicked = await page.evaluate(() => {
-    const promptHost = document.querySelector('#mnr-entry-prompt-root');
-    const promptRoot = promptHost?.shadowRoot;
-    const acceptButton = Array.from(promptRoot?.querySelectorAll('button') || []).find(button =>
-      button.textContent?.includes('进入阅读模式')
-    ) as HTMLButtonElement | undefined;
-    if (acceptButton) {
-      acceptButton.click();
-      return true;
-    }
-
     const entryHost = document.querySelector('#mnr-entry-root');
     const entryButton = entryHost?.shadowRoot?.querySelector(
       '#mnr-entry-button'
@@ -198,7 +187,6 @@ async function collectMnrPageState(page: Page): Promise<MnrPageState> {
       document.querySelector(cloudflareSelectors.join(',')) !== null;
 
     const root = document.querySelector('#mnr-reader-root');
-    const prompt = document.querySelector('#mnr-entry-prompt-root');
     const entry = document.querySelector('#mnr-entry-root');
     const reader = root?.shadowRoot?.querySelector('.mnr-reader');
     const content = root?.shadowRoot?.querySelector('.mnr-reader-content');
@@ -218,7 +206,6 @@ async function collectMnrPageState(page: Page): Promise<MnrPageState> {
       originalHidden: !!document.querySelector('#mnr-hide-original'),
       pageTitle: document.title,
       paragraphCount: root?.shadowRoot?.querySelectorAll('.mnr-reader-content p').length || 0,
-      entryPromptRoot: !!prompt,
       readerMounted: !!reader,
       readerRoot: !!root,
       shadowTitle: title,
@@ -263,7 +250,6 @@ export async function waitForMnrReader(page: Page): Promise<MnrPageState> {
     .waitForFunction(
       () =>
         !!document.querySelector('#mnr-reader-root') ||
-        !!document.querySelector('#mnr-entry-prompt-root') ||
         !!document.querySelector('#mnr-entry-root') ||
         location.pathname.startsWith('/cdn-cgi/') ||
         document.querySelector('[id*="cf-chl"], [class*="cf-chl"], form[action*="/cdn-cgi/"]') !==
@@ -273,7 +259,7 @@ export async function waitForMnrReader(page: Page): Promise<MnrPageState> {
     )
     .catch(() => undefined);
 
-  await acceptPromptOrReaderEntry(page);
+  await clickReaderEntry(page);
 
   await page
     .waitForFunction(

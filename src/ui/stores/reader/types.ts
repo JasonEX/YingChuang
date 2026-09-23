@@ -20,6 +20,9 @@ export const MAX_NAV_FAILURES = 200;
 /** VIP block toast message */
 export const VIP_BLOCK_TOAST = '该章节为VIP/付费内容，无法加载';
 
+/** A fetched page was a Cloudflare challenge; a reload lets the user pass it on the site */
+export const CLOUDFLARE_TOAST = '请刷新页面完成 Cloudflare 验证';
+
 /** Shown instead of an end-of-book message while a chapter is still merging its sections */
 export const SECTION_MERGING_TOAST = '本章正在加载后续内容，请稍候';
 

@@ -3,7 +3,7 @@
     <div v-show="visible" class="mnr-floating-toolbar">
       <button
         class="mnr-fab"
-        title="目录 (Tab)"
+        title="目录 (C)"
         aria-label="打开目录"
         @click.stop="$emit('toggleDrawer')"
       >

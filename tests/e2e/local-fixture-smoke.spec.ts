@@ -118,15 +118,11 @@ for (const site of pagedCatalogSites) {
         failedDiagnostic.recentEvents.some((event: { type: string }) => event.type === 'toc.load')
       ).toBe(true);
 
-      // Cache-all must retry the failed catalog, not offer to cache its first page.
-      let cacheConfirmations = 0;
-      page.on('dialog', async dialog => {
-        cacheConfirmations++;
-        await dialog.dismiss();
-      });
-      await root.getByRole('button', { name: '缓存本书', exact: true }).click();
+      // A failed catalog offers a retry; cache-all waits for real chapters, not its first page.
+      await expect(root.getByRole('button', { name: '缓存本书', exact: true })).toBeDisabled();
+      await root.getByRole('button', { name: '重新加载', exact: true }).click();
       await expect(root.locator('.mnr-drawer-position')).toContainText('第 25 / 46 章');
-      expect(cacheConfirmations).toBe(0);
+      await expect(root.getByRole('button', { name: '缓存本书', exact: true })).toBeEnabled();
       expect(catalogRequests).toEqual([1, 2, 1, 2, 3]);
       const completedDiagnostic = await copyReaderDiagnostic(page);
       expect(completedDiagnostic.reader.toc.lastLoad).toMatchObject({
@@ -804,7 +800,14 @@ test('runs the built userscript and restores the host page after exit', async ({
       })
     )
     .toEqual({ lineHeight: '43.2px', paddingLeft: '48px', textIndent: '54px' });
-  await page.locator('#mnr-reader-root').getByRole('button', { name: '恢复默认外观' }).click();
+  const resetAppearance = page
+    .locator('#mnr-reader-root')
+    .locator('.mnr-secondary-action')
+    .filter({ hasText: '恢复默认外观' });
+  await resetAppearance.click();
+  await expect(resetAppearance).toHaveText('再点一次恢复默认外观');
+  await resetAppearance.click();
+  await expect(resetAppearance).toHaveText('恢复默认外观');
   await page.locator('#mnr-reader-root').locator('#mnr-settings-title').focus();
 
   await page.keyboard.press('Tab');
@@ -830,7 +833,7 @@ test('runs the built userscript and restores the host page after exit', async ({
     .filter({ hasText: '本站与高级' });
   await advancedSettings.locator(':scope > summary').click();
   const siteAutoEnable = advancedSettings.locator('.mnr-switch-row').filter({
-    hasText: '在本站自动开启',
+    hasText: '本站自动进入阅读模式',
   });
   await siteAutoEnable.locator('input').uncheck();
   await expect(siteAutoEnable.locator('input')).not.toBeChecked();
@@ -1154,7 +1157,7 @@ test('auto-starts TTKS and preloads through a short author-note chapter', async 
       host.shadowRoot?.querySelector('.mnr-reader')?.matches(':lang(zh-CN)')
     )
   ).toBe(true);
-  await expect(page.locator('#mnr-entry-root, #mnr-entry-prompt-root')).toHaveCount(0);
+  await expect(page.locator('#mnr-entry-root')).toHaveCount(0);
 
   const firstChapter = readerRoot.locator(`article[data-chapter-url="${firstUrl}"]`);
   await expect(firstChapter.locator('.mnr-chapter-title')).toHaveText('第82章 真黑袍（求月票）');
@@ -1194,12 +1197,12 @@ test('auto-starts TTKS and preloads through a short author-note chapter', async 
   expect(thirdRequests).toBe(1);
 });
 
-test('keeps detection details internal and hands a dismissed prompt off to manual entry', async ({
+test('offers medium-confidence chapters through a quiet manual entry, never a prompt', async ({
   context,
   page,
 }) => {
-  const promptUrl = 'http://mnr.test/chapter/200.html';
-  const promptHtml = `<!doctype html>
+  const entryUrl = 'http://mnr.test/chapter/200.html';
+  const entryHtml = `<!doctype html>
     <html lang="zh-CN">
       <head>
         <meta charset="utf-8">
@@ -1212,30 +1215,25 @@ test('keeps detection details internal and hands a dismissed prompt off to manua
       </body>
     </html>`;
 
-  await context.route(promptUrl, route =>
+  await context.route(entryUrl, route =>
     route.fulfill({
-      body: promptHtml,
+      body: entryHtml,
       contentType: 'text/html; charset=utf-8',
       status: 200,
     })
   );
   await addYingChuangUserscript(context);
   const logs = createConsoleCollector(page);
-  await page.goto(promptUrl, { waitUntil: 'domcontentloaded' });
-
-  const prompt = page.locator('#mnr-entry-prompt-root');
-  await expect(prompt.locator('[role="dialog"]')).toBeVisible();
-  await expect(prompt.locator('#mnr-entry-prompt-title')).toHaveText('检测到小说正文');
-  await expect(prompt.locator('text=检测置信度')).toHaveCount(0);
-  await expect(prompt.locator('.mnr-result-list')).toHaveCount(0);
-  await expect(prompt.locator('.mnr-entry-button.primary')).toBeFocused();
-  await expect(prompt.locator('.mnr-entry-button.primary')).toHaveCSS('min-height', '44px');
-
-  await page.keyboard.press('Escape');
-  await expect(prompt).toHaveCount(0);
+  await page.goto(entryUrl, { waitUntil: 'domcontentloaded' });
 
   const readerEntry = page.locator('#mnr-entry-root').locator('#mnr-entry-button');
   await expect(readerEntry).toBeVisible();
+  // Nothing modal is mounted and focus stays with the page; the entry waits to be pointed at.
+  await expect(page.locator('body > [id^="mnr-"]')).toHaveCount(1);
+  await expect(readerEntry).not.toBeFocused();
+  await expect(readerEntry).toHaveCSS('opacity', '0.6');
+  await readerEntry.hover();
+  await expect(readerEntry).toHaveCSS('opacity', '1');
   await readerEntry.click();
   await expect(page.locator('#mnr-entry-root')).toHaveCount(0);
   await expect(page.locator('#mnr-reader-root').locator('.mnr-reader-content')).toContainText(
@@ -1458,6 +1456,35 @@ test('leaves Enter on a focused toolbar button to native activation', async ({ c
   await page.keyboard.press('Enter');
   await expect(settingsPanel).toBeVisible();
   expect(page.url()).toBe(targetUrl);
+});
+
+test('keeps Tab as focus navigation and opens the directory with C', async ({ context, page }) => {
+  await context.route(targetUrl, route =>
+    route.fulfill({
+      body: fixtureHtml,
+      contentType: 'text/html; charset=utf-8',
+      status: 200,
+    })
+  );
+  await addYingChuangUserscript(context);
+
+  await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
+  assertMnrSmokeState(await waitForMnrReader(page));
+
+  const reader = page.locator('#mnr-reader-root');
+  const drawer = reader.locator('.mnr-drawer');
+  const settingsButton = reader.getByRole('button', { name: '打开设置' });
+
+  await reader.locator('.mnr-reader-main').focus();
+  await page.keyboard.press('Shift+Tab');
+  await expect(settingsButton).toBeFocused();
+  await expect(drawer).not.toHaveClass(/\bopen\b/);
+
+  await page.keyboard.press('c');
+  await expect(drawer).toHaveClass(/\bopen\b/);
+  await page.keyboard.press('Escape');
+  await expect(drawer).not.toHaveClass(/\bopen\b/);
+  await expect(settingsButton).toBeFocused();
 });
 
 for (const switchBack of [false, true]) {
@@ -1989,8 +2016,8 @@ test('caches script-rendered rule chapters through an iframe and removes it afte
   const root = page.locator('#mnr-reader-root');
   await root.getByRole('button', { name: '打开目录' }).click();
   await expect(root.locator('.mnr-chapter-list li')).toHaveCount(2);
-  page.once('dialog', dialog => dialog.accept());
   await root.getByRole('button', { name: '缓存本书', exact: true }).click();
+  await root.getByRole('button', { name: '开始缓存', exact: true }).click();
   await expect(
     root.locator('.mnr-chapter-list li').filter({ hasText: '第501章' }).locator('.mnr-cache-mark')
   ).toBeVisible();
@@ -2046,20 +2073,33 @@ test('does not queue cache-all work when the drawer closes during TOC loading', 
     void dialog.accept();
   });
   await root.getByRole('button', { name: '打开目录' }).click();
-  const cacheButton = root.getByRole('button', { name: '缓存本书', exact: true });
+  const cacheButton = root.locator('.mnr-offline-action.primary');
   await expect(cacheButton).toBeDisabled();
   await root.getByRole('button', { name: '关闭目录' }).click();
   releaseToc();
   await page.waitForTimeout(300);
-  expect(dialogs).toBe(0);
 
   await root.getByRole('button', { name: '打开目录' }).click();
   await expect(cacheButton).toBeEnabled();
+  await expect(cacheButton).toHaveText('缓存本书');
+  await cacheButton.click();
+  // The first click only states the cost; closing the drawer forgets it.
+  await expect(cacheButton).toHaveText('开始缓存');
+  await expect(root.locator('.mnr-offline-copy span')).toHaveText('将缓存 2 章，再点一次开始');
+  await page.keyboard.press('Escape');
+  await root.getByRole('button', { name: '打开目录' }).click();
+  await expect(cacheButton).toHaveText('缓存本书');
+  await expect(
+    root.locator('.mnr-chapter-list li').filter({ hasText: '第501章' }).locator('.mnr-cache-mark')
+  ).toHaveCount(0);
+
+  await cacheButton.click();
   await cacheButton.click();
   await expect(
     root.locator('.mnr-chapter-list li').filter({ hasText: '第501章' }).locator('.mnr-cache-mark')
   ).toBeVisible();
-  expect(dialogs).toBe(1);
+  // No native dialog ever blocks the page.
+  expect(dialogs).toBe(0);
 });
 
 test('keeps same-origin chapter requests in the page session with bound fetch wrappers', async ({

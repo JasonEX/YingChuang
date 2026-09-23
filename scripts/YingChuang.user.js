@@ -8732,7 +8732,6 @@
 		}
 		constructor(options = {}) {
 			this.hasRun = false;
-			this.launchVersion = 0;
 			this.pendingLaunch = null;
 			this.options = {
 				...DEFAULT_OPTIONS,
@@ -8751,9 +8750,6 @@
 				this.parser = new Parser({ forceDetection: options.forceDetection });
 				this.sectionMerger = createSectionMerger(this.parser);
 			}
-		}
-		setPromptCallback(callback) {
-			this.promptCallback = callback;
 		}
 		setLaunchCallback(callback) {
 			this.launchCallback = callback;
@@ -8883,25 +8879,12 @@
 				await this.launch(doc, decision.rule);
 				return;
 			}
-			if (this.promptCallback) {
-				this.deactivateProtection();
-				const launchVersion = this.launchVersion;
-				const response = await this.promptCallback();
-				if (launchVersion !== this.launchVersion) return;
-				if (response.accepted) {
-					if (await this.launch(doc, decision.rule) && response.rememberForSite) this.rememberSiteEnabled(doc);
-				}
-				return;
-			}
 			this.deactivateProtection();
 		}
 		launch(doc, rule) {
-			if (!this.pendingLaunch) {
-				this.launchVersion++;
-				this.pendingLaunch = this.parseAndLaunch(doc, rule).finally(() => {
-					this.pendingLaunch = null;
-				});
-			}
+			if (!this.pendingLaunch) this.pendingLaunch = this.parseAndLaunch(doc, rule).finally(() => {
+				this.pendingLaunch = null;
+			});
 			return this.pendingLaunch;
 		}
 		async parseAndLaunch(doc, rule) {
@@ -9218,7 +9201,6 @@
 			pageFlags: getPageFlags(),
 			mnrRoots: {
 				readerRoot: Boolean(document.getElementById("mnr-reader-root")),
-				entryPromptRoot: Boolean(document.getElementById("mnr-entry-prompt-root")),
 				readerEntryRoot: Boolean(document.getElementById("mnr-entry-root")),
 				hideOriginalStyle: Boolean(document.getElementById("mnr-hide-original"))
 			},
@@ -9477,9 +9459,6 @@
 			return looseCompareNested(a, b, seen, looseCompareObjects);
 		}
 		return String(a) === String(b);
-	}
-	function looseIndexOf(arr, val) {
-		return arr.findIndex((item) => looseEqual(item, val));
 	}
 	var isRef$1 = (val) => {
 		return !!(val && val["__v_isRef"] === true);
@@ -10476,6 +10455,9 @@
 	}
 	function ref(value) {
 		return createRef(value, false);
+	}
+	function shallowRef(value) {
+		return createRef(value, true);
 	}
 	function createRef(rawValue, shallow) {
 		if (isRef(rawValue)) return rawValue;
@@ -13771,56 +13753,6 @@
 			el.value = newValue;
 		}
 	};
-	var vModelCheckbox = {
-		deep: true,
-		created(el, _, vnode) {
-			el[assignKey] = getModelAssigner(vnode);
-			addEventListener(el, "change", () => {
-				const modelValue = el._modelValue;
-				const elementValue = getValue(el);
-				const checked = el.checked;
-				const assign = el[assignKey];
-				if (isArray(modelValue)) {
-					const index = looseIndexOf(modelValue, elementValue);
-					const found = index !== -1;
-					if (checked && !found) assign(modelValue.concat(elementValue));
-					else if (!checked && found) {
-						const filtered = [...modelValue];
-						filtered.splice(index, 1);
-						assign(filtered);
-					}
-				} else if (isSet(modelValue)) {
-					const cloned = new Set(modelValue);
-					if (checked) cloned.add(elementValue);
-					else cloned.delete(elementValue);
-					assign(cloned);
-				} else assign(getCheckboxValue(el, checked));
-			});
-		},
-		mounted: setChecked,
-		beforeUpdate(el, binding, vnode) {
-			el[assignKey] = getModelAssigner(vnode);
-			setChecked(el, binding, vnode);
-		}
-	};
-	function setChecked(el, { value, oldValue }, vnode) {
-		el._modelValue = value;
-		let checked;
-		if (isArray(value)) checked = looseIndexOf(value, vnode.props.value) > -1;
-		else if (isSet(value)) checked = value.has(vnode.props.value);
-		else {
-			if (value === oldValue) return;
-			checked = looseEqual(value, getCheckboxValue(el, true));
-		}
-		if (el.checked !== checked) el.checked = checked;
-	}
-	function getValue(el) {
-		return "_value" in el ? el._value : el.value;
-	}
-	function getCheckboxValue(el, checked) {
-		const key = checked ? "_trueValue" : "_falseValue";
-		return key in el ? el[key] : checked;
-	}
 	var systemModifiers = [
 		"ctrl",
 		"shift",
@@ -13883,174 +13815,6 @@
 		if (isString(container)) return document.querySelector(container);
 		return container;
 	}
-	var ReaderEntryButton_vue_vue_type_script_setup_true_lang_default = defineComponent({
-		__name: "ReaderEntryButton",
-		emits: ["enter"],
-		setup(__props, { emit: __emit }) {
-			const emit = __emit;
-			return (_ctx, _cache) => {
-				return openBlock(), createElementBlock("button", {
-					id: "mnr-entry-button",
-					class: "mnr-reader-entry",
-					type: "button",
-					title: "进入阅读模式",
-					"aria-label": "进入阅读模式",
-					onClick: _cache[0] || (_cache[0] = ($event) => emit("enter"))
-				}, [..._cache[1] || (_cache[1] = [createStaticVNode("<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\" data-v-e6dad6e3><path d=\"M12 7v14\" data-v-e6dad6e3></path><path d=\"M3 18a1 1 0 0 1-1-1V5a2 2 0 0 1 2-2h5a3 3 0 0 1 3 3v15\" data-v-e6dad6e3></path><path d=\"M21 18a1 1 0 0 0 1-1V5a2 2 0 0 0-2-2h-5a3 3 0 0 0-3 3\" data-v-e6dad6e3></path><path d=\"M3 18h6a3 3 0 0 1 3 3\" data-v-e6dad6e3></path><path d=\"M21 18h-6a3 3 0 0 0-3 3\" data-v-e6dad6e3></path></svg><span data-v-e6dad6e3>进入阅读模式</span>", 2)])]);
-			};
-		}
-	});
-	var _plugin_vue_export_helper_default = (sfc, props) => {
-		const target = sfc.__vccOpts || sfc;
-		for (const [key, val] of props) target[key] = val;
-		return target;
-	};
-	var ReaderEntryButton_default = _plugin_vue_export_helper_default(ReaderEntryButton_vue_vue_type_script_setup_true_lang_default, [["__scopeId", "data-v-e6dad6e3"]]);
-	function useEventListener(type, listener, options = {}) {
-		const { target = window, passive = false, capture = false } = options;
-		let attached = false;
-		const add = (currentTarget) => {
-			const element = unref(currentTarget);
-			if (element && !attached) {
-				element.addEventListener(type, listener, {
-					capture,
-					passive
-				});
-				attached = true;
-			}
-		};
-		const remove = (currentTarget) => {
-			const element = unref(currentTarget);
-			if (element && attached) {
-				element.removeEventListener(type, listener, capture);
-				attached = false;
-			}
-		};
-		onMounted(() => add(target));
-		onScopeDispose(() => remove(target));
-		if (isRef(target)) watch(target, (newTarget, oldTarget) => {
-			remove(oldTarget);
-			add(newTarget);
-		});
-		return () => remove(target);
-	}
-	function getDeepActiveElement() {
-		let active = document.activeElement;
-		while (active instanceof window.HTMLElement && active.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
-		return active instanceof window.HTMLElement ? active : null;
-	}
-	var _hoisted_1$7 = { class: "mnr-entry-preference" };
-	var _hoisted_2$5 = { class: "mnr-entry-prompt-actions" };
-	var ReaderEntryPrompt_default = _plugin_vue_export_helper_default(defineComponent({
-		__name: "ReaderEntryPrompt",
-		props: { visible: { type: Boolean } },
-		emits: ["respond"],
-		setup(__props, { emit: __emit }) {
-			const props = __props;
-			const emit = __emit;
-			const rememberForSite = ref(true);
-			const cardRef = ref(null);
-			const acceptButtonRef = ref(null);
-			let previouslyFocused = null;
-			function handleAccept() {
-				emit("respond", {
-					accepted: true,
-					rememberForSite: rememberForSite.value
-				});
-			}
-			function handleDismiss() {
-				emit("respond", {
-					accepted: false,
-					rememberForSite: false
-				});
-			}
-			function trapFocus(event) {
-				const card = cardRef.value;
-				if (!card) return;
-				const focusable = Array.from(card.querySelectorAll("button:not([disabled]), input:not([disabled])"));
-				if (focusable.length === 0) return;
-				const first = focusable[0];
-				const last = focusable[focusable.length - 1];
-				const activeElement = getDeepActiveElement();
-				if (event.shiftKey && activeElement === first) {
-					event.preventDefault();
-					last.focus();
-				} else if (!event.shiftKey && activeElement === last) {
-					event.preventDefault();
-					first.focus();
-				}
-			}
-			function handleDialogKeydown(event) {
-				const keyboardEvent = event;
-				const card = cardRef.value;
-				if (!props.visible || !card || !keyboardEvent.composedPath().includes(card)) return;
-				if (keyboardEvent.key === "Escape") {
-					keyboardEvent.preventDefault();
-					keyboardEvent.stopImmediatePropagation();
-					handleDismiss();
-				} else if (keyboardEvent.key === "Tab") {
-					keyboardEvent.stopImmediatePropagation();
-					trapFocus(keyboardEvent);
-				}
-			}
-			useEventListener("keydown", handleDialogKeydown, { capture: true });
-			watch(() => props.visible, async (visible) => {
-				if (visible) {
-					previouslyFocused = getDeepActiveElement();
-					await nextTick();
-					acceptButtonRef.value?.focus({ preventScroll: true });
-				} else {
-					await nextTick();
-					previouslyFocused?.focus?.({ preventScroll: true });
-					previouslyFocused = null;
-				}
-			}, { immediate: true });
-			return (_ctx, _cache) => {
-				return openBlock(), createBlock(Transition, { name: "mnr-entry-prompt-fade" }, {
-					default: withCtx(() => [__props.visible ? (openBlock(), createElementBlock("div", {
-						key: 0,
-						class: "mnr-entry-prompt-overlay",
-						onClick: withModifiers(handleDismiss, ["self"])
-					}, [createBaseVNode("section", {
-						ref_key: "cardRef",
-						ref: cardRef,
-						class: "mnr-entry-prompt-card",
-						role: "dialog",
-						"aria-modal": "true",
-						"aria-labelledby": "mnr-entry-prompt-title",
-						"aria-describedby": "mnr-entry-prompt-description"
-					}, [
-						_cache[2] || (_cache[2] = createBaseVNode("header", { class: "mnr-entry-prompt-header" }, [createBaseVNode("span", {
-							class: "mnr-entry-prompt-icon",
-							"aria-hidden": "true"
-						}, [createBaseVNode("svg", { viewBox: "0 0 24 24" }, [
-							createBaseVNode("path", { d: "M12 7v14" }),
-							createBaseVNode("path", { d: "M3 18a1 1 0 0 1-1-1V5a2 2 0 0 1 2-2h5a3 3 0 0 1 3 3v15" }),
-							createBaseVNode("path", { d: "M21 18a1 1 0 0 0 1-1V5a2 2 0 0 0-2-2h-5a3 3 0 0 0-3 3" }),
-							createBaseVNode("path", { d: "M3 18h6a3 3 0 0 1 3 3" }),
-							createBaseVNode("path", { d: "M21 18h-6a3 3 0 0 0-3 3" })
-						])]), createBaseVNode("div", null, [createBaseVNode("h3", { id: "mnr-entry-prompt-title" }, "检测到小说正文"), createBaseVNode("p", { id: "mnr-entry-prompt-description" }, " 是否使用阅读模式打开本章？正文将采用统一排版并支持连续滚动阅读。 ")])], -1)),
-						createBaseVNode("label", _hoisted_1$7, [withDirectives(createBaseVNode("input", {
-							"onUpdate:modelValue": _cache[0] || (_cache[0] = ($event) => rememberForSite.value = $event),
-							type: "checkbox"
-						}, null, 512), [[vModelCheckbox, rememberForSite.value]]), _cache[1] || (_cache[1] = createBaseVNode("span", null, [createBaseVNode("strong", null, "以后在本站自动进入"), createBaseVNode("small", null, "下次打开本站章节时直接进入阅读模式")], -1))]),
-						createBaseVNode("div", _hoisted_2$5, [createBaseVNode("button", {
-							type: "button",
-							class: "mnr-entry-button secondary",
-							onClick: handleDismiss
-						}, " 暂不 "), createBaseVNode("button", {
-							ref_key: "acceptButtonRef",
-							ref: acceptButtonRef,
-							type: "button",
-							class: "mnr-entry-button primary",
-							onClick: handleAccept
-						}, " 进入阅读模式 ", 512)])
-					], 512)])) : createCommentVNode("", true)]),
-					_: 1
-				});
-			};
-		}
-	}), [["__scopeId", "data-v-2c14cbfa"]]);
 	function getMnrGlobalState() {
 		if (!window.__MY_NOVEL_READER__) window.__MY_NOVEL_READER__ = {};
 		return window.__MY_NOVEL_READER__;
@@ -14593,7 +14357,8 @@ ul, ol {
 			text: "#242424",
 			link: "#2563a8",
 			onLink: "#ffffff",
-			border: "#d8d8d8"
+			border: "#d8d8d8",
+			danger: "#b3261e"
 		},
 		{
 			id: "light",
@@ -14602,7 +14367,8 @@ ul, ol {
 			text: "#1a1a1a",
 			link: "#0066cc",
 			onLink: "#ffffff",
-			border: "#e5e5e5"
+			border: "#e5e5e5",
+			danger: "#b3261e"
 		},
 		{
 			id: "sepia",
@@ -14611,7 +14377,8 @@ ul, ol {
 			text: "#4a4137",
 			link: "#7a4f26",
 			onLink: "#ffffff",
-			border: "#e8dcc8"
+			border: "#e8dcc8",
+			danger: "#b3261e"
 		},
 		{
 			id: "green",
@@ -14620,7 +14387,8 @@ ul, ol {
 			text: "#243429",
 			link: "#2f6f3d",
 			onLink: "#ffffff",
-			border: "#c9ddc9"
+			border: "#c9ddc9",
+			danger: "#b3261e"
 		},
 		{
 			id: "blue",
@@ -14629,7 +14397,8 @@ ul, ol {
 			text: "#263746",
 			link: "#2563a8",
 			onLink: "#ffffff",
-			border: "#c7d8e8"
+			border: "#c7d8e8",
+			danger: "#b3261e"
 		},
 		{
 			id: "dark",
@@ -14638,7 +14407,8 @@ ul, ol {
 			text: "#c8c8c8",
 			link: "#78bdf2",
 			onLink: "#111111",
-			border: "#3a3a3a"
+			border: "#3a3a3a",
+			danger: "#f28b82"
 		}
 	];
 	var DEFAULT_READING = {
@@ -14728,7 +14498,8 @@ ul, ol {
 				"--mnr-text": t.text,
 				"--mnr-link": t.link,
 				"--mnr-on-link": t.onLink,
-				"--mnr-border": t.border
+				"--mnr-border": t.border,
+				"--mnr-danger": t.danger
 			});
 		}
 		function applyReading(settings = reading.value) {
@@ -14889,7 +14660,31 @@ ul, ol {
 			$reset
 		};
 	});
+	var ReaderEntryButton_vue_vue_type_script_setup_true_lang_default = defineComponent({
+		__name: "ReaderEntryButton",
+		emits: ["enter"],
+		setup(__props, { emit: __emit }) {
+			const emit = __emit;
+			return (_ctx, _cache) => {
+				return openBlock(), createElementBlock("button", {
+					id: "mnr-entry-button",
+					class: "mnr-reader-entry",
+					type: "button",
+					title: "进入阅读模式",
+					"aria-label": "进入阅读模式",
+					onClick: _cache[0] || (_cache[0] = ($event) => emit("enter"))
+				}, [..._cache[1] || (_cache[1] = [createStaticVNode("<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\" data-v-af68b126><path d=\"M12 7v14\" data-v-af68b126></path><path d=\"M3 18a1 1 0 0 1-1-1V5a2 2 0 0 1 2-2h5a3 3 0 0 1 3 3v15\" data-v-af68b126></path><path d=\"M21 18a1 1 0 0 0 1-1V5a2 2 0 0 0-2-2h-5a3 3 0 0 0-3 3\" data-v-af68b126></path><path d=\"M3 18h6a3 3 0 0 1 3 3\" data-v-af68b126></path><path d=\"M21 18h-6a3 3 0 0 0-3 3\" data-v-af68b126></path></svg><span data-v-af68b126>进入阅读模式</span>", 2)])]);
+			};
+		}
+	});
+	var _plugin_vue_export_helper_default = (sfc, props) => {
+		const target = sfc.__vccOpts || sfc;
+		for (const [key, val] of props) target[key] = val;
+		return target;
+	};
+	var ReaderEntryButton_default = _plugin_vue_export_helper_default(ReaderEntryButton_vue_vue_type_script_setup_true_lang_default, [["__scopeId", "data-v-af68b126"]]);
 	var VIP_BLOCK_TOAST = "该章节为VIP/付费内容，无法加载";
+	var CLOUDFLARE_TOAST = "请刷新页面完成 Cloudflare 验证";
 	var SECTION_MERGING_TOAST = "本章正在加载后续内容，请稍候";
 	var SECTION_INCOMPLETE_TOAST = "本章内容不完整，无法确认下一章";
 	var nextChapterEntryId = 0;
@@ -19243,7 +19038,7 @@ ul, ol {
 				if (ctx.runtime.isSessionStale(runId)) return;
 				diagnostic.entries = entries.length;
 				diagnostic.outcome = entries.length ? "complete" : "empty";
-				if (entries.length === 0) ctx.showToast("目录解析为空，可稍后重试或刷新页面", "info", 2500);
+				if (entries.length === 0) ctx.showToast("目录解析为空，可稍后重试", "info", 2500);
 			} catch (e) {
 				if (!ctx.runtime.isSessionStale(runId)) {
 					diagnostic.outcome = "failed";
@@ -19609,7 +19404,7 @@ ul, ol {
 		});
 		if (blockReason === "cloudflare") {
 			const count = recordNavFailure(ctx.navFailures, load.navKey, { maxFailures: 200 });
-			if (source === "manual" || count === 1) ctx.showToast("Cloudflare 验证页面，请在新标签页中完成验证后重试", "info", 4e3);
+			if (source === "manual" || count === 1) ctx.showToast(CLOUDFLARE_TOAST, "info", 4e3);
 			return "blocked";
 		}
 		if (blockReason === "vip") {
@@ -20354,7 +20149,7 @@ ul, ol {
 			}
 			const blockReason = getChapterDocumentBlockReason(result.doc);
 			if (blockReason === "cloudflare") {
-				ctx.showToast("Cloudflare 验证页面，请完成验证后重试", "info", 4e3);
+				ctx.showToast(CLOUDFLARE_TOAST, "info", 4e3);
 				return;
 			}
 			if (blockReason === "vip") {
@@ -20973,6 +20768,39 @@ ul, ol {
 			$reset
 		};
 	});
+	function getDeepActiveElement() {
+		let active = document.activeElement;
+		while (active instanceof window.HTMLElement && active.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;
+		return active instanceof window.HTMLElement ? active : null;
+	}
+	function useEventListener(type, listener, options = {}) {
+		const { target = window, passive = false, capture = false } = options;
+		let attached = false;
+		const add = (currentTarget) => {
+			const element = unref(currentTarget);
+			if (element && !attached) {
+				element.addEventListener(type, listener, {
+					capture,
+					passive
+				});
+				attached = true;
+			}
+		};
+		const remove = (currentTarget) => {
+			const element = unref(currentTarget);
+			if (element && attached) {
+				element.removeEventListener(type, listener, capture);
+				attached = false;
+			}
+		};
+		onMounted(() => add(target));
+		onScopeDispose(() => remove(target));
+		if (isRef(target)) watch(target, (newTarget, oldTarget) => {
+			remove(oldTarget);
+			add(newTarget);
+		});
+		return () => remove(target);
+	}
 	function isInputElement(target) {
 		const element = target;
 		const tagName = element?.tagName;
@@ -21643,6 +21471,7 @@ ul, ol {
 	var SWIPE_MAX_DURATION_MS = 700;
 	var SWIPE_CANCEL_VERTICAL_PX = 28;
 	var SWIPE_AXIS_RATIO = 1.5;
+	var SWIPE_EDGE_GUARD_PX = 24;
 	var BOUNDARY_PULL_HINT_PX = 12;
 	var BOUNDARY_PULL_TRIGGER_PX = 48;
 	var BOUNDARY_AXIS_RATIO = 1.25;
@@ -21678,10 +21507,10 @@ ul, ol {
 			if (isInteractiveElement(e.target)) return;
 			const selection = window.getSelection();
 			if (selection && selection.toString().length > 0) return;
-			const boundaryDirection = onBoundaryPull ? getBoundaryDirection?.() || null : null;
-			const canSwipe = swipeEnabled.value;
-			if (!canSwipe && !boundaryDirection) return;
 			const touch = e.touches[0];
+			const boundaryDirection = onBoundaryPull ? getBoundaryDirection?.() || null : null;
+			const canSwipe = swipeEnabled.value && touch.clientX >= SWIPE_EDGE_GUARD_PX && touch.clientX <= window.innerWidth - SWIPE_EDGE_GUARD_PX;
+			if (!canSwipe && !boundaryDirection) return;
 			gestureStart = {
 				boundaryDirection,
 				boundaryReady: false,
@@ -22108,7 +21937,7 @@ ul, ol {
 				return openBlock(), createBlock(Transition, { name: "mnr-fade-slide" }, {
 					default: withCtx(() => [withDirectives(createBaseVNode("div", _hoisted_1$5, [createBaseVNode("button", {
 						class: "mnr-fab",
-						title: "目录 (Tab)",
+						title: "目录 (C)",
 						"aria-label": "打开目录",
 						onClick: _cache[0] || (_cache[0] = withModifiers(($event) => _ctx.$emit("toggleDrawer"), ["stop"]))
 					}, [..._cache[2] || (_cache[2] = [createBaseVNode("svg", {
@@ -22133,7 +21962,32 @@ ul, ol {
 				});
 			};
 		}
-	}), [["__scopeId", "data-v-99e4013e"]]);
+	}), [["__scopeId", "data-v-1dc60197"]]);
+	var CONFIRM_WINDOW_MS = 4e3;
+	function useTwoStepConfirm() {
+		const armed = shallowRef(null);
+		let timer;
+		function disarm() {
+			clearTimeout(timer);
+			armed.value = null;
+		}
+		function confirm(action, run) {
+			if (armed.value === action) {
+				disarm();
+				run();
+				return;
+			}
+			clearTimeout(timer);
+			armed.value = action;
+			timer = setTimeout(disarm, CONFIRM_WINDOW_MS);
+		}
+		onScopeDispose(disarm);
+		return {
+			armed,
+			confirm,
+			disarm
+		};
+	}
 	var MnrSpinner_default = _plugin_vue_export_helper_default(defineComponent({
 		__name: "MnrSpinner",
 		props: { size: { default: "medium" } },
@@ -22209,10 +22063,17 @@ ul, ol {
 	var _hoisted_17$1 = ["aria-current", "onClick"];
 	var _hoisted_18$1 = {
 		key: 0,
-		class: "mnr-cache-mark",
+		class: "mnr-chapter-mark mnr-lock-mark",
+		role: "img",
+		"aria-label": "付费章节"
+	};
+	var _hoisted_19$1 = {
+		key: 1,
+		class: "mnr-chapter-mark mnr-cache-mark",
+		role: "img",
 		"aria-label": "已离线缓存"
 	};
-	var _hoisted_19$1 = { class: "mnr-chapter-title-text" };
+	var _hoisted_20$1 = { class: "mnr-chapter-title-text" };
 	var SEARCH_THRESHOLD = 50;
 	var ROW_HEIGHT = 44;
 	var OVERSCAN = 8;
@@ -22229,6 +22090,7 @@ ul, ol {
 		emits: [
 			"close",
 			"select",
+			"reloadToc",
 			"cacheAll",
 			"retryCache",
 			"clearCache"
@@ -22251,7 +22113,15 @@ ul, ol {
 				const index = props.chapters.findIndex((chapter) => chapter.isCurrent);
 				return index >= 0 ? index + 1 : 0;
 			});
+			const { armed, confirm, disarm } = useTwoStepConfirm();
+			const uncachedCount = computed(() => props.chapters.filter((chapter) => chapter.access !== "locked" && !chapter.isPersisted).length);
+			const cacheActionLabel = computed(() => {
+				if (props.cacheProgress.running) return "取消";
+				return armed.value === "cache" ? "开始缓存" : "缓存本书";
+			});
 			const offlineStatus = computed(() => {
+				if (armed.value === "cache") return `将缓存 ${uncachedCount.value} 章，再点一次开始`;
+				if (armed.value === "clear") return `将删除已保存的 ${props.persistedCount} 章，再点一次确认`;
 				if (props.cacheProgress.running) return props.cacheProgress.total > 0 ? `已缓存 ${props.cacheProgress.done} / ${props.cacheProgress.total} 章` : "正在准备缓存";
 				if (props.cacheProgress.failed > 0) return `有 ${props.cacheProgress.failed} 章缓存失败`;
 				if (props.persistedCount > 0) return `已保存 ${props.persistedCount} 章`;
@@ -22292,6 +22162,14 @@ ul, ol {
 				emit("select", entry);
 				emit("close");
 			}
+			function handleCacheAction() {
+				if (props.cacheProgress.running || uncachedCount.value === 0) {
+					disarm();
+					emit("cacheAll");
+					return;
+				}
+				confirm("cache", () => emit("cacheAll"));
+			}
 			function trapFocus(event) {
 				const drawer = drawerRef.value;
 				if (!drawer) return;
@@ -22323,11 +22201,13 @@ ul, ol {
 			}
 			useEventListener("keydown", handleDialogKeydown, { capture: true });
 			watch(() => props.isOpen, async (open) => {
-				if (open) {
-					query.value = "";
-					await scrollCurrentIntoView();
-					closeButtonRef.value?.focus({ preventScroll: true });
+				if (!open) {
+					disarm();
+					return;
 				}
+				query.value = "";
+				await scrollCurrentIntoView();
+				closeButtonRef.value?.focus({ preventScroll: true });
 			}, { flush: "post" });
 			watch(() => [
 				props.loading,
@@ -22384,9 +22264,9 @@ ul, ol {
 						createBaseVNode("div", _hoisted_8$3, [createBaseVNode("div", _hoisted_9$2, [_cache[8] || (_cache[8] = createBaseVNode("strong", { id: "mnr-offline-title" }, "离线阅读", -1)), createBaseVNode("span", _hoisted_10$2, toDisplayString(offlineStatus.value), 1)]), createBaseVNode("button", {
 							class: "mnr-offline-action primary",
 							type: "button",
-							disabled: __props.loading,
-							onClick: _cache[3] || (_cache[3] = ($event) => emit("cacheAll"))
-						}, toDisplayString(__props.cacheProgress.running ? "取消" : "缓存本书"), 9, _hoisted_11$2)]),
+							disabled: __props.loading || __props.chapters.length === 0,
+							onClick: handleCacheAction
+						}, toDisplayString(cacheActionLabel.value), 9, _hoisted_11$2)]),
 						__props.cacheProgress.running ? (openBlock(), createElementBlock("div", {
 							key: 0,
 							class: "mnr-cache-progress-track",
@@ -22403,15 +22283,19 @@ ul, ol {
 							key: 0,
 							class: "mnr-offline-action",
 							type: "button",
-							onClick: _cache[4] || (_cache[4] = ($event) => emit("retryCache"))
+							onClick: _cache[3] || (_cache[3] = ($event) => emit("retryCache"))
 						}, " 重试失败章节（" + toDisplayString(__props.cacheProgress.failed) + "） ", 1)) : createCommentVNode("", true), __props.persistedCount > 0 ? (openBlock(), createElementBlock("button", {
 							key: 1,
 							class: "mnr-offline-action danger",
 							type: "button",
-							onClick: _cache[5] || (_cache[5] = ($event) => emit("clearCache"))
-						}, " 清除缓存 ")) : createCommentVNode("", true)])) : createCommentVNode("", true)
+							onClick: _cache[4] || (_cache[4] = ($event) => unref(confirm)("clear", () => emit("clearCache")))
+						}, toDisplayString(unref(armed) === "clear" ? "确认清除" : "清除缓存"), 1)) : createCommentVNode("", true)])) : createCommentVNode("", true)
 					]),
-					__props.loading ? (openBlock(), createElementBlock("div", _hoisted_14$1, [createVNode(unref(MnrSpinner_default), { size: "small" }), _cache[9] || (_cache[9] = createBaseVNode("span", null, "加载目录中...", -1))])) : __props.chapters.length === 0 ? (openBlock(), createElementBlock("div", _hoisted_15$1, "暂无目录")) : filteredChapters.value.length === 0 ? (openBlock(), createElementBlock("div", _hoisted_16$1, "没有匹配的章节")) : (openBlock(), createElementBlock("div", {
+					__props.loading ? (openBlock(), createElementBlock("div", _hoisted_14$1, [createVNode(unref(MnrSpinner_default), { size: "small" }), _cache[9] || (_cache[9] = createBaseVNode("span", null, "加载目录中...", -1))])) : __props.chapters.length === 0 ? (openBlock(), createElementBlock("div", _hoisted_15$1, [_cache[10] || (_cache[10] = createBaseVNode("span", null, "暂无目录", -1)), createBaseVNode("button", {
+						class: "mnr-offline-action",
+						type: "button",
+						onClick: _cache[5] || (_cache[5] = ($event) => emit("reloadToc"))
+					}, "重新加载")])) : filteredChapters.value.length === 0 ? (openBlock(), createElementBlock("div", _hoisted_16$1, "没有匹配的章节")) : (openBlock(), createElementBlock("div", {
 						key: 4,
 						ref_key: "contentRef",
 						ref: contentRef,
@@ -22425,21 +22309,27 @@ ul, ol {
 						})
 					}, [(openBlock(true), createElementBlock(Fragment, null, renderList(visibleChapters.value, (ch) => {
 						return openBlock(), createElementBlock("li", { key: ch.url }, [createBaseVNode("button", {
-							class: normalizeClass(["mnr-chapter-button", {
-								active: ch.isCurrent,
-								persisted: ch.isPersisted && !ch.isCurrent
-							}]),
+							class: normalizeClass(["mnr-chapter-button", { active: ch.isCurrent }]),
 							"aria-current": ch.isCurrent ? "page" : void 0,
 							onClick: ($event) => handleSelect(ch)
-						}, [ch.isPersisted && !ch.isCurrent ? (openBlock(), createElementBlock("span", _hoisted_18$1, [..._cache[10] || (_cache[10] = [createBaseVNode("svg", {
+						}, [ch.access === "locked" ? (openBlock(), createElementBlock("span", _hoisted_18$1, [..._cache[11] || (_cache[11] = [createBaseVNode("svg", {
 							viewBox: "0 0 24 24",
 							"aria-hidden": "true"
-						}, [createBaseVNode("path", { d: "m5 12 4 4L19 6" })], -1)])])) : createCommentVNode("", true), createBaseVNode("span", _hoisted_19$1, toDisplayString(ch.title), 1)], 10, _hoisted_17$1)]);
+						}, [createBaseVNode("rect", {
+							x: "5",
+							y: "11",
+							width: "14",
+							height: "10",
+							rx: "2"
+						}), createBaseVNode("path", { d: "M8 11V7a4 4 0 0 1 8 0v4" })], -1)])])) : ch.isPersisted && !ch.isCurrent ? (openBlock(), createElementBlock("span", _hoisted_19$1, [..._cache[12] || (_cache[12] = [createBaseVNode("svg", {
+							viewBox: "0 0 24 24",
+							"aria-hidden": "true"
+						}, [createBaseVNode("path", { d: "m5 12 4 4L19 6" })], -1)])])) : createCommentVNode("", true), createBaseVNode("span", _hoisted_20$1, toDisplayString(ch.title), 1)], 10, _hoisted_17$1)]);
 					}), 128))], 4)], 544))
 				], 10, _hoisted_1$3)], 64);
 			};
 		}
-	}), [["__scopeId", "data-v-7f96ddd9"]]);
+	}), [["__scopeId", "data-v-d67a6804"]]);
 	var _hoisted_1$2 = { class: "mnr-reading-control" };
 	var _hoisted_2$2 = { class: "mnr-reading-control-header" };
 	var _hoisted_3$2 = ["id", "for"];
@@ -22697,7 +22587,10 @@ ul, ol {
 	var _hoisted_26 = { class: "mnr-settings-group-content" };
 	var _hoisted_27 = { class: "mnr-switch-row" };
 	var _hoisted_28 = ["checked"];
-	var _hoisted_29 = { class: "mnr-settings-fieldset" };
+	var _hoisted_29 = {
+		class: "mnr-settings-fieldset",
+		"aria-describedby": "mnr-protection-help"
+	};
 	var _hoisted_30 = { class: "mnr-segmented-control" };
 	var _hoisted_31 = ["aria-pressed"];
 	var _hoisted_32 = ["aria-pressed"];
@@ -22755,6 +22648,7 @@ ul, ol {
 			const props = __props;
 			const emit = __emit;
 			const configStore = useConfigStore();
+			const { armed, confirm, disarm } = useTwoStepConfirm();
 			const panelRef = ref(null);
 			const titleRef = ref(null);
 			const customCleanupDraft = ref("");
@@ -22783,16 +22677,16 @@ ul, ol {
 					value: "system-ui, -apple-system, \"Microsoft YaHei\", sans-serif"
 				},
 				{
-					label: "思源宋体",
-					value: "'Noto Serif SC', 'Source Han Serif SC', serif"
-				},
-				{
-					label: "苹方",
-					value: "'PingFang SC', 'Hiragino Sans GB', sans-serif"
+					label: "宋体",
+					value: "'Noto Serif SC', 'Source Han Serif SC', 'Noto Serif CJK SC', 'Songti SC', SimSun, serif"
 				},
 				{
 					label: "楷体",
-					value: "'Kaiti SC', 'STKaiti', serif"
+					value: "'Kaiti SC', STKaiti, KaiTi, serif"
+				},
+				{
+					label: "仿宋",
+					value: "STFangsong, FangSong, serif"
 				}
 			];
 			function closePanel() {
@@ -22880,6 +22774,7 @@ ul, ol {
 				}
 				customCleanupDraft.value = "";
 				customCleanupDraftError.value = "";
+				disarm();
 				configStore.flushSave();
 			});
 			return (_ctx, _cache) => {
@@ -22905,13 +22800,13 @@ ul, ol {
 							class: "mnr-close-btn",
 							"aria-label": "关闭设置",
 							onClick: closePanel
-						}, [..._cache[15] || (_cache[15] = [createBaseVNode("svg", {
+						}, [..._cache[16] || (_cache[16] = [createBaseVNode("svg", {
 							viewBox: "0 0 24 24",
 							"aria-hidden": "true"
 						}, [createBaseVNode("path", { d: "m6 6 12 12M18 6 6 18" })], -1)])])]),
 						createBaseVNode("div", _hoisted_2$1, [
 							createBaseVNode("section", _hoisted_3$1, [
-								_cache[17] || (_cache[17] = createBaseVNode("h4", { id: "mnr-appearance-title" }, "阅读外观", -1)),
+								_cache[18] || (_cache[18] = createBaseVNode("h4", { id: "mnr-appearance-title" }, "阅读外观", -1)),
 								createBaseVNode("div", _hoisted_4$1, [(openBlock(true), createElementBlock(Fragment, null, renderList(unref(themes), (theme) => {
 									return openBlock(), createElementBlock("button", {
 										key: theme.id,
@@ -22925,7 +22820,7 @@ ul, ol {
 										onClick: ($event) => unref(configStore).setTheme(theme.id)
 									}, toDisplayString(theme.name), 15, _hoisted_5$1);
 								}), 128))]),
-								_cache[18] || (_cache[18] = createBaseVNode("div", {
+								_cache[19] || (_cache[19] = createBaseVNode("div", {
 									class: "mnr-reading-preview",
 									"aria-hidden": "true"
 								}, [createBaseVNode("span", null, "排版预览"), createBaseVNode("p", null, "山高月小，水落石出。愿每一页都读得舒适从容。")], -1)),
@@ -22952,7 +22847,7 @@ ul, ol {
 									"display-value": `${unref(configStore).reading.lineHeight} 倍`,
 									"onUpdate:modelValue": _cache[1] || (_cache[1] = ($event) => updateNumericReading("lineHeight", $event))
 								}, null, 8, ["model-value", "display-value"]),
-								_cache[19] || (_cache[19] = createBaseVNode("label", {
+								_cache[20] || (_cache[20] = createBaseVNode("label", {
 									class: "mnr-field-label",
 									for: "mnr-font-family"
 								}, "字体", -1)),
@@ -22967,7 +22862,7 @@ ul, ol {
 										value: option.value
 									}, toDisplayString(option.label), 9, _hoisted_7$1);
 								}), 64))], 40, _hoisted_6$1),
-								createBaseVNode("fieldset", _hoisted_8$1, [_cache[16] || (_cache[16] = createBaseVNode("legend", null, "简繁转换", -1)), createBaseVNode("div", _hoisted_9$1, [(openBlock(), createElementBlock(Fragment, null, renderList(conversionOptions, (option) => {
+								createBaseVNode("fieldset", _hoisted_8$1, [_cache[17] || (_cache[17] = createBaseVNode("legend", null, "简繁转换", -1)), createBaseVNode("div", _hoisted_9$1, [(openBlock(), createElementBlock(Fragment, null, renderList(conversionOptions, (option) => {
 									return createBaseVNode("button", {
 										key: option.value,
 										class: normalizeClass(["mnr-segment", { active: unref(configStore).reading.textConversion === option.value }]),
@@ -22977,10 +22872,10 @@ ul, ol {
 								}), 64))])]),
 								createBaseVNode("button", {
 									class: "mnr-secondary-action",
-									onClick: resetAppearance
-								}, "恢复默认外观")
+									onClick: _cache[2] || (_cache[2] = ($event) => unref(confirm)("reset", resetAppearance))
+								}, toDisplayString(unref(armed) === "reset" ? "再点一次恢复默认外观" : "恢复默认外观"), 1)
 							]),
-							createBaseVNode("details", _hoisted_11$1, [_cache[20] || (_cache[20] = createBaseVNode("summary", null, "排版细节", -1)), createBaseVNode("div", _hoisted_12, [
+							createBaseVNode("details", _hoisted_11$1, [_cache[21] || (_cache[21] = createBaseVNode("summary", null, "排版细节", -1)), createBaseVNode("div", _hoisted_12, [
 								createVNode(ReadingSlider_default, {
 									id: "mnr-letter-spacing",
 									label: "字间距",
@@ -22991,7 +22886,7 @@ ul, ol {
 									"min-label": "紧",
 									"max-label": "松",
 									"display-value": `${Math.round(unref(configStore).reading.letterSpacing * 100)}%`,
-									"onUpdate:modelValue": _cache[2] || (_cache[2] = ($event) => updateNumericReading("letterSpacing", $event))
+									"onUpdate:modelValue": _cache[3] || (_cache[3] = ($event) => updateNumericReading("letterSpacing", $event))
 								}, null, 8, ["model-value", "display-value"]),
 								createVNode(ReadingSlider_default, {
 									id: "mnr-paragraph-indent",
@@ -23003,7 +22898,7 @@ ul, ol {
 									"min-label": "0",
 									"max-label": "4",
 									"display-value": `${unref(configStore).reading.paragraphIndent} 字`,
-									"onUpdate:modelValue": _cache[3] || (_cache[3] = ($event) => updateNumericReading("paragraphIndent", $event))
+									"onUpdate:modelValue": _cache[4] || (_cache[4] = ($event) => updateNumericReading("paragraphIndent", $event))
 								}, null, 8, ["model-value", "display-value"]),
 								createVNode(ReadingSlider_default, {
 									id: "mnr-max-width",
@@ -23016,7 +22911,7 @@ ul, ol {
 									"min-label": "窄",
 									"max-label": "宽",
 									"display-value": `${unref(configStore).reading.maxWidth} 像素`,
-									"onUpdate:modelValue": _cache[4] || (_cache[4] = ($event) => updateNumericReading("maxWidth", $event))
+									"onUpdate:modelValue": _cache[5] || (_cache[5] = ($event) => updateNumericReading("maxWidth", $event))
 								}, null, 8, ["model-value", "display-value"]),
 								createVNode(ReadingSlider_default, {
 									id: "mnr-padding",
@@ -23028,52 +22923,59 @@ ul, ol {
 									"min-label": "窄",
 									"max-label": "宽",
 									"display-value": `${unref(configStore).reading.padding} 像素`,
-									"onUpdate:modelValue": _cache[5] || (_cache[5] = ($event) => updateNumericReading("padding", $event))
+									"onUpdate:modelValue": _cache[6] || (_cache[6] = ($event) => updateNumericReading("padding", $event))
 								}, null, 8, ["model-value", "display-value"])
 							])]),
-							createBaseVNode("details", _hoisted_13, [_cache[26] || (_cache[26] = createBaseVNode("summary", null, "阅读行为", -1)), createBaseVNode("div", _hoisted_14, [
-								createBaseVNode("label", _hoisted_15, [_cache[21] || (_cache[21] = createBaseVNode("span", null, "显示阅读进度", -1)), createBaseVNode("input", {
+							createBaseVNode("details", _hoisted_13, [_cache[27] || (_cache[27] = createBaseVNode("summary", null, "阅读行为", -1)), createBaseVNode("div", _hoisted_14, [
+								createBaseVNode("label", _hoisted_15, [_cache[22] || (_cache[22] = createBaseVNode("span", null, "显示阅读进度", -1)), createBaseVNode("input", {
 									type: "checkbox",
 									checked: unref(configStore).behavior.showProgress,
-									onChange: _cache[6] || (_cache[6] = ($event) => updateBehavior("showProgress", $event))
+									onChange: _cache[7] || (_cache[7] = ($event) => updateBehavior("showProgress", $event))
 								}, null, 40, _hoisted_16)]),
-								createBaseVNode("label", _hoisted_17, [_cache[22] || (_cache[22] = createBaseVNode("span", null, "自动加载下一章", -1)), createBaseVNode("input", {
+								createBaseVNode("label", _hoisted_17, [_cache[23] || (_cache[23] = createBaseVNode("span", null, "自动加载下一章", -1)), createBaseVNode("input", {
 									type: "checkbox",
 									checked: unref(configStore).behavior.preloadNext,
-									onChange: _cache[7] || (_cache[7] = ($event) => updateBehavior("preloadNext", $event))
+									onChange: _cache[8] || (_cache[8] = ($event) => updateBehavior("preloadNext", $event))
 								}, null, 40, _hoisted_18)]),
-								createBaseVNode("label", _hoisted_19, [_cache[23] || (_cache[23] = createBaseVNode("span", null, "自动隐藏工具栏", -1)), createBaseVNode("input", {
+								createBaseVNode("label", _hoisted_19, [_cache[24] || (_cache[24] = createBaseVNode("span", null, "自动隐藏工具栏", -1)), createBaseVNode("input", {
 									type: "checkbox",
 									checked: unref(configStore).behavior.autoHideHeader,
-									onChange: _cache[8] || (_cache[8] = ($event) => updateBehavior("autoHideHeader", $event))
+									onChange: _cache[9] || (_cache[9] = ($event) => updateBehavior("autoHideHeader", $event))
 								}, null, 40, _hoisted_20)]),
-								createBaseVNode("label", _hoisted_21, [_cache[24] || (_cache[24] = createBaseVNode("span", null, "键盘导航", -1)), createBaseVNode("input", {
+								createBaseVNode("label", _hoisted_21, [_cache[25] || (_cache[25] = createBaseVNode("span", null, "键盘导航", -1)), createBaseVNode("input", {
 									type: "checkbox",
 									checked: unref(configStore).behavior.keyboardNavigation,
-									onChange: _cache[9] || (_cache[9] = ($event) => updateBehavior("keyboardNavigation", $event))
+									onChange: _cache[10] || (_cache[10] = ($event) => updateBehavior("keyboardNavigation", $event))
 								}, null, 40, _hoisted_22)]),
-								createBaseVNode("label", _hoisted_23, [_cache[25] || (_cache[25] = createBaseVNode("span", null, "左右滑动翻屏", -1)), createBaseVNode("input", {
+								createBaseVNode("label", _hoisted_23, [_cache[26] || (_cache[26] = createBaseVNode("span", null, "左右滑动翻屏", -1)), createBaseVNode("input", {
 									type: "checkbox",
 									checked: unref(configStore).behavior.swipeGestures,
-									onChange: _cache[10] || (_cache[10] = ($event) => updateBehavior("swipeGestures", $event))
+									onChange: _cache[11] || (_cache[11] = ($event) => updateBehavior("swipeGestures", $event))
 								}, null, 40, _hoisted_24)])
 							])]),
-							createBaseVNode("details", _hoisted_25, [_cache[35] || (_cache[35] = createBaseVNode("summary", null, "本站与高级", -1)), createBaseVNode("div", _hoisted_26, [
-								createBaseVNode("label", _hoisted_27, [_cache[27] || (_cache[27] = createBaseVNode("span", null, "在本站自动开启", -1)), createBaseVNode("input", {
+							createBaseVNode("details", _hoisted_25, [_cache[37] || (_cache[37] = createBaseVNode("summary", null, "本站与高级", -1)), createBaseVNode("div", _hoisted_26, [
+								createBaseVNode("label", _hoisted_27, [_cache[28] || (_cache[28] = createBaseVNode("span", null, "本站自动进入阅读模式", -1)), createBaseVNode("input", {
 									type: "checkbox",
 									checked: __props.siteAutoEnable,
 									onChange: updateSiteAutoEnable
 								}, null, 40, _hoisted_28)]),
-								createBaseVNode("fieldset", _hoisted_29, [_cache[28] || (_cache[28] = createBaseVNode("legend", null, "网站防护", -1)), createBaseVNode("div", _hoisted_30, [createBaseVNode("button", {
-									class: normalizeClass(["mnr-segment", { active: unref(configStore).protection.mode === "standard" }]),
-									"aria-pressed": unref(configStore).protection.mode === "standard",
-									onClick: _cache[11] || (_cache[11] = ($event) => emit("protectionModeChange", "standard"))
-								}, " 标准 ", 10, _hoisted_31), createBaseVNode("button", {
-									class: normalizeClass(["mnr-segment", { active: unref(configStore).protection.mode === "aggressive" }]),
-									"aria-pressed": unref(configStore).protection.mode === "aggressive",
-									onClick: _cache[12] || (_cache[12] = ($event) => emit("protectionModeChange", "aggressive"))
-								}, " 强力 ", 10, _hoisted_32)])]),
-								_cache[34] || (_cache[34] = createBaseVNode("label", {
+								createBaseVNode("fieldset", _hoisted_29, [
+									_cache[29] || (_cache[29] = createBaseVNode("legend", null, "网站防护", -1)),
+									createBaseVNode("div", _hoisted_30, [createBaseVNode("button", {
+										class: normalizeClass(["mnr-segment", { active: unref(configStore).protection.mode === "standard" }]),
+										"aria-pressed": unref(configStore).protection.mode === "standard",
+										onClick: _cache[12] || (_cache[12] = ($event) => emit("protectionModeChange", "standard"))
+									}, " 标准 ", 10, _hoisted_31), createBaseVNode("button", {
+										class: normalizeClass(["mnr-segment", { active: unref(configStore).protection.mode === "aggressive" }]),
+										"aria-pressed": unref(configStore).protection.mode === "aggressive",
+										onClick: _cache[13] || (_cache[13] = ($event) => emit("protectionModeChange", "aggressive"))
+									}, " 强力 ", 10, _hoisted_32)]),
+									_cache[30] || (_cache[30] = createBaseVNode("p", {
+										id: "mnr-protection-help",
+										class: "mnr-field-help mnr-protection-help"
+									}, " 强力模式会额外停止页面定时器，清理可疑脚本和遮罩层，退出阅读后也无法恢复。 ", -1))
+								]),
+								_cache[36] || (_cache[36] = createBaseVNode("label", {
 									class: "mnr-field-label",
 									for: "mnr-custom-css"
 								}, "自定义 CSS", -1)),
@@ -23087,8 +22989,8 @@ ul, ol {
 									onInput: updateCustomCSS
 								}, null, 40, _hoisted_33),
 								createBaseVNode("div", _hoisted_34, [
-									_cache[31] || (_cache[31] = createBaseVNode("h4", { class: "mnr-field-label" }, "自定义正则清理", -1)),
-									_cache[32] || (_cache[32] = createBaseVNode("p", {
+									_cache[33] || (_cache[33] = createBaseVNode("h4", { class: "mnr-field-label" }, "自定义正则清理", -1)),
+									_cache[34] || (_cache[34] = createBaseVNode("p", {
 										id: "mnr-custom-cleanup-help",
 										class: "mnr-field-help"
 									}, " 每行一条正则，匹配后隐藏整段正文。 ", -1)),
@@ -23111,7 +23013,7 @@ ul, ol {
 										onClick: addCurrentSiteCleanupRule
 									}, " 添加规则 ", 8, _hoisted_38)]),
 									customCleanupDraftError.value ? (openBlock(), createElementBlock("p", _hoisted_39, toDisplayString(customCleanupDraftError.value), 1)) : createCommentVNode("", true),
-									_cache[33] || (_cache[33] = createBaseVNode("label", {
+									_cache[35] || (_cache[35] = createBaseVNode("label", {
 										class: "mnr-cleanup-editor-label",
 										for: "mnr-custom-cleanup-regex"
 									}, "全部规则", -1)),
@@ -23128,8 +23030,8 @@ ul, ol {
 									}, null, 40, _hoisted_40),
 									customCleanupErrors.value.length > 0 ? (openBlock(), createElementBlock("p", _hoisted_41, toDisplayString(customCleanupErrorMessage.value), 1)) : createCommentVNode("", true),
 									createBaseVNode("details", _hoisted_42, [
-										_cache[29] || (_cache[29] = createBaseVNode("summary", null, "规则语法与数量限制", -1)),
-										_cache[30] || (_cache[30] = createBaseVNode("p", null, [
+										_cache[31] || (_cache[31] = createBaseVNode("summary", null, "规则语法与数量限制", -1)),
+										_cache[32] || (_cache[32] = createBaseVNode("p", null, [
 											createTextVNode(" 无前缀时对所有网站生效；以 "),
 											createBaseVNode("code", null, "@host=域名"),
 											createTextVNode(" 开头时仅对该网站生效。 上方“添加规则”会自动填写本站前缀。 ")
@@ -23139,20 +23041,20 @@ ul, ol {
 								]),
 								createBaseVNode("button", {
 									class: "mnr-secondary-action",
-									onClick: _cache[13] || (_cache[13] = ($event) => emit("copyDiagnostics"))
+									onClick: _cache[14] || (_cache[14] = ($event) => emit("copyDiagnostics"))
 								}, " 复制诊断信息 ")
 							])])
 						]),
 						createBaseVNode("footer", _hoisted_43, [createBaseVNode("button", {
 							class: "mnr-exit-btn",
-							onClick: _cache[14] || (_cache[14] = ($event) => emit("exit"))
+							onClick: _cache[15] || (_cache[15] = ($event) => emit("exit"))
 						}, "退出阅读模式")])
 					], 512)])) : createCommentVNode("", true)]),
 					_: 1
 				});
 			};
 		}
-	}), [["__scopeId", "data-v-c4214e4a"]]);
+	}), [["__scopeId", "data-v-7e7dbfc6"]]);
 	var _hoisted_1 = ["inert"];
 	var _hoisted_2 = {
 		key: 0,
@@ -23301,24 +23203,16 @@ ul, ol {
 					readerStore.showToast("已取消离线缓存", "info");
 					return;
 				}
-				if (readerStore.tocLoading) return;
-				if (readerStore.toc.length === 0) {
-					readerStore.loadToc();
-					return;
-				}
-				const remaining = readerStore.tocWithStatus.filter((entry) => entry.access !== "locked" && !entry.isPersisted).length;
-				if (remaining > 0 && !window.confirm(`预计缓存 ${remaining} 章，过程可能需要一些时间。是否继续？`)) return;
 				readerStore.startCacheAll();
 			}
 			function handleClearCache() {
-				if (!window.confirm("确定要清除本书的离线缓存吗？")) return;
 				readerStore.clearPersistedCache();
 				readerStore.showToast("离线缓存已清除", "info");
 			}
 			function handleSiteAutoEnableChange(enabled) {
 				siteAutoEnableValue.value = enabled;
 				emit("siteAutoEnableChange", enabled);
-				readerStore.showToast(enabled ? "已开启本站自动阅读" : "已关闭本站自动阅读", "info");
+				readerStore.showToast(enabled ? "已开启本站自动进入" : "已关闭本站自动进入", "info");
 			}
 			function sectionProgressLabel(progress) {
 				return progress.total ? `正在加载本章后续内容 ${progress.loaded}/${progress.total}` : `正在加载本章后续内容 ${progress.loaded}`;
@@ -23338,7 +23232,7 @@ ul, ol {
 			const readerShortcutsEnabled = computed(() => configStore.behavior.keyboardNavigation && !hasOpenPanel.value);
 			useKeyboardShortcuts([
 				{
-					key: "tab",
+					key: "c",
 					handler: toggleDrawer,
 					preventDefault: true,
 					allowRepeat: false
@@ -23490,6 +23384,7 @@ ul, ol {
 						"persisted-count": unref(readerStore).persistedUrls.size,
 						onClose: unref(closeDrawer),
 						onSelect: handleChapterSelect,
+						onReloadToc: unref(readerStore).loadToc,
 						onCacheAll: handleCacheAll,
 						onRetryCache: unref(readerStore).retryFailedCache,
 						onClearCache: handleClearCache
@@ -23501,6 +23396,7 @@ ul, ol {
 						"cache-progress",
 						"persisted-count",
 						"onClose",
+						"onReloadToc",
 						"onRetryCache"
 					]),
 					createBaseVNode("main", {
@@ -23569,7 +23465,7 @@ ul, ol {
 				], 32);
 			};
 		}
-	}), [["__scopeId", "data-v-2566e7a6"]]);
+	}), [["__scopeId", "data-v-0f05a50a"]]);
 	var EXIT_NAVIGATION_KEY = "mnr_exit_navigation";
 	var hasTabStorage = typeof GM_getTab === "function" && typeof GM_saveTab === "function";
 	var appState = {
@@ -23658,53 +23554,12 @@ ul, ol {
 			getSiteProtection().deactivate();
 			return;
 		}
-		manager.setPromptCallback(showPrompt);
 		manager.setLaunchCallback(launchReader);
 		await manager.execute(document);
 		if (!appState.isActive && decision.shouldEnable) {
 			getSiteProtection().deactivate();
 			showReaderEntry();
 		}
-	}
-	async function showPrompt() {
-		return new Promise((resolve) => {
-			const { mountPoint, cleanup } = createShadowMount("mnr-entry-prompt-root");
-			const promptVisible = ref(true);
-			let promptApp = null;
-			let settled = false;
-			const finish = (response) => {
-				if (settled) return;
-				settled = true;
-				promptVisible.value = false;
-				window.setTimeout(() => {
-					promptApp?.unmount();
-					promptApp = null;
-					cleanup();
-					resolve(response);
-				}, 300);
-			};
-			const PromptWrapper = defineComponent({ setup() {
-				const handleRespond = (response) => {
-					finish(response);
-				};
-				return () => h(ReaderEntryPrompt_default, {
-					visible: promptVisible.value,
-					onRespond: handleRespond
-				});
-			} });
-			try {
-				promptApp = createApp(PromptWrapper);
-				promptApp.mount(mountPoint);
-			} catch (e) {
-				settled = true;
-				cleanup();
-				console.error("[MNR] Failed to mount reader entry prompt:", e);
-				resolve({
-					accepted: false,
-					rememberForSite: false
-				});
-			}
-		});
 	}
 	function launchReader(event) {
 		if (!pinia) {
@@ -23751,7 +23606,7 @@ ul, ol {
 		const style = document.createElement("style");
 		style.id = "mnr-hide-original";
 		style.textContent = `
-    body > *:not(#mnr-reader-root):not(#mnr-entry-prompt-root):not(script):not(style) {
+    body > *:not(#mnr-reader-root):not(script):not(style) {
       display: none !important;
     }
   `;
@@ -23967,6 +23822,16 @@ ul, ol {
 		GM_registerMenuCommand("复制诊断信息", () => {
 			copyDiagnosticsFromMenu().catch((e) => console.error("[MNR] Copy diagnostics error:", e));
 		});
+		GM_registerMenuCommand("清空自定义 CSS", () => {
+			clearCustomCSSFromMenu().catch((e) => console.error("[MNR] Clear custom CSS error:", e));
+		});
+	}
+	async function clearCustomCSSFromMenu() {
+		await ensureInitialized();
+		if (!pinia) return;
+		const configStore = useConfigStore(pinia);
+		configStore.setCustomCSS("");
+		await configStore.flushSave();
 	}
 	async function copyDiagnosticsFromMenu() {
 		await ensureInitialized();
@@ -24041,6 +23906,6 @@ ul, ol {
 			} catch (e) {
 				console.error("[MNR] CSS injection error:", e);
 			}
-		})(".mnr-reader-entry[data-v-e6dad6e3]{right:max(20px, env(safe-area-inset-right));bottom:max(20px, env(safe-area-inset-bottom));z-index:2147483646;background:var(--mnr-link,#1976d2);min-width:48px;height:48px;color:var(--mnr-on-link,#fff);cursor:pointer;-webkit-tap-highlight-color:transparent;border:0;border-radius:24px;justify-content:center;align-items:center;gap:8px;margin:0;padding:0 16px;font-size:14px;font-weight:600;line-height:1;transition:transform .18s,filter .18s,box-shadow .18s;animation:.2s ease-out mnr-entry-in-e6dad6e3;display:flex;position:fixed;box-shadow:0 6px 18px #0003}.mnr-reader-entry svg[data-v-e6dad6e3]{fill:none;stroke:currentColor;stroke-width:1.8px;stroke-linecap:round;stroke-linejoin:round;flex:0 0 24px;width:24px;height:24px}.mnr-reader-entry span[data-v-e6dad6e3]{white-space:nowrap}.mnr-reader-entry[data-v-e6dad6e3]:active{transform:scale(.96)}.mnr-reader-entry[data-v-e6dad6e3]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 48%, #fff);outline-offset:3px}@media (hover:hover){.mnr-reader-entry[data-v-e6dad6e3]:hover{filter:brightness(.94);transform:translateY(-2px);box-shadow:0 8px 22px #0000003d}}@media (width<=480px){.mnr-reader-entry[data-v-e6dad6e3]{width:48px;padding:0}.mnr-reader-entry span[data-v-e6dad6e3]{display:none}}@keyframes mnr-entry-in-e6dad6e3{0%{opacity:0;transform:translateY(8px)scale(.96)}}@media (prefers-reduced-motion:reduce){.mnr-reader-entry[data-v-e6dad6e3]{transition:none;animation:none}}.mnr-entry-prompt-overlay[data-v-2c14cbfa]{z-index:2147483647;padding:max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));background:#00000085;justify-content:center;align-items:center;display:flex;position:fixed;inset:0}.mnr-entry-prompt-card[data-v-2c14cbfa]{border:1px solid var(--mnr-border,#e0e0e0);background:var(--mnr-bg,#fff);width:min(100%,400px);max-height:calc(100dvh - 32px);color:var(--mnr-text,#333);border-radius:14px;padding:24px;animation:.24s ease-out mnr-entry-prompt-in-2c14cbfa;overflow:auto;box-shadow:0 18px 50px #00000047}.mnr-entry-prompt-header[data-v-2c14cbfa]{align-items:flex-start;gap:14px;display:flex}.mnr-entry-prompt-icon[data-v-2c14cbfa]{background:color-mix(in srgb, var(--mnr-link,#1976d2) 12%, transparent);width:44px;height:44px;color:var(--mnr-link,#1976d2);border-radius:12px;flex:0 0 44px;place-items:center;display:grid}.mnr-entry-prompt-icon svg[data-v-2c14cbfa]{fill:none;stroke:currentColor;stroke-width:1.8px;stroke-linecap:round;stroke-linejoin:round;width:26px;height:26px}.mnr-entry-prompt-header h3[data-v-2c14cbfa]{margin:1px 0 6px;font-size:18px;font-weight:700;line-height:1.4}.mnr-entry-prompt-header p[data-v-2c14cbfa]{opacity:.76;margin:0;font-size:14px;line-height:1.65}.mnr-entry-preference[data-v-2c14cbfa]{border:1px solid var(--mnr-border,#e0e0e0);background:color-mix(in srgb, var(--mnr-border,#e0e0e0) 34%, transparent);cursor:pointer;border-radius:10px;align-items:flex-start;gap:10px;margin:22px 0;padding:13px 14px;display:flex}.mnr-entry-preference input[data-v-2c14cbfa]{width:20px;height:20px;accent-color:var(--mnr-link,#1976d2);flex:0 0 20px;margin:1px 0 0}.mnr-entry-preference span[data-v-2c14cbfa],.mnr-entry-preference strong[data-v-2c14cbfa],.mnr-entry-preference small[data-v-2c14cbfa]{display:block}.mnr-entry-preference strong[data-v-2c14cbfa]{font-size:14px;font-weight:600}.mnr-entry-preference small[data-v-2c14cbfa]{opacity:.68;margin-top:3px;font-size:12px;line-height:1.5}.mnr-entry-prompt-actions[data-v-2c14cbfa]{grid-template-columns:1fr 1.25fr;gap:10px;display:grid}.mnr-entry-button[data-v-2c14cbfa]{cursor:pointer;border:1px solid #0000;border-radius:9px;min-height:44px;padding:10px 14px;font-size:14px;font-weight:600;transition:filter .18s,background .18s}.mnr-entry-button.secondary[data-v-2c14cbfa]{border-color:var(--mnr-border,#ddd);color:var(--mnr-text,#555);background:0 0}.mnr-entry-button.primary[data-v-2c14cbfa]{background:var(--mnr-link,#1976d2);color:var(--mnr-on-link,#fff)}.mnr-entry-button[data-v-2c14cbfa]:focus-visible,.mnr-entry-preference input[data-v-2c14cbfa]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}@media (hover:hover){.mnr-entry-button[data-v-2c14cbfa]:hover{filter:brightness(.94)}.mnr-entry-button.secondary[data-v-2c14cbfa]:hover{background:var(--mnr-border,#f0f0f0)}}.mnr-entry-prompt-fade-enter-active[data-v-2c14cbfa],.mnr-entry-prompt-fade-leave-active[data-v-2c14cbfa]{transition:opacity .24s}.mnr-entry-prompt-fade-enter-from[data-v-2c14cbfa],.mnr-entry-prompt-fade-leave-to[data-v-2c14cbfa]{opacity:0}@keyframes mnr-entry-prompt-in-2c14cbfa{0%{opacity:0;transform:translateY(12px)scale(.98)}}@media (width<=480px){.mnr-entry-prompt-card[data-v-2c14cbfa]{padding:20px}.mnr-entry-prompt-header[data-v-2c14cbfa]{gap:12px}.mnr-entry-prompt-icon[data-v-2c14cbfa]{flex-basis:40px;width:40px;height:40px}}@media (prefers-reduced-motion:reduce){.mnr-entry-prompt-card[data-v-2c14cbfa],.mnr-entry-button[data-v-2c14cbfa],.mnr-entry-prompt-fade-enter-active[data-v-2c14cbfa],.mnr-entry-prompt-fade-leave-active[data-v-2c14cbfa]{transition:none;animation:none}}.mnr-progress[data-v-fb6f172c]{z-index:1000;height:3px;transition:opacity .3s;position:fixed;top:0;left:0;right:0}.mnr-progress.hidden[data-v-fb6f172c]{opacity:0}.mnr-progress-bar[data-v-fb6f172c]{background:var(--mnr-link,#1976d2);height:100%;transition:width .1s ease-out}.mnr-progress-text[data-v-fb6f172c]{color:#fff;background:#000000b3;border-radius:4px;padding:4px 8px;font-size:12px;position:absolute;top:8px;right:8px}@media (prefers-reduced-motion:reduce){.mnr-progress[data-v-fb6f172c],.mnr-progress-bar[data-v-fb6f172c]{transition:none}}.mnr-floating-toolbar[data-v-99e4013e]{top:max(12px, env(safe-area-inset-top));left:max(12px, env(safe-area-inset-left));right:max(12px, env(safe-area-inset-right));pointer-events:none;z-index:100;justify-content:space-between;display:flex;position:fixed}.mnr-fab[data-v-99e4013e]{pointer-events:auto;background:var(--mnr-bg,#fff);width:44px;height:44px;color:var(--mnr-text,#333);border:1px solid var(--mnr-border,#e5e5e5);cursor:pointer;-webkit-tap-highlight-color:transparent;border-radius:50%;justify-content:center;align-items:center;padding:0;font-size:18px;transition:all .2s cubic-bezier(.25,.8,.25,1);display:flex;position:relative;box-shadow:0 4px 12px #00000026}.mnr-fab[data-v-99e4013e]:hover{background:var(--mnr-border,#f0f0f0);transform:translateY(-2px);box-shadow:0 6px 16px #0003}.mnr-fab[data-v-99e4013e]:active{transform:scale(.95)}.mnr-fab[data-v-99e4013e]:disabled{opacity:.6;cursor:not-allowed;box-shadow:none;transform:none}.mnr-icon[data-v-99e4013e]{fill:none;stroke:currentColor;stroke-width:1.8px;stroke-linecap:round;stroke-linejoin:round;flex:none;width:22px;height:22px;display:block}.mnr-fab[data-v-99e4013e]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}.mnr-fade-slide-enter-active[data-v-99e4013e],.mnr-fade-slide-leave-active[data-v-99e4013e]{transition:opacity .3s,transform .3s}.mnr-fade-slide-enter-from[data-v-99e4013e],.mnr-fade-slide-leave-to[data-v-99e4013e]{opacity:0;transform:translateY(-20px)}@media (prefers-reduced-motion:reduce){.mnr-fab[data-v-99e4013e],.mnr-fade-slide-enter-active[data-v-99e4013e],.mnr-fade-slide-leave-active[data-v-99e4013e]{transition:none}}.mnr-spinner[data-v-c925c262]{border-radius:50%;animation:.8s cubic-bezier(.4,0,.2,1) infinite mnr-spin-c925c262}.mnr-spinner.small[data-v-c925c262]{border:2px solid var(--mnr-border,#e0e0e0);border-top-color:var(--mnr-link,#1976d2);width:24px;height:24px;animation-duration:1s;animation-timing-function:linear}.mnr-spinner.medium[data-v-c925c262]{border:4px solid var(--mnr-border,#e0e0e0);border-top-color:var(--mnr-link,#1976d2);width:48px;height:48px}.mnr-spinner.large[data-v-c925c262]{border:4px solid var(--mnr-border,#e0e0e0);border-top-color:var(--mnr-link,#1976d2);width:64px;height:64px}@keyframes mnr-spin-c925c262{to{transform:rotate(360deg)}}.mnr-toast[data-v-baea3e69]{bottom:max(32px, env(safe-area-inset-bottom));-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);color:#fff;cursor:pointer;z-index:1001;white-space:nowrap;text-overflow:ellipsis;background:#1e1e1ee6;border-radius:50px;align-items:center;gap:8px;max-width:90vw;padding:14px 28px;font-size:15px;font-weight:500;display:flex;position:fixed;left:50%;overflow:hidden;transform:translate(-50%);box-shadow:0 8px 24px #0003}.mnr-toast--error[data-v-baea3e69]{background:#d32f2ff2}.mnr-toast-enter-active[data-v-baea3e69],.mnr-toast-leave-active[data-v-baea3e69]{transition:all .4s cubic-bezier(.175,.885,.32,1.275)}.mnr-toast-enter-from[data-v-baea3e69],.mnr-toast-leave-to[data-v-baea3e69]{opacity:0;transform:translate(-50%)translateY(40px)scale(.9)}@media (prefers-reduced-motion:reduce){.mnr-toast-enter-active[data-v-baea3e69],.mnr-toast-leave-active[data-v-baea3e69]{transition:none}}.mnr-drawer[data-v-7f96ddd9]{z-index:1001;width:min(88%,340px);padding-left:env(safe-area-inset-left);background:var(--mnr-bg,#fff);color:var(--mnr-text,#333);flex-direction:column;transition:transform .24s;display:flex;position:fixed;inset:0 auto 0 0;transform:translate(-105%);box-shadow:4px 0 20px #00000026}.mnr-drawer.open[data-v-7f96ddd9]{transform:translate(0)}.mnr-drawer-overlay[data-v-7f96ddd9]{z-index:1000;background:#00000080;position:fixed;inset:0}.mnr-drawer-header[data-v-7f96ddd9]{padding:max(16px, env(safe-area-inset-top)) 16px 14px;border-bottom:1px solid var(--mnr-border,#e5e5e5);flex-shrink:0;justify-content:space-between;align-items:center;gap:12px;display:flex}.mnr-drawer-heading[data-v-7f96ddd9]{min-width:0}.mnr-drawer-title[data-v-7f96ddd9]{overflow-wrap:anywhere;-webkit-line-clamp:2;-webkit-box-orient:vertical;margin:0;font-size:16px;font-weight:600;line-height:1.5;display:-webkit-box;overflow:hidden}.mnr-drawer-position[data-v-7f96ddd9]{color:var(--mnr-text,#666);opacity:.72;margin-top:3px;font-size:12px;display:block}.mnr-drawer-close[data-v-7f96ddd9]{width:36px;height:36px;color:inherit;cursor:pointer;background:0 0;border:0;border-radius:50%;flex:0 0 36px;place-items:center;padding:0;display:grid}.mnr-drawer-close svg[data-v-7f96ddd9]{fill:none;stroke:currentColor;stroke-width:2px;stroke-linecap:round;width:20px;height:20px}.mnr-drawer-search[data-v-7f96ddd9]{flex-shrink:0;padding:10px 12px 6px}.mnr-drawer-search input[data-v-7f96ddd9]{border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);width:100%;color:var(--mnr-text,#333);border-radius:8px;padding:9px 12px;font-size:14px}.mnr-offline-section[data-v-7f96ddd9]{border-bottom:1px solid var(--mnr-border,#e5e5e5);flex-shrink:0;padding:10px 12px 12px}.mnr-offline-main[data-v-7f96ddd9]{justify-content:space-between;align-items:center;gap:12px;display:flex}.mnr-offline-copy[data-v-7f96ddd9]{min-width:0}.mnr-offline-copy strong[data-v-7f96ddd9],.mnr-offline-copy span[data-v-7f96ddd9]{display:block}.mnr-offline-copy strong[data-v-7f96ddd9]{font-size:13px;font-weight:600}.mnr-offline-copy span[data-v-7f96ddd9]{color:var(--mnr-text,#666);opacity:.7;margin-top:2px;font-size:12px}.mnr-offline-action[data-v-7f96ddd9]{border:1px solid var(--mnr-border,#ddd);min-height:36px;color:var(--mnr-link,#1976d2);cursor:pointer;background:0 0;border-radius:8px;padding:6px 11px;font-size:12px;font-weight:600}.mnr-offline-action[data-v-7f96ddd9]:disabled{cursor:wait;opacity:.6}.mnr-offline-action.primary[data-v-7f96ddd9]{border-color:var(--mnr-link,#1976d2);background:var(--mnr-link,#1976d2);color:var(--mnr-on-link,#fff);flex:none}.mnr-offline-action.danger[data-v-7f96ddd9]{color:var(--mnr-text,#555)}.mnr-offline-secondary[data-v-7f96ddd9]{flex-wrap:wrap;gap:6px;margin-top:8px;display:flex}.mnr-drawer-state[data-v-7f96ddd9]{color:var(--mnr-text,#666);text-align:center;opacity:.78;flex:1;justify-content:center;align-items:center;gap:10px;padding:40px 20px;display:flex}.mnr-drawer-content[data-v-7f96ddd9]{overscroll-behavior:contain;-webkit-overflow-scrolling:touch;flex:1;position:relative;overflow-y:auto}.mnr-cache-progress-track[data-v-7f96ddd9]{background:var(--mnr-border,#e0e0e0);border-radius:2px;height:4px;margin-top:10px;overflow:hidden}.mnr-cache-progress-fill[data-v-7f96ddd9]{background:var(--mnr-link,#1976d2);height:100%;transition:width .2s}.mnr-chapter-list[data-v-7f96ddd9]{margin:0;padding-left:0;padding-right:0;list-style:none}.mnr-chapter-list li[data-v-7f96ddd9]{height:44px}.mnr-chapter-button[data-v-7f96ddd9]{width:100%;height:44px;color:inherit;text-align:left;cursor:pointer;background:0 0;border:0;border-left:3px solid #0000;align-items:center;gap:6px;padding:0 14px;font-size:14px;display:flex;overflow:hidden}.mnr-chapter-title-text[data-v-7f96ddd9]{text-overflow:ellipsis;white-space:nowrap;overflow:hidden}.mnr-chapter-button.active[data-v-7f96ddd9]{border-left-color:var(--mnr-link,#1976d2);background:color-mix(in srgb, var(--mnr-link,#1976d2) 10%, transparent);color:var(--mnr-link,#1976d2);font-weight:600}.mnr-chapter-button.persisted[data-v-7f96ddd9],.mnr-cache-mark[data-v-7f96ddd9]{color:#388e3c}.mnr-cache-mark[data-v-7f96ddd9]{flex:none;width:14px;height:14px}.mnr-cache-mark svg[data-v-7f96ddd9]{fill:none;stroke:currentColor;stroke-width:2px;stroke-linecap:round;stroke-linejoin:round;width:100%;height:100%;display:block}@media (hover:hover){.mnr-drawer-close[data-v-7f96ddd9]:hover,.mnr-chapter-button[data-v-7f96ddd9]:not(.active):hover,.mnr-offline-action[data-v-7f96ddd9]:enabled:hover{background:var(--mnr-border,#f0f0f0)}.mnr-offline-action.primary[data-v-7f96ddd9]:enabled:hover{background:var(--mnr-link,#1976d2);filter:brightness(.94)}}.mnr-drawer-close[data-v-7f96ddd9]:focus-visible,.mnr-drawer-search input[data-v-7f96ddd9]:focus-visible,.mnr-offline-action[data-v-7f96ddd9]:focus-visible,.mnr-chapter-button[data-v-7f96ddd9]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:-3px}.mnr-visually-hidden[data-v-7f96ddd9]{clip:rect(0 0 0 0);white-space:nowrap;clip-path:inset(50%);width:1px;height:1px;position:absolute;overflow:hidden}.mnr-fade-enter-active[data-v-7f96ddd9],.mnr-fade-leave-active[data-v-7f96ddd9]{transition:opacity .24s}.mnr-fade-enter-from[data-v-7f96ddd9],.mnr-fade-leave-to[data-v-7f96ddd9]{opacity:0}@media (prefers-reduced-motion:reduce){.mnr-drawer[data-v-7f96ddd9],.mnr-fade-enter-active[data-v-7f96ddd9],.mnr-fade-leave-active[data-v-7f96ddd9],.mnr-cache-progress-fill[data-v-7f96ddd9]{transition:none}}.mnr-reading-control[data-v-e6745e69]{margin-top:18px}.mnr-reading-control-header[data-v-e6745e69]{justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:4px;display:flex}.mnr-reading-control-header label[data-v-e6745e69]{color:var(--mnr-text,#333);font-size:14px;font-weight:600}.mnr-reading-control-header output[data-v-e6745e69]{color:var(--mnr-text,#666);opacity:.78;font-size:13px}.mnr-reading-slider-row[data-v-e6745e69]{align-items:center;gap:10px;display:flex}.mnr-reading-slider-row span[data-v-e6745e69]{color:var(--mnr-text,#666);text-align:center;flex:0 0 24px;font-size:13px}.mnr-reading-slider-row input[data-v-e6745e69]{appearance:none;cursor:pointer;touch-action:pan-y;background:0 0;flex:1;min-width:0;height:32px;margin:0}.mnr-reading-slider-row input[data-v-e6745e69]::-webkit-slider-runnable-track{background:var(--mnr-border,#e0e0e0);border-radius:2px;height:4px}.mnr-reading-slider-row input[data-v-e6745e69]::-webkit-slider-thumb{appearance:none;background:var(--mnr-link,#1976d2);border:0;border-radius:50%;width:24px;height:24px;margin-top:-10px}.mnr-reading-slider-row input[data-v-e6745e69]::-moz-range-track{background:var(--mnr-border,#e0e0e0);border-radius:2px;height:4px}.mnr-reading-slider-row input[data-v-e6745e69]::-moz-range-thumb{background:var(--mnr-link,#1976d2);border:0;border-radius:50%;width:24px;height:24px}.mnr-reading-slider-row input[data-v-e6745e69]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}.mnr-settings-overlay[data-v-c4214e4a]{z-index:1000;background:#00000080;justify-content:flex-end;display:flex;position:fixed;inset:0}.mnr-settings-panel[data-v-c4214e4a]{width:min(100%,380px);height:100%;padding-right:env(safe-area-inset-right);background:var(--mnr-bg,#fff);color:var(--mnr-text,#333);flex-direction:column;display:flex;box-shadow:-4px 0 20px #00000026}.mnr-settings-header[data-v-c4214e4a]{padding:max(16px, env(safe-area-inset-top)) 16px 16px;border-bottom:1px solid var(--mnr-border,#e0e0e0);flex-shrink:0;justify-content:space-between;align-items:center;display:flex}.mnr-settings-header h3[data-v-c4214e4a],.mnr-settings-section h4[data-v-c4214e4a],.mnr-field-label[data-v-c4214e4a]{color:var(--mnr-text,#333);margin:0}.mnr-settings-header h3[data-v-c4214e4a]{border-radius:4px;font-size:18px}.mnr-close-btn[data-v-c4214e4a]{width:36px;height:36px;color:inherit;cursor:pointer;background:0 0;border:0;border-radius:50%;place-items:center;padding:0;display:grid}.mnr-close-btn svg[data-v-c4214e4a]{fill:none;stroke:currentColor;stroke-width:2px;stroke-linecap:round;width:20px;height:20px}.mnr-settings-content[data-v-c4214e4a]{overscroll-behavior:contain;flex:1;padding:18px 16px 24px;overflow:auto}.mnr-settings-section h4[data-v-c4214e4a],.mnr-field-label[data-v-c4214e4a],.mnr-settings-fieldset legend[data-v-c4214e4a]{margin-bottom:10px;font-size:14px;font-weight:600;display:block}.mnr-theme-grid[data-v-c4214e4a]{grid-template-columns:repeat(3,1fr);gap:8px;display:grid}.mnr-theme-btn[data-v-c4214e4a]{cursor:pointer;border:2px solid #0000;border-radius:8px;min-width:0;min-height:42px;padding:8px 4px;font-size:12px}.mnr-reading-preview[data-v-c4214e4a]{border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);color:var(--mnr-text,#333);border-radius:8px;margin-top:16px;padding:12px 14px;display:none}.mnr-reading-preview span[data-v-c4214e4a]{opacity:.65;margin-bottom:4px;font-size:12px;display:block}.mnr-reading-preview p[data-v-c4214e4a]{font-family:var(--mnr-font-family,system-ui, sans-serif);font-size:var(--mnr-font-size,18px);line-height:var(--mnr-line-height,1.8);letter-spacing:var(--mnr-letter-spacing,0);text-indent:var(--mnr-paragraph-indent,2em);margin:0}.mnr-field-label[data-v-c4214e4a]{margin-top:18px}.mnr-select[data-v-c4214e4a]{border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);width:100%;min-height:42px;color:var(--mnr-text,#333);border-radius:8px;padding:9px 12px;font-size:14px}.mnr-settings-fieldset[data-v-c4214e4a]{border:0;min-width:0;margin:18px 0 0;padding:0}.mnr-segmented-control[data-v-c4214e4a]{border:1px solid var(--mnr-border,#ddd);border-radius:8px;display:flex;overflow:hidden}.mnr-segment[data-v-c4214e4a]{border:0;border-right:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);min-height:42px;color:var(--mnr-text,#666);cursor:pointer;flex:1;padding:9px 12px;font-size:14px}.mnr-segment[data-v-c4214e4a]:last-child{border-right:0}.mnr-segment.active[data-v-c4214e4a]{background:var(--mnr-link,#1976d2);color:var(--mnr-on-link,#fff)}.mnr-secondary-action[data-v-c4214e4a]{border:1px solid var(--mnr-border,#ddd);width:100%;min-height:42px;color:var(--mnr-text,#333);cursor:pointer;background:0 0;border-radius:8px;margin-top:16px;padding:9px 12px;font-size:14px}.mnr-settings-group[data-v-c4214e4a]{border-top:1px solid var(--mnr-border,#ddd);margin-top:18px}.mnr-settings-group summary[data-v-c4214e4a]{min-height:48px;color:var(--mnr-text,#333);cursor:pointer;padding:14px 0;font-size:14px;font-weight:600}.mnr-settings-group-content[data-v-c4214e4a]{padding-bottom:4px}.mnr-settings-group-content[data-v-c4214e4a]>:first-child{margin-top:0}.mnr-switch-row[data-v-c4214e4a]{min-height:44px;color:var(--mnr-text,#333);cursor:pointer;justify-content:space-between;align-items:center;gap:16px;display:flex}.mnr-switch-row input[data-v-c4214e4a]{width:22px;height:22px;accent-color:var(--mnr-link,#1976d2);flex:none}.mnr-custom-css[data-v-c4214e4a]{box-sizing:border-box;resize:vertical;border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);width:100%;min-height:110px;color:var(--mnr-text,#333);border-radius:8px;padding:10px 12px;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}.mnr-cleanup-fields[data-v-c4214e4a]{gap:10px;margin-top:8px;display:grid}.mnr-cleanup-fields .mnr-field-label[data-v-c4214e4a],.mnr-cleanup-fields .mnr-field-help[data-v-c4214e4a],.mnr-cleanup-fields .mnr-field-error[data-v-c4214e4a]{margin:0}.mnr-cleanup-editor-label[data-v-c4214e4a],.mnr-cleanup-guide[data-v-c4214e4a]{font-size:12px;line-height:1.6}.mnr-cleanup-guide[data-v-c4214e4a]{color:var(--mnr-text,#333)}.mnr-cleanup-guide summary[data-v-c4214e4a]{cursor:pointer;opacity:.72}.mnr-cleanup-guide p[data-v-c4214e4a]{margin:8px 0 0}.mnr-cleanup-guide code[data-v-c4214e4a]{overflow-wrap:anywhere}.mnr-cleanup-add[data-v-c4214e4a]{grid-template-columns:minmax(0,1fr) auto;gap:8px;display:grid}.mnr-cleanup-input[data-v-c4214e4a]{box-sizing:border-box;border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);min-width:0;min-height:42px;color:var(--mnr-text,#333);border-radius:8px;padding:9px 12px;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}.mnr-cleanup-add-button[data-v-c4214e4a]{white-space:nowrap;width:auto;margin-top:0}.mnr-cleanup-add-button[data-v-c4214e4a]:disabled{cursor:not-allowed;opacity:.55}.mnr-cleanup-site[data-v-c4214e4a]{overflow-wrap:anywhere}.mnr-field-help[data-v-c4214e4a],.mnr-field-error[data-v-c4214e4a]{margin:-4px 0 8px;font-size:12px;line-height:1.5}.mnr-field-help[data-v-c4214e4a]{opacity:.72}.mnr-field-error[data-v-c4214e4a]{color:#c93f49;margin-top:6px}.mnr-settings-footer[data-v-c4214e4a]{padding:10px 16px max(12px, env(safe-area-inset-bottom));border-top:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);flex-shrink:0}.mnr-exit-btn[data-v-c4214e4a]{color:#c93f49;cursor:pointer;background:0 0;border:1px solid #c93f49;border-radius:8px;width:100%;min-height:42px;padding:9px 12px;font-size:14px}@media (hover:hover){.mnr-close-btn[data-v-c4214e4a]:hover,.mnr-secondary-action[data-v-c4214e4a]:enabled:hover,.mnr-segment[data-v-c4214e4a]:not(.active):hover,.mnr-exit-btn[data-v-c4214e4a]:hover{background:var(--mnr-border,#f0f0f0)}}.mnr-settings-header h3[data-v-c4214e4a]:focus-visible,.mnr-close-btn[data-v-c4214e4a]:focus-visible,.mnr-theme-btn[data-v-c4214e4a]:focus-visible,.mnr-select[data-v-c4214e4a]:focus-visible,.mnr-segment[data-v-c4214e4a]:focus-visible,.mnr-secondary-action[data-v-c4214e4a]:focus-visible,.mnr-settings-group summary[data-v-c4214e4a]:focus-visible,.mnr-cleanup-guide summary[data-v-c4214e4a]:focus-visible,.mnr-switch-row input[data-v-c4214e4a]:focus-visible,.mnr-cleanup-input[data-v-c4214e4a]:focus-visible,.mnr-custom-css[data-v-c4214e4a]:focus-visible,.mnr-exit-btn[data-v-c4214e4a]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}.mnr-slide-enter-active[data-v-c4214e4a],.mnr-slide-leave-active[data-v-c4214e4a],.mnr-settings-panel[data-v-c4214e4a]{transition:opacity .22s,transform .22s}.mnr-slide-enter-from[data-v-c4214e4a],.mnr-slide-leave-to[data-v-c4214e4a]{opacity:0}.mnr-slide-enter-from .mnr-settings-panel[data-v-c4214e4a],.mnr-slide-leave-to .mnr-settings-panel[data-v-c4214e4a]{transform:translate(100%)}@media (width<=600px){.mnr-settings-panel[data-v-c4214e4a]{width:100%}.mnr-reading-preview[data-v-c4214e4a]{display:block}.mnr-desktop-width[data-v-c4214e4a]{display:none}}@media (prefers-reduced-motion:reduce){.mnr-slide-enter-active[data-v-c4214e4a],.mnr-slide-leave-active[data-v-c4214e4a],.mnr-settings-panel[data-v-c4214e4a]{transition:none}}.mnr-reader[data-v-2566e7a6]{z-index:2147483647;background:var(--mnr-bg,#fff);color:var(--mnr-text,#1a1a1a);overscroll-behavior:none;flex-direction:column;display:flex;position:fixed;inset:0;overflow:hidden}.mnr-reader-main[data-v-2566e7a6]{padding-top:68px;padding-bottom:max(40px, env(safe-area-inset-bottom));overscroll-behavior:none;-webkit-overflow-scrolling:touch;touch-action:pan-y pinch-zoom;flex:1;overflow:auto}.mnr-boundary-gesture-hint[data-v-2566e7a6]{z-index:4;background:color-mix(in srgb, var(--mnr-text,#1a1a1a) 86%, transparent);max-width:calc(100vw - 32px);color:var(--mnr-bg,#fff);white-space:nowrap;pointer-events:none;border-radius:999px;padding:8px 14px;font-size:14px;line-height:1.4;position:fixed;left:50%;transform:translate(-50%)}.mnr-boundary-gesture-hint.is-prev[data-v-2566e7a6]{top:max(16px, env(safe-area-inset-top))}.mnr-boundary-gesture-hint.is-next[data-v-2566e7a6]{bottom:max(16px, env(safe-area-inset-bottom))}.mnr-reader-content[data-v-2566e7a6]{max-width:var(--mnr-max-width,800px);padding:var(--mnr-padding,20px);font-family:var(--mnr-font-family,\"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif);font-size:var(--mnr-font-size,18px);line-height:var(--mnr-line-height,1.8);letter-spacing:var(--mnr-letter-spacing,0em);margin:0 auto}.mnr-reader-content[data-v-2566e7a6] p{text-indent:var(--mnr-paragraph-indent,2em);margin:0 0 1em}.mnr-reader-content[data-v-2566e7a6] img{max-width:100%;height:auto;margin:1em auto;display:block}.mnr-reader-content[data-v-2566e7a6] a{color:var(--mnr-link,#1976d2)}.mnr-reader-main[data-v-2566e7a6]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}.mnr-chapter-title[data-v-2566e7a6]{color:var(--mnr-text,#1a1a1a);text-align:center;margin:0 0 1em;font-size:1.5em;font-weight:700;line-height:1.4}.mnr-chapter-end[data-v-2566e7a6]{max-width:var(--mnr-max-width,800px);text-align:center;margin:0 auto;padding:40px 20px}.mnr-chapter-end-text[data-v-2566e7a6]{color:var(--mnr-text,#666);opacity:.7;margin-bottom:16px}.mnr-chapter-nav[data-v-2566e7a6]{flex-wrap:wrap;justify-content:center;gap:24px;display:flex}.mnr-chapter-link[data-v-2566e7a6]{color:var(--mnr-link,#1976d2);border:1px solid var(--mnr-border,#e0e0e0);border-radius:8px;padding:12px 24px;text-decoration:none;transition:all .2s}.mnr-chapter-link[data-v-2566e7a6]:hover{background:var(--mnr-border,#f0f0f0)}.mnr-sentinel[data-v-2566e7a6]{visibility:hidden;width:100%;height:1px}.mnr-loading-prev[data-v-2566e7a6],.mnr-loading-next[data-v-2566e7a6],.mnr-section-progress[data-v-2566e7a6]{color:var(--mnr-text,#666);justify-content:center;align-items:center;gap:12px;padding:24px;display:flex}@media (width>=768px){.mnr-reader-content[data-v-2566e7a6]{padding:var(--mnr-padding,30px)}}@media (width>=1024px){.mnr-reader-content[data-v-2566e7a6]{padding:var(--mnr-padding,40px)}}@media (prefers-reduced-motion:reduce){.mnr-chapter-link[data-v-2566e7a6]{transition:none}}\n/*$vite$:1*/", {});
+		})(".mnr-reader-entry[data-v-af68b126]{right:max(20px, env(safe-area-inset-right));bottom:max(20px, env(safe-area-inset-bottom));z-index:2147483646;background:var(--mnr-link,#1976d2);min-width:48px;height:48px;color:var(--mnr-on-link,#fff);cursor:pointer;opacity:.6;-webkit-tap-highlight-color:transparent;border:0;border-radius:24px;justify-content:center;align-items:center;gap:8px;margin:0;padding:0 16px;font-size:14px;font-weight:600;line-height:1;transition:opacity .18s,transform .18s,filter .18s,box-shadow .18s;animation:.2s ease-out mnr-entry-in-af68b126;display:flex;position:fixed;box-shadow:0 6px 18px #0003}.mnr-reader-entry svg[data-v-af68b126]{fill:none;stroke:currentColor;stroke-width:1.8px;stroke-linecap:round;stroke-linejoin:round;flex:0 0 24px;width:24px;height:24px}.mnr-reader-entry span[data-v-af68b126]{white-space:nowrap}.mnr-reader-entry[data-v-af68b126]:active{transform:scale(.96)}.mnr-reader-entry[data-v-af68b126]:focus-visible{opacity:1;outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 48%, #fff);outline-offset:3px}@media (hover:hover){.mnr-reader-entry[data-v-af68b126]:hover{opacity:1;filter:brightness(.94);transform:translateY(-2px);box-shadow:0 8px 22px #0000003d}}@media (width<=480px){.mnr-reader-entry[data-v-af68b126]{width:48px;padding:0}.mnr-reader-entry span[data-v-af68b126]{display:none}}@keyframes mnr-entry-in-af68b126{0%{opacity:0;transform:translateY(8px)scale(.96)}}@media (prefers-reduced-motion:reduce){.mnr-reader-entry[data-v-af68b126]{transition:none;animation:none}}.mnr-progress[data-v-fb6f172c]{z-index:1000;height:3px;transition:opacity .3s;position:fixed;top:0;left:0;right:0}.mnr-progress.hidden[data-v-fb6f172c]{opacity:0}.mnr-progress-bar[data-v-fb6f172c]{background:var(--mnr-link,#1976d2);height:100%;transition:width .1s ease-out}.mnr-progress-text[data-v-fb6f172c]{color:#fff;background:#000000b3;border-radius:4px;padding:4px 8px;font-size:12px;position:absolute;top:8px;right:8px}@media (prefers-reduced-motion:reduce){.mnr-progress[data-v-fb6f172c],.mnr-progress-bar[data-v-fb6f172c]{transition:none}}.mnr-floating-toolbar[data-v-1dc60197]{top:max(12px, env(safe-area-inset-top));left:max(12px, env(safe-area-inset-left));right:max(12px, env(safe-area-inset-right));pointer-events:none;z-index:100;justify-content:space-between;display:flex;position:fixed}.mnr-fab[data-v-1dc60197]{pointer-events:auto;background:var(--mnr-bg,#fff);width:44px;height:44px;color:var(--mnr-text,#333);border:1px solid var(--mnr-border,#e5e5e5);cursor:pointer;-webkit-tap-highlight-color:transparent;border-radius:50%;justify-content:center;align-items:center;padding:0;font-size:18px;transition:all .2s cubic-bezier(.25,.8,.25,1);display:flex;position:relative;box-shadow:0 4px 12px #00000026}.mnr-fab[data-v-1dc60197]:hover{background:var(--mnr-border,#f0f0f0);transform:translateY(-2px);box-shadow:0 6px 16px #0003}.mnr-fab[data-v-1dc60197]:active{transform:scale(.95)}.mnr-fab[data-v-1dc60197]:disabled{opacity:.6;cursor:not-allowed;box-shadow:none;transform:none}.mnr-icon[data-v-1dc60197]{fill:none;stroke:currentColor;stroke-width:1.8px;stroke-linecap:round;stroke-linejoin:round;flex:none;width:22px;height:22px;display:block}.mnr-fab[data-v-1dc60197]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}.mnr-fade-slide-enter-active[data-v-1dc60197],.mnr-fade-slide-leave-active[data-v-1dc60197]{transition:opacity .3s,transform .3s}.mnr-fade-slide-enter-from[data-v-1dc60197],.mnr-fade-slide-leave-to[data-v-1dc60197]{opacity:0;transform:translateY(-20px)}@media (prefers-reduced-motion:reduce){.mnr-fab[data-v-1dc60197],.mnr-fade-slide-enter-active[data-v-1dc60197],.mnr-fade-slide-leave-active[data-v-1dc60197]{transition:none}}.mnr-spinner[data-v-c925c262]{border-radius:50%;animation:.8s cubic-bezier(.4,0,.2,1) infinite mnr-spin-c925c262}.mnr-spinner.small[data-v-c925c262]{border:2px solid var(--mnr-border,#e0e0e0);border-top-color:var(--mnr-link,#1976d2);width:24px;height:24px;animation-duration:1s;animation-timing-function:linear}.mnr-spinner.medium[data-v-c925c262]{border:4px solid var(--mnr-border,#e0e0e0);border-top-color:var(--mnr-link,#1976d2);width:48px;height:48px}.mnr-spinner.large[data-v-c925c262]{border:4px solid var(--mnr-border,#e0e0e0);border-top-color:var(--mnr-link,#1976d2);width:64px;height:64px}@keyframes mnr-spin-c925c262{to{transform:rotate(360deg)}}.mnr-toast[data-v-baea3e69]{bottom:max(32px, env(safe-area-inset-bottom));-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);color:#fff;cursor:pointer;z-index:1001;white-space:nowrap;text-overflow:ellipsis;background:#1e1e1ee6;border-radius:50px;align-items:center;gap:8px;max-width:90vw;padding:14px 28px;font-size:15px;font-weight:500;display:flex;position:fixed;left:50%;overflow:hidden;transform:translate(-50%);box-shadow:0 8px 24px #0003}.mnr-toast--error[data-v-baea3e69]{background:#d32f2ff2}.mnr-toast-enter-active[data-v-baea3e69],.mnr-toast-leave-active[data-v-baea3e69]{transition:all .4s cubic-bezier(.175,.885,.32,1.275)}.mnr-toast-enter-from[data-v-baea3e69],.mnr-toast-leave-to[data-v-baea3e69]{opacity:0;transform:translate(-50%)translateY(40px)scale(.9)}@media (prefers-reduced-motion:reduce){.mnr-toast-enter-active[data-v-baea3e69],.mnr-toast-leave-active[data-v-baea3e69]{transition:none}}.mnr-drawer[data-v-d67a6804]{z-index:1001;width:min(88%,340px);padding-left:env(safe-area-inset-left);background:var(--mnr-bg,#fff);color:var(--mnr-text,#333);flex-direction:column;transition:transform .24s;display:flex;position:fixed;inset:0 auto 0 0;transform:translate(-105%);box-shadow:4px 0 20px #00000026}.mnr-drawer.open[data-v-d67a6804]{transform:translate(0)}.mnr-drawer-overlay[data-v-d67a6804]{z-index:1000;background:#00000080;position:fixed;inset:0}.mnr-drawer-header[data-v-d67a6804]{padding:max(16px, env(safe-area-inset-top)) 16px 14px;border-bottom:1px solid var(--mnr-border,#e5e5e5);flex-shrink:0;justify-content:space-between;align-items:center;gap:12px;display:flex}.mnr-drawer-heading[data-v-d67a6804]{min-width:0}.mnr-drawer-title[data-v-d67a6804]{overflow-wrap:anywhere;-webkit-line-clamp:2;-webkit-box-orient:vertical;margin:0;font-size:16px;font-weight:600;line-height:1.5;display:-webkit-box;overflow:hidden}.mnr-drawer-position[data-v-d67a6804]{color:var(--mnr-text,#666);opacity:.72;margin-top:3px;font-size:12px;display:block}.mnr-drawer-close[data-v-d67a6804]{width:36px;height:36px;color:inherit;cursor:pointer;background:0 0;border:0;border-radius:50%;flex:0 0 36px;place-items:center;padding:0;display:grid}.mnr-drawer-close svg[data-v-d67a6804]{fill:none;stroke:currentColor;stroke-width:2px;stroke-linecap:round;width:20px;height:20px}.mnr-drawer-search[data-v-d67a6804]{flex-shrink:0;padding:10px 12px 6px}.mnr-drawer-search input[data-v-d67a6804]{border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);width:100%;color:var(--mnr-text,#333);border-radius:8px;padding:9px 12px;font-size:14px}.mnr-offline-section[data-v-d67a6804]{border-bottom:1px solid var(--mnr-border,#e5e5e5);flex-shrink:0;padding:10px 12px 12px}.mnr-offline-main[data-v-d67a6804]{justify-content:space-between;align-items:center;gap:12px;display:flex}.mnr-offline-copy[data-v-d67a6804]{min-width:0}.mnr-offline-copy strong[data-v-d67a6804],.mnr-offline-copy span[data-v-d67a6804]{display:block}.mnr-offline-copy strong[data-v-d67a6804]{font-size:13px;font-weight:600}.mnr-offline-copy span[data-v-d67a6804]{color:var(--mnr-text,#666);opacity:.7;margin-top:2px;font-size:12px}.mnr-offline-action[data-v-d67a6804]{border:1px solid var(--mnr-border,#ddd);min-height:36px;color:var(--mnr-link,#1976d2);cursor:pointer;background:0 0;border-radius:8px;padding:6px 11px;font-size:12px;font-weight:600}.mnr-offline-action[data-v-d67a6804]:disabled{cursor:wait;opacity:.6}.mnr-offline-action.primary[data-v-d67a6804]{border-color:var(--mnr-link,#1976d2);background:var(--mnr-link,#1976d2);color:var(--mnr-on-link,#fff);flex:none}.mnr-offline-action.danger[data-v-d67a6804]{color:var(--mnr-text,#555)}.mnr-offline-secondary[data-v-d67a6804]{flex-wrap:wrap;gap:6px;margin-top:8px;display:flex}.mnr-drawer-state[data-v-d67a6804]{color:color-mix(in srgb, var(--mnr-text,#666) 78%, transparent);text-align:center;flex:1;justify-content:center;align-items:center;gap:10px;padding:40px 20px;display:flex}.mnr-drawer-content[data-v-d67a6804]{overscroll-behavior:contain;-webkit-overflow-scrolling:touch;flex:1;position:relative;overflow-y:auto}.mnr-cache-progress-track[data-v-d67a6804]{background:var(--mnr-border,#e0e0e0);border-radius:2px;height:4px;margin-top:10px;overflow:hidden}.mnr-cache-progress-fill[data-v-d67a6804]{background:var(--mnr-link,#1976d2);height:100%;transition:width .2s}.mnr-chapter-list[data-v-d67a6804]{margin:0;padding-left:0;padding-right:0;list-style:none}.mnr-chapter-list li[data-v-d67a6804]{height:44px}.mnr-chapter-button[data-v-d67a6804]{width:100%;height:44px;color:inherit;text-align:left;cursor:pointer;background:0 0;border:0;border-left:3px solid #0000;align-items:center;gap:6px;padding:0 14px;font-size:14px;display:flex;overflow:hidden}.mnr-chapter-title-text[data-v-d67a6804]{text-overflow:ellipsis;white-space:nowrap;overflow:hidden}.mnr-chapter-button.active[data-v-d67a6804]{border-left-color:var(--mnr-link,#1976d2);background:color-mix(in srgb, var(--mnr-link,#1976d2) 10%, transparent);color:var(--mnr-link,#1976d2);font-weight:600}.mnr-chapter-mark[data-v-d67a6804]{flex:none;width:14px;height:14px}.mnr-cache-mark[data-v-d67a6804]{color:#388e3c}.mnr-lock-mark[data-v-d67a6804]{opacity:.6}.mnr-chapter-mark svg[data-v-d67a6804]{fill:none;stroke:currentColor;stroke-width:2px;stroke-linecap:round;stroke-linejoin:round;width:100%;height:100%;display:block}@media (hover:hover){.mnr-drawer-close[data-v-d67a6804]:hover,.mnr-chapter-button[data-v-d67a6804]:not(.active):hover,.mnr-offline-action[data-v-d67a6804]:enabled:hover{background:var(--mnr-border,#f0f0f0)}.mnr-offline-action.primary[data-v-d67a6804]:enabled:hover{background:var(--mnr-link,#1976d2);filter:brightness(.94)}}.mnr-drawer-close[data-v-d67a6804]:focus-visible,.mnr-drawer-search input[data-v-d67a6804]:focus-visible,.mnr-offline-action[data-v-d67a6804]:focus-visible,.mnr-chapter-button[data-v-d67a6804]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:-3px}.mnr-visually-hidden[data-v-d67a6804]{clip:rect(0 0 0 0);white-space:nowrap;clip-path:inset(50%);width:1px;height:1px;position:absolute;overflow:hidden}.mnr-fade-enter-active[data-v-d67a6804],.mnr-fade-leave-active[data-v-d67a6804]{transition:opacity .24s}.mnr-fade-enter-from[data-v-d67a6804],.mnr-fade-leave-to[data-v-d67a6804]{opacity:0}@media (prefers-reduced-motion:reduce){.mnr-drawer[data-v-d67a6804],.mnr-fade-enter-active[data-v-d67a6804],.mnr-fade-leave-active[data-v-d67a6804],.mnr-cache-progress-fill[data-v-d67a6804]{transition:none}}.mnr-reading-control[data-v-e6745e69]{margin-top:18px}.mnr-reading-control-header[data-v-e6745e69]{justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:4px;display:flex}.mnr-reading-control-header label[data-v-e6745e69]{color:var(--mnr-text,#333);font-size:14px;font-weight:600}.mnr-reading-control-header output[data-v-e6745e69]{color:var(--mnr-text,#666);opacity:.78;font-size:13px}.mnr-reading-slider-row[data-v-e6745e69]{align-items:center;gap:10px;display:flex}.mnr-reading-slider-row span[data-v-e6745e69]{color:var(--mnr-text,#666);text-align:center;flex:0 0 24px;font-size:13px}.mnr-reading-slider-row input[data-v-e6745e69]{appearance:none;cursor:pointer;touch-action:pan-y;background:0 0;flex:1;min-width:0;height:32px;margin:0}.mnr-reading-slider-row input[data-v-e6745e69]::-webkit-slider-runnable-track{background:var(--mnr-border,#e0e0e0);border-radius:2px;height:4px}.mnr-reading-slider-row input[data-v-e6745e69]::-webkit-slider-thumb{appearance:none;background:var(--mnr-link,#1976d2);border:0;border-radius:50%;width:24px;height:24px;margin-top:-10px}.mnr-reading-slider-row input[data-v-e6745e69]::-moz-range-track{background:var(--mnr-border,#e0e0e0);border-radius:2px;height:4px}.mnr-reading-slider-row input[data-v-e6745e69]::-moz-range-thumb{background:var(--mnr-link,#1976d2);border:0;border-radius:50%;width:24px;height:24px}.mnr-reading-slider-row input[data-v-e6745e69]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}.mnr-settings-overlay[data-v-7e7dbfc6]{z-index:1000;background:#0000001f;justify-content:flex-end;display:flex;position:fixed;inset:0}.mnr-settings-panel[data-v-7e7dbfc6]{width:min(100%,380px);height:100%;padding-right:env(safe-area-inset-right);background:var(--mnr-bg,#fff);color:var(--mnr-text,#333);border-left:1px solid var(--mnr-border,#e0e0e0);flex-direction:column;display:flex;box-shadow:-4px 0 20px #00000026}.mnr-settings-header[data-v-7e7dbfc6]{padding:max(16px, env(safe-area-inset-top)) 16px 16px;border-bottom:1px solid var(--mnr-border,#e0e0e0);flex-shrink:0;justify-content:space-between;align-items:center;display:flex}.mnr-settings-header h3[data-v-7e7dbfc6],.mnr-settings-section h4[data-v-7e7dbfc6],.mnr-field-label[data-v-7e7dbfc6]{color:var(--mnr-text,#333);margin:0}.mnr-settings-header h3[data-v-7e7dbfc6]{border-radius:4px;font-size:18px}.mnr-close-btn[data-v-7e7dbfc6]{width:36px;height:36px;color:inherit;cursor:pointer;background:0 0;border:0;border-radius:50%;place-items:center;padding:0;display:grid}.mnr-close-btn svg[data-v-7e7dbfc6]{fill:none;stroke:currentColor;stroke-width:2px;stroke-linecap:round;width:20px;height:20px}.mnr-settings-content[data-v-7e7dbfc6]{overscroll-behavior:contain;flex:1;padding:18px 16px 24px;overflow:auto}.mnr-settings-section h4[data-v-7e7dbfc6],.mnr-field-label[data-v-7e7dbfc6],.mnr-settings-fieldset legend[data-v-7e7dbfc6]{margin-bottom:10px;font-size:14px;font-weight:600;display:block}.mnr-theme-grid[data-v-7e7dbfc6]{grid-template-columns:repeat(3,1fr);gap:8px;display:grid}.mnr-theme-btn[data-v-7e7dbfc6]{cursor:pointer;border:2px solid #0000;border-radius:8px;min-width:0;min-height:42px;padding:8px 4px;font-size:12px}.mnr-reading-preview[data-v-7e7dbfc6]{border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);color:var(--mnr-text,#333);border-radius:8px;margin-top:16px;padding:12px 14px;display:none}.mnr-reading-preview span[data-v-7e7dbfc6]{opacity:.65;margin-bottom:4px;font-size:12px;display:block}.mnr-reading-preview p[data-v-7e7dbfc6]{font-family:var(--mnr-font-family,system-ui, sans-serif);font-size:var(--mnr-font-size,18px);line-height:var(--mnr-line-height,1.8);letter-spacing:var(--mnr-letter-spacing,0);text-indent:var(--mnr-paragraph-indent,2em);margin:0}.mnr-field-label[data-v-7e7dbfc6]{margin-top:18px}.mnr-select[data-v-7e7dbfc6]{border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);width:100%;min-height:42px;color:var(--mnr-text,#333);border-radius:8px;padding:9px 12px;font-size:14px}.mnr-settings-fieldset[data-v-7e7dbfc6]{border:0;min-width:0;margin:18px 0 0;padding:0}.mnr-segmented-control[data-v-7e7dbfc6]{border:1px solid var(--mnr-border,#ddd);border-radius:8px;display:flex;overflow:hidden}.mnr-segment[data-v-7e7dbfc6]{border:0;border-right:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);min-height:42px;color:var(--mnr-text,#666);cursor:pointer;flex:1;padding:9px 12px;font-size:14px}.mnr-segment[data-v-7e7dbfc6]:last-child{border-right:0}.mnr-segment.active[data-v-7e7dbfc6]{background:var(--mnr-link,#1976d2);color:var(--mnr-on-link,#fff)}.mnr-secondary-action[data-v-7e7dbfc6]{border:1px solid var(--mnr-border,#ddd);width:100%;min-height:42px;color:var(--mnr-text,#333);cursor:pointer;background:0 0;border-radius:8px;margin-top:16px;padding:9px 12px;font-size:14px}.mnr-settings-group[data-v-7e7dbfc6]{border-top:1px solid var(--mnr-border,#ddd);margin-top:18px}.mnr-settings-group summary[data-v-7e7dbfc6]{min-height:48px;color:var(--mnr-text,#333);cursor:pointer;padding:14px 0;font-size:14px;font-weight:600}.mnr-settings-group-content[data-v-7e7dbfc6]{padding-bottom:4px}.mnr-settings-group-content[data-v-7e7dbfc6]>:first-child{margin-top:0}.mnr-switch-row[data-v-7e7dbfc6]{min-height:44px;color:var(--mnr-text,#333);cursor:pointer;justify-content:space-between;align-items:center;gap:16px;display:flex}.mnr-switch-row input[data-v-7e7dbfc6]{width:22px;height:22px;accent-color:var(--mnr-link,#1976d2);flex:none}.mnr-custom-css[data-v-7e7dbfc6]{box-sizing:border-box;resize:vertical;border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);width:100%;min-height:110px;color:var(--mnr-text,#333);border-radius:8px;padding:10px 12px;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}.mnr-cleanup-fields[data-v-7e7dbfc6]{gap:10px;margin-top:8px;display:grid}.mnr-cleanup-fields .mnr-field-label[data-v-7e7dbfc6],.mnr-cleanup-fields .mnr-field-help[data-v-7e7dbfc6],.mnr-cleanup-fields .mnr-field-error[data-v-7e7dbfc6]{margin:0}.mnr-cleanup-editor-label[data-v-7e7dbfc6],.mnr-cleanup-guide[data-v-7e7dbfc6]{font-size:12px;line-height:1.6}.mnr-cleanup-guide[data-v-7e7dbfc6]{color:var(--mnr-text,#333)}.mnr-cleanup-guide summary[data-v-7e7dbfc6]{cursor:pointer;opacity:.72}.mnr-cleanup-guide p[data-v-7e7dbfc6]{margin:8px 0 0}.mnr-cleanup-guide code[data-v-7e7dbfc6]{overflow-wrap:anywhere}.mnr-cleanup-add[data-v-7e7dbfc6]{grid-template-columns:minmax(0,1fr) auto;gap:8px;display:grid}.mnr-cleanup-input[data-v-7e7dbfc6]{box-sizing:border-box;border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);min-width:0;min-height:42px;color:var(--mnr-text,#333);border-radius:8px;padding:9px 12px;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}.mnr-cleanup-add-button[data-v-7e7dbfc6]{white-space:nowrap;width:auto;margin-top:0}.mnr-cleanup-add-button[data-v-7e7dbfc6]:disabled{cursor:not-allowed;opacity:.55}.mnr-cleanup-site[data-v-7e7dbfc6]{overflow-wrap:anywhere}.mnr-field-help[data-v-7e7dbfc6],.mnr-field-error[data-v-7e7dbfc6]{margin:-4px 0 8px;font-size:12px;line-height:1.5}.mnr-field-help[data-v-7e7dbfc6]{opacity:.72}.mnr-protection-help[data-v-7e7dbfc6]{margin:8px 0 0}.mnr-field-error[data-v-7e7dbfc6]{color:var(--mnr-danger,#b3261e);margin-top:6px}.mnr-settings-footer[data-v-7e7dbfc6]{padding:10px 16px max(12px, env(safe-area-inset-bottom));border-top:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);flex-shrink:0}.mnr-exit-btn[data-v-7e7dbfc6]{border:1px solid var(--mnr-danger,#b3261e);width:100%;min-height:42px;color:var(--mnr-danger,#b3261e);cursor:pointer;background:0 0;border-radius:8px;padding:9px 12px;font-size:14px}@media (hover:hover){.mnr-close-btn[data-v-7e7dbfc6]:hover,.mnr-secondary-action[data-v-7e7dbfc6]:enabled:hover,.mnr-segment[data-v-7e7dbfc6]:not(.active):hover,.mnr-exit-btn[data-v-7e7dbfc6]:hover{background:var(--mnr-border,#f0f0f0)}}.mnr-settings-header h3[data-v-7e7dbfc6]:focus-visible,.mnr-close-btn[data-v-7e7dbfc6]:focus-visible,.mnr-theme-btn[data-v-7e7dbfc6]:focus-visible,.mnr-select[data-v-7e7dbfc6]:focus-visible,.mnr-segment[data-v-7e7dbfc6]:focus-visible,.mnr-secondary-action[data-v-7e7dbfc6]:focus-visible,.mnr-settings-group summary[data-v-7e7dbfc6]:focus-visible,.mnr-cleanup-guide summary[data-v-7e7dbfc6]:focus-visible,.mnr-switch-row input[data-v-7e7dbfc6]:focus-visible,.mnr-cleanup-input[data-v-7e7dbfc6]:focus-visible,.mnr-custom-css[data-v-7e7dbfc6]:focus-visible,.mnr-exit-btn[data-v-7e7dbfc6]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}.mnr-slide-enter-active[data-v-7e7dbfc6],.mnr-slide-leave-active[data-v-7e7dbfc6],.mnr-settings-panel[data-v-7e7dbfc6]{transition:opacity .22s,transform .22s}.mnr-slide-enter-from[data-v-7e7dbfc6],.mnr-slide-leave-to[data-v-7e7dbfc6]{opacity:0}.mnr-slide-enter-from .mnr-settings-panel[data-v-7e7dbfc6],.mnr-slide-leave-to .mnr-settings-panel[data-v-7e7dbfc6]{transform:translate(100%)}@media (width<=600px){.mnr-settings-panel[data-v-7e7dbfc6]{width:100%}.mnr-reading-preview[data-v-7e7dbfc6]{display:block}.mnr-desktop-width[data-v-7e7dbfc6]{display:none}}@media (prefers-reduced-motion:reduce){.mnr-slide-enter-active[data-v-7e7dbfc6],.mnr-slide-leave-active[data-v-7e7dbfc6],.mnr-settings-panel[data-v-7e7dbfc6]{transition:none}}.mnr-reader[data-v-0f05a50a]{z-index:2147483647;background:var(--mnr-bg,#fff);color:var(--mnr-text,#1a1a1a);overscroll-behavior:none;flex-direction:column;display:flex;position:fixed;inset:0;overflow:hidden}.mnr-reader-main[data-v-0f05a50a]{padding-top:68px;padding-bottom:max(40px, env(safe-area-inset-bottom));overscroll-behavior:none;-webkit-overflow-scrolling:touch;touch-action:pan-y pinch-zoom;flex:1;overflow:auto}.mnr-boundary-gesture-hint[data-v-0f05a50a]{z-index:4;background:color-mix(in srgb, var(--mnr-text,#1a1a1a) 86%, transparent);max-width:calc(100vw - 32px);color:var(--mnr-bg,#fff);white-space:nowrap;pointer-events:none;border-radius:999px;padding:8px 14px;font-size:14px;line-height:1.4;position:fixed;left:50%;transform:translate(-50%)}.mnr-boundary-gesture-hint.is-prev[data-v-0f05a50a]{top:max(16px, env(safe-area-inset-top))}.mnr-boundary-gesture-hint.is-next[data-v-0f05a50a]{bottom:max(16px, env(safe-area-inset-bottom))}.mnr-reader-content[data-v-0f05a50a]{max-width:var(--mnr-max-width,800px);padding:var(--mnr-padding,20px);font-family:var(--mnr-font-family,\"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif);font-size:var(--mnr-font-size,18px);line-height:var(--mnr-line-height,1.8);letter-spacing:var(--mnr-letter-spacing,0em);margin:0 auto}.mnr-reader-content[data-v-0f05a50a] p{text-indent:var(--mnr-paragraph-indent,2em);margin:0 0 1em}.mnr-reader-content[data-v-0f05a50a] img{max-width:100%;height:auto;margin:1em auto;display:block}.mnr-reader-content[data-v-0f05a50a] a{color:var(--mnr-link,#1976d2)}.mnr-reader-main[data-v-0f05a50a]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}.mnr-chapter-title[data-v-0f05a50a]{color:var(--mnr-text,#1a1a1a);text-align:center;margin:0 0 1em;font-size:1.5em;font-weight:700;line-height:1.4}.mnr-chapter-end[data-v-0f05a50a]{max-width:var(--mnr-max-width,800px);text-align:center;margin:0 auto;padding:40px 20px}.mnr-chapter-end-text[data-v-0f05a50a]{color:var(--mnr-text,#666);opacity:.7;margin-bottom:16px}.mnr-chapter-nav[data-v-0f05a50a]{flex-wrap:wrap;justify-content:center;gap:24px;display:flex}.mnr-chapter-link[data-v-0f05a50a]{color:var(--mnr-link,#1976d2);border:1px solid var(--mnr-border,#e0e0e0);border-radius:8px;padding:12px 24px;text-decoration:none;transition:all .2s}.mnr-chapter-link[data-v-0f05a50a]:hover{background:var(--mnr-border,#f0f0f0)}.mnr-sentinel[data-v-0f05a50a]{visibility:hidden;width:100%;height:1px}.mnr-loading-prev[data-v-0f05a50a],.mnr-loading-next[data-v-0f05a50a],.mnr-section-progress[data-v-0f05a50a]{color:var(--mnr-text,#666);justify-content:center;align-items:center;gap:12px;padding:24px;display:flex}@media (width>=768px){.mnr-reader-content[data-v-0f05a50a]{padding:var(--mnr-padding,30px)}}@media (width>=1024px){.mnr-reader-content[data-v-0f05a50a]{padding:var(--mnr-padding,40px)}}@media (prefers-reduced-motion:reduce){.mnr-chapter-link[data-v-0f05a50a]{transition:none}}\n/*$vite$:1*/", {});
 	})();
 })();
