@@ -21930,10 +21930,10 @@ ul, ol {
 		}
 	}), [["__scopeId", "data-v-fb6f172c"]]);
 	var vChapterContent = {
-		mounted(element, { value }) {
+		beforeMount(element, { value }) {
 			element.innerHTML = value;
 		},
-		updated(element, { value, oldValue }) {
+		beforeUpdate(element, { value, oldValue }) {
 			if (value === oldValue) return;
 			if (oldValue && value.startsWith(`${oldValue}<p></p>`)) element.insertAdjacentHTML("beforeend", value.slice(oldValue.length));
 			else element.innerHTML = value;

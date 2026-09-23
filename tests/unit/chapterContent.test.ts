@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { createApp, h, nextTick, ref, withDirectives } from 'vue';
+import { createApp, h, nextTick, ref, watch, withDirectives } from 'vue';
 import { joinHtml } from '@/core/utils';
 import { vChapterContent } from '@/ui/components/reader/chapterContent';
 
@@ -16,6 +16,39 @@ function mount(html: string) {
   return { content, element: host.firstElementChild! };
 }
 describe('chapter content rendering', () => {
+  it('publishes chapter HTML before post-flush layout observers run', async () => {
+    const chapters = ref(['<p>第一章</p>']);
+    const host = document.createElement('div');
+    const observed: string[][] = [];
+    const app = createApp({
+      setup() {
+        // The reader measures appended chapters in a post-flush watcher and caches their height.
+        watch(
+          () => [...chapters.value],
+          () => observed.push(Array.from(host.querySelectorAll('article'), el => el.innerHTML)),
+          { flush: 'post' }
+        );
+        return () =>
+          h(
+            'main',
+            chapters.value.map((html, id) =>
+              withDirectives(h('article', { key: id }), [[vChapterContent, html]])
+            )
+          );
+      },
+    });
+    apps.push(app);
+    app.mount(host);
+
+    chapters.value.push('<p>第二章正文</p>');
+    await nextTick();
+    expect(observed.at(-1)).toEqual(chapters.value);
+
+    chapters.value[1] = '<p>第二章完整正文</p>';
+    await nextTick();
+    expect(observed.at(-1)).toEqual(chapters.value);
+  });
+
   it('retains text and image nodes across page appends with the same final HTML', async () => {
     const first = '<p>第一页</p><img src="/illustration.png">';
     const { content, element } = mount(first);

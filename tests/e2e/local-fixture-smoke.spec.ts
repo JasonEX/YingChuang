@@ -1446,6 +1446,73 @@ test('auto-starts TTKS and preloads through a short author-note chapter', async 
   expect(thirdRequests).toBe(1);
 });
 
+for (const nextStatus of [200, 403]) {
+  test(`sto9 preloads one full chapter and handles the next response (${nextStatus})`, async ({
+    context,
+    page,
+  }) => {
+    await page.setViewportSize({ width: 2510, height: 1307 });
+    const firstId = 3881397;
+    const chapterUrl = (id: number) => `https://sto9.com/txt/7974/${id}.html`;
+    const requested: number[] = [];
+    await context.route('https://sto9.com/**', route => {
+      const id = Number(new URL(route.request().url()).pathname.match(/\/(\d+)\.html$/)?.[1]);
+      requested.push(id);
+      if (id > firstId + 1 && nextStatus === 403) {
+        return route.fulfill({
+          status: 403,
+          headers: { 'cf-mitigated': 'challenge' },
+          contentType: 'text/html',
+          body: '<title>Just a moment...</title><form id="challenge-form">Verify you are human</form>',
+        });
+      }
+      return route.fulfill({
+        contentType: 'text/html; charset=utf-8',
+        body: `<!doctype html><html><head><title>第${id - firstId + 21}章 测试正文</title></head><body>
+          <div class="bread"><a href="/book/7974/index.html">测试小说</a></div>
+          <div class="txtnav"><h1>第${id - firstId + 21}章 测试正文</h1>
+          ${Array.from({ length: 70 }, (_, i) => `&emsp;&emsp;第${i + 1}段，城楼上的守军望向远处的山林，商议着明天沿河行军的路线。<br><br>`).join('')}
+          </div><div class="page1">
+          <a href="${chapterUrl(id - 1)}">上一章</a>
+          <a href="/book/7974/index.html">目錄</a>
+          <a href="${chapterUrl(id + 1)}">下一章</a>
+          </div></body></html>`,
+      });
+    });
+    await addYingChuangUserscript(context);
+    await page.goto(chapterUrl(firstId));
+    const root = page.locator('#mnr-reader-root');
+    await expect(root.locator('article')).toHaveCount(2);
+    expect(
+      await root
+        .locator('article')
+        .last()
+        .evaluate(el => el.clientHeight)
+    ).toBeGreaterThan(1307);
+    // A complete buffered chapter must stop the 300ms short-chapter continuation.
+    await page.waitForTimeout(1500);
+    await expect(root.locator('article')).toHaveCount(2);
+    expect(requested.filter(id => id > firstId)).toEqual([firstId + 1]);
+    await expect(page).toHaveURL(chapterUrl(firstId));
+
+    await root.locator('.mnr-reader-main').focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(page).toHaveURL(chapterUrl(firstId + 1));
+    await expect
+      .poll(() => requested.filter(id => id > firstId))
+      .toEqual([firstId + 1, firstId + 2]);
+    await page.waitForTimeout(1500);
+    await expect(root.locator('article')).toHaveCount(nextStatus === 200 ? 3 : 2);
+    expect(requested.filter(id => id > firstId)).toEqual([firstId + 1, firstId + 2]);
+    if (nextStatus === 403) {
+      const diagnostic = await copyReaderDiagnostic(page);
+      expect(diagnostic.reader.view.hasNext).toBe(true);
+      expect(diagnostic.reader.navigation.navFailures.count).toBe(1);
+      await expect(root.locator('.mnr-reader-main')).not.toContainText('Verify you are human');
+    }
+  });
+}
+
 test('offers medium-confidence chapters through a quiet manual entry, never a prompt', async ({
   context,
   page,
