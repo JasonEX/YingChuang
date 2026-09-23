@@ -20,13 +20,13 @@ import {
   loadFetchDocument,
   parseCandidateDocument,
 } from './chapterFetch';
+import { CLOUDFLARE_TOAST, MAX_NAV_FAILURES, MAX_SESSION_CACHE, VIP_BLOCK_TOAST } from './types';
 import { getParser, type ParsedChapter } from '@/core/parser';
 import {
   insertCachedChapter,
   insertParsedChapter,
   rebuildChaptersFromCache,
 } from './chapterListMutations';
-import { MAX_NAV_FAILURES, MAX_SESSION_CACHE, VIP_BLOCK_TOAST } from './types';
 import { normalizeUrl, normalizeUrlForBlock, normalizeUrlForFetch } from './utils';
 import { prepareChapterLoad, validateTargetChapterUrl } from './chapterLoadGuards';
 import { detectTocPage } from './detection';
@@ -329,7 +329,7 @@ export function createNavigation(ctx: NavigationContext) {
 
     const blockReason = getChapterDocumentBlockReason(result.doc);
     if (blockReason === 'cloudflare') {
-      ctx.showToast('Cloudflare 验证页面，请完成验证后重试', 'info', 4000);
+      ctx.showToast(CLOUDFLARE_TOAST, 'info', 4000);
       return;
     }
     if (blockReason === 'vip') {

@@ -15,6 +15,7 @@ function completeEvent(chapter: unknown, rule?: unknown): LaunchEvent {
 let configStore: {
   load: () => Promise<void>;
   flushSave: () => Promise<void>;
+  setCustomCSS: (css: string) => void;
   updateProtection: (settings: { mode: 'standard' | 'aggressive' }) => void;
   protection: {
     blockRedirects: boolean;
@@ -121,16 +122,6 @@ vi.mock('@/ui/components/reader', async () => {
 vi.mock('@/ui/components/entry', async () => {
   const { defineComponent, h } = await import('vue');
   return {
-    ReaderEntryPrompt: defineComponent({
-      name: 'ReaderEntryPromptStub',
-      emits: ['respond'],
-      setup(_props, { emit }) {
-        Promise.resolve().then(() => {
-          emit('respond', { accepted: true, rememberForSite: false });
-        });
-        return () => null;
-      },
-    }),
     ReaderEntryButton: defineComponent({
       name: 'ReaderEntryButtonStub',
       emits: ['enter'],
@@ -175,6 +166,7 @@ describe('bootstrap', () => {
     configStore = {
       load: vi.fn(async () => {}),
       flushSave: vi.fn(async () => {}),
+      setCustomCSS: vi.fn(),
       updateProtection: vi.fn(settings => {
         configStore.protection = { ...configStore.protection, ...settings };
       }),
@@ -307,7 +299,6 @@ describe('bootstrap', () => {
 
     const manager = {
       check: vi.fn(() => ({ shouldEnable: true })),
-      setPromptCallback: vi.fn(),
       setLaunchCallback: vi.fn(),
       execute: vi.fn(async () => {}),
       manualEnable: vi.fn(async () => {}),
@@ -485,7 +476,6 @@ describe('bootstrap', () => {
 
     const manager = {
       check: vi.fn(() => ({ shouldEnable: true, method: 'builtin-rule' })),
-      setPromptCallback: vi.fn(),
       setLaunchCallback: vi.fn(),
       execute: vi.fn(async () => {}),
       manualEnable: vi.fn(async () => {}),
@@ -503,7 +493,7 @@ describe('bootstrap', () => {
     expect(GM_saveTab).not.toHaveBeenCalled();
   });
 
-  it('runs auto-enable prompt and mounts reader UI when accepted', async () => {
+  it('mounts reader UI when auto-enable launches', async () => {
     vi.useFakeTimers();
 
     dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
@@ -518,24 +508,15 @@ describe('bootstrap', () => {
     const decision = { shouldEnable: true, method: 'detection' };
     const chapter = { title: 't', content: 'c', rawContent: 'c', url: dom.window.location.href };
 
-    let promptCb: (() => Promise<unknown>) | null = null;
-    let launchCb: ((c: unknown, r?: unknown) => void) | null = null;
+    let launchCb: LaunchCallback | null = null;
 
     const manager = {
       check: vi.fn(() => decision),
-      setPromptCallback: vi.fn((cb: () => Promise<unknown>) => {
-        promptCb = cb;
-      }),
-      setLaunchCallback: vi.fn((cb: (c: unknown, r?: unknown) => void) => {
+      setLaunchCallback: vi.fn((cb: LaunchCallback) => {
         launchCb = cb;
       }),
       execute: vi.fn(async () => {
-        if (promptCb) {
-          const res = (await promptCb()) as { accepted?: boolean };
-          if (res?.accepted && launchCb) launchCb(completeEvent(chapter));
-        } else if (launchCb) {
-          launchCb(completeEvent(chapter));
-        }
+        launchCb?.(completeEvent(chapter));
       }),
       manualEnable: vi.fn(async () => {}),
     };
@@ -552,7 +533,7 @@ describe('bootstrap', () => {
     expect(document.getElementById('mnr-hide-original')).not.toBeNull();
     expect(readerStore.activate).toHaveBeenCalledTimes(1);
     expect(readerStore.setChapter).toHaveBeenCalledTimes(1);
-    expect(document.getElementById('mnr-entry-prompt-root')).toBeNull();
+    expect(document.getElementById('mnr-entry-root')).toBeNull();
 
     const host = document.getElementById('mnr-reader-root') as HTMLElement;
     expect(host.shadowRoot?.querySelector('#reader-view-stub')).not.toBeNull();
@@ -575,6 +556,60 @@ describe('bootstrap', () => {
     expect(mockRemoveOverlays).toHaveBeenCalledTimes(1);
   });
 
+  it('offers medium-confidence detection through the manual entry, not a prompt', async () => {
+    vi.useFakeTimers();
+
+    dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
+      url: 'https://example.com/book/1',
+      pretendToBeVisual: true,
+    });
+    vi.stubGlobal('window', dom.window);
+    vi.stubGlobal('document', dom.window.document);
+    vi.stubGlobal('sessionStorage', dom.window.sessionStorage);
+
+    const manager = {
+      check: vi.fn(() => ({ shouldEnable: true, method: 'detection', confidence: 0.7 })),
+      setLaunchCallback: vi.fn(),
+      // Below the auto-launch threshold, execute() declines to launch.
+      execute: vi.fn(async () => {}),
+      manualEnable: vi.fn(async () => {}),
+    };
+    mockGetAutoEnableManager.mockReturnValue(manager);
+
+    const bootstrap = await import('@/bootstrap');
+    const initPromise = bootstrap.initialize();
+    await vi.runAllTimersAsync();
+    await initPromise;
+
+    expect(bootstrap.isActive()).toBe(false);
+    expect(manager.execute).toHaveBeenCalledTimes(1);
+    expect(mockDeactivateProtection).toHaveBeenCalled();
+    expect(Array.from(document.body.children, element => element.id)).toEqual(['mnr-entry-root']);
+    expect(
+      document.getElementById('mnr-entry-root')?.shadowRoot?.querySelector('#mnr-entry-button')
+    ).not.toBeNull();
+  });
+
+  it('clears custom CSS from the userscript menu', async () => {
+    dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
+      url: 'https://example.com/',
+    });
+    vi.stubGlobal('window', dom.window);
+    vi.stubGlobal('document', dom.window.document);
+    const commands = new Map<string, () => void>();
+    vi.stubGlobal(
+      'GM_registerMenuCommand',
+      vi.fn((name: string, callback: () => void) => commands.set(name, callback))
+    );
+    Object.defineProperty(document, 'readyState', { configurable: true, get: () => 'complete' });
+
+    await import('@/bootstrap');
+    commands.get('清空自定义 CSS')?.();
+
+    await vi.waitFor(() => expect(configStore.flushSave).toHaveBeenCalledTimes(1));
+    expect(configStore.setCustomCSS).toHaveBeenCalledWith('');
+  });
+
   it('updates a progressive chapter without mounting a second reader', async () => {
     dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
       url: 'https://example.com/chapter/1',
@@ -595,7 +630,6 @@ describe('bootstrap', () => {
     const abort = vi.fn();
     const manager = {
       check: vi.fn(() => ({ shouldEnable: true, method: 'builtin-rule' })),
-      setPromptCallback: vi.fn(),
       setLaunchCallback: vi.fn((callback: LaunchCallback) => {
         launchCb = callback;
       }),
@@ -669,7 +703,6 @@ describe('bootstrap', () => {
     const delivery: { update?: import('@/core/auto-enable/SectionMerger').SectionDelivery } = {};
     const manager = {
       check: vi.fn(() => ({ shouldEnable: true, method: 'builtin-rule' })),
-      setPromptCallback: vi.fn(),
       setLaunchCallback: vi.fn((callback: LaunchCallback) => {
         launchCb = callback;
       }),
@@ -734,7 +767,6 @@ describe('bootstrap', () => {
     let launchCb: LaunchCallback | null = null;
     const manager = {
       check: vi.fn(() => ({ shouldEnable: true, method: 'builtin-rule' })),
-      setPromptCallback: vi.fn(),
       setLaunchCallback: vi.fn((callback: LaunchCallback) => {
         launchCb = callback;
       }),
@@ -797,7 +829,6 @@ describe('bootstrap', () => {
 
     const manager = {
       check: vi.fn(() => decision),
-      setPromptCallback: vi.fn(),
       setLaunchCallback: vi.fn((cb: (c: unknown) => void) => {
         launchCb = cb;
       }),
@@ -856,7 +887,6 @@ describe('bootstrap', () => {
     let launchCb: ((c: unknown) => void) | null = null;
     mockGetAutoEnableManager.mockReturnValue({
       check: vi.fn(() => ({ shouldEnable: true, method: 'detection' })),
-      setPromptCallback: vi.fn(),
       setLaunchCallback: vi.fn((cb: (c: unknown) => void) => {
         launchCb = cb;
       }),
@@ -913,7 +943,6 @@ describe('bootstrap', () => {
 
     const manager = {
       check: vi.fn(() => ({ shouldEnable: true, method: 'builtin-rule', rule })),
-      setPromptCallback: vi.fn(),
       setLaunchCallback: vi.fn((cb: (c: unknown, r?: unknown) => void) => {
         launchCb = cb;
       }),
@@ -945,7 +974,6 @@ describe('bootstrap', () => {
 
     const manager = {
       check: vi.fn(() => ({ shouldEnable: false })),
-      setPromptCallback: vi.fn(),
       setLaunchCallback: vi.fn(),
       execute: vi.fn(async () => {}),
       manualEnable: vi.fn(async () => {}),
@@ -983,7 +1011,6 @@ describe('bootstrap', () => {
     const launchError = new Error('parse failed');
     const manager = {
       check: vi.fn(() => ({ shouldEnable: false })),
-      setPromptCallback: vi.fn(),
       setLaunchCallback: vi.fn(),
       execute: vi.fn(async () => {}),
       manualEnable: vi.fn(async () => {

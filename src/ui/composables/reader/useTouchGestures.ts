@@ -28,6 +28,8 @@ const SWIPE_VIEWPORT_RATIO = 0.18;
 const SWIPE_MAX_DURATION_MS = 700;
 const SWIPE_CANCEL_VERTICAL_PX = 28;
 const SWIPE_AXIS_RATIO = 1.5;
+// System back/forward gestures start at the screen edge; leave those to the browser.
+const SWIPE_EDGE_GUARD_PX = 24;
 const BOUNDARY_PULL_HINT_PX = 12;
 const BOUNDARY_PULL_TRIGGER_PX = 48;
 const BOUNDARY_AXIS_RATIO = 1.25;
@@ -90,11 +92,14 @@ export function useTouchGestures(options: UseTouchGesturesOptions) {
     const selection = window.getSelection();
     if (selection && selection.toString().length > 0) return;
 
+    const touch = e.touches[0];
     const boundaryDirection = onBoundaryPull ? getBoundaryDirection?.() || null : null;
-    const canSwipe = swipeEnabled.value;
+    const canSwipe =
+      swipeEnabled.value &&
+      touch.clientX >= SWIPE_EDGE_GUARD_PX &&
+      touch.clientX <= window.innerWidth - SWIPE_EDGE_GUARD_PX;
     if (!canSwipe && !boundaryDirection) return;
 
-    const touch = e.touches[0];
     gestureStart = {
       boundaryDirection,
       boundaryReady: false,
