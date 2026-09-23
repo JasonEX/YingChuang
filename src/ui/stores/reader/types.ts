@@ -55,7 +55,7 @@ export interface SectionMergeRecord {
   abort: () => void;
   /** Conversion mode the appended deltas were converted with */
   convertedMode: ConversionMode;
-  /** Source script the appended deltas were converted with */
+  /** Source hint used by Traditional mode; Simplified conversion does not depend on it. */
   convertedScript?: ChineseScript;
 }
 

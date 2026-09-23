@@ -8,13 +8,13 @@ import { type ChineseScript, convertHTML, convertText } from '@/core/converter';
 vi.mock('@/core/converter', () => ({
   convertHTML: vi.fn(
     async (html: string, mode: string, options?: { sourceScript?: ChineseScript }) => {
-      if (options?.sourceScript === 'hans') return html;
+      if (mode === 'tc' && options?.sourceScript === 'hant') return html;
       return mode === 'sc' ? html.replace(/東/g, '东') : html.replace(/东/g, '東');
     }
   ),
   convertText: vi.fn(
     async (text: string, mode: string, options?: { sourceScript?: ChineseScript }) => {
-      if (options?.sourceScript === 'hans') return text;
+      if (mode === 'tc' && options?.sourceScript === 'hant') return text;
       return mode === 'sc' ? text.replace(/東/g, '东') : text.replace(/东/g, '東');
     }
   ),
@@ -125,7 +125,7 @@ describe('applyConversionToChapterEntry', () => {
     expect(chapters[0].chapter.bookTitle).toBeUndefined();
   });
 
-  it('passes sourceScript so Simplified title and content are not changed in sc mode', async () => {
+  it('passes the source metadata without skipping Simplified-mode conversion', async () => {
     const chapters = [makeEntry('a', '搁这说我坏话是吧', '坏话标题', '坏话书名', 'hans')];
     const origContents = new Map([['a', '搁这说我坏话是吧']]);
     const origTitles = new Map([['a', { title: '坏话标题', bookTitle: '坏话书名' }]]);

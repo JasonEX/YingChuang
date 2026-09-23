@@ -86,8 +86,14 @@ does not justify a riskier parser shortcut that could reduce extraction correctn
 The 9.4.5 build after dependency trimming is about 829 KiB raw and 221 KiB gzip, down from
 900 KiB / 248 KiB before trimming. Minification remains disabled so the installed userscript stays
 inspectable. The build excludes Vue's unused Options API and imports only OpenCC's t2s dictionaries.
-Compatibility-ideograph normalization still runs before phrase/character conversion; Japanese repairs,
-source-script guards and the separate Simplified-to-Traditional converter are preserved.
+At that measurement point, compatibility-ideograph normalization ran before phrase/character conversion;
+Japanese repairs, source-script guards and the separate Simplified-to-Traditional converter were preserved.
+
+The subsequent conversion-correctness change uses one lazy Simplified converter for every source hint.
+Phrase exceptions may protect character spellings, but cannot rewrite otherwise unchanged characters;
+already-simplified exception spellings are retained too. It removes the Japanese repair map and the
+blanket 著-to-着 replacement. Source hints remain relevant only to the existing Traditional-mode
+protection, so a hint change no longer reconverts a growing Simplified chapter.
 
 `check:size` reports exact byte counts and remaining budget. To compare against a saved userscript:
 
@@ -97,3 +103,19 @@ npm run check:size -- /path/to/baseline.user.js
 
 The gzip value measures compressibility, not browser memory or per-chapter network usage. Review
 growth by its source and browser behavior before adjusting these budgets.
+
+### Conversion correctness follow-up
+
+Compared with master `b3f8af2`, the conservative Simplified converter was measured with a
+local Playwright/CDP fixture containing 500 paragraphs and 5,000 TOC entries. Three alternating
+baseline/rewrite samples were collected for each case, without concurrent test runs.
+
+| Source content     | SC switch TaskDuration, before / after | Click to visible, before / after |
+| ------------------ | -------------------------------------: | -------------------------------: |
+| Mixed Chinese      |                         99.5 / 99.4 ms |                 318.7 / 321.6 ms |
+| Simplified Chinese |                         89.3 / 96.5 ms |                 307.9 / 318.3 ms |
+
+Values are medians, include UI work and profiler overhead, and are not a performance guarantee.
+The already-Simplified case now checks actual text instead of skipping it based on a chapter
+language guess. This adds about 7 ms in this fixture; mixed-text cost stayed comparable.
+The generated userscript decreased by 2,322 raw bytes / 580 gzip bytes relative to that baseline.

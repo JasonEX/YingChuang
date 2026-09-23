@@ -10,7 +10,7 @@ import {
   waitForMnrReader,
 } from './mnrE2e';
 
-import { makeNovelsChapter, novelsOrigin, novelsUrl } from '../testUtils/novels';
+import { encryptNovels, makeNovelsChapter, novelsOrigin, novelsUrl } from '../testUtils/novels';
 
 import {
   makeNovel543Chapter,
@@ -1029,7 +1029,7 @@ test('applies the Sto9 adapter and loads its complete dynamic catalog', async ({
   const originalContent = await readerContent.first().innerHTML();
   await readerRoot.getByRole('button', { name: '打开设置', exact: true }).click();
   await readerRoot.getByRole('button', { name: '简体', exact: true }).click();
-  await expect(readerContent.first()).toContainText('黑龙看着著作，连忙穿过干涸的河床。车龙神福。');
+  await expect(readerContent.first()).toContainText('黒竜看著著作，连忙穿过干涸的河床。车龙神福。');
   await readerRoot.getByRole('button', { name: '关闭设置', exact: true }).click();
   await readerRoot.getByRole('button', { name: '打开目录', exact: true }).click();
   await expect(readerRoot.locator('.mnr-chapter-button').last()).toContainText('援军到了');
@@ -3108,3 +3108,77 @@ for (const scenario of ['recover', 'background', 'exit'] as const) {
     }
   });
 }
+
+for (const kind of ['minority', 'credit', 'mislabeled']) {
+  test(`preserves conversion semantics for ${kind} prose`, async ({ page, context }) => {
+    const paragraph =
+      kind === 'minority'
+        ? '他走进房间，听见风吹过树林。'
+        : '他走进房间，听见风吹过树林。他走進房間，聽見風吹過樹林。';
+    await context.route('http://mnr.test/**', route =>
+      route.fulfill({
+        contentType: 'text/html; charset=utf-8',
+        body: route.request().url().endsWith('/book/index.html')
+          ? '<main><a href="/chapter/100.html">第一章 沈默的鐘樓</a></main>'
+          : `<html ${kind === 'mislabeled' ? 'lang="zh-CN"' : ''}><head><title>第一章 沈默的鐘樓</title></head><body><h1>第一章 沈默的鐘樓</h1><div id="content">${('<p>' + paragraph + '</p>').repeat(80)}<p>鐘聲響徹，燈籠搖曳。</p><p>曹雪芹著</p></div><nav><a href="/book/index.html">目录</a></nav></body></html>`,
+      })
+    );
+    await addYingChuangUserscript(context);
+    await page.goto('http://mnr.test/chapter/100.html');
+    await waitForMnrReader(page);
+    const root = page.locator('#mnr-reader-root');
+    await root.getByRole('button', { name: '打开设置', exact: true }).click();
+    await root.getByRole('button', { name: '简体', exact: true }).click();
+    const content = root.locator('.mnr-reader-content').first();
+    await expect(content).toContainText('钟声响彻，灯笼摇曳。');
+    await expect(content).toContainText('曹雪芹著');
+    await expect(root.locator('.mnr-chapter-title').first()).toContainText('沈默的钟楼');
+    await root.getByRole('button', { name: '关闭设置', exact: true }).click();
+    await root.getByRole('button', { name: '打开目录', exact: true }).click();
+    await expect(root.locator('.mnr-chapter-button').first()).toContainText('沈默的钟楼');
+    await root.getByRole('button', { name: '关闭目录', exact: true }).click();
+    await root.getByRole('button', { name: '打开设置', exact: true }).click();
+    await root.getByRole('button', { name: '退出阅读模式', exact: true }).click();
+    await expect(root).toHaveCount(0);
+    await expect(page.locator('#content')).toContainText('鐘聲響徹，燈籠搖曳。');
+    await expect(page.locator('#content')).toContainText('曹雪芹著');
+  });
+}
+
+test('keeps Simplified first-section text when later sections change the language guess', async ({
+  page,
+  context,
+}) => {
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  await context.route(`${novelsOrigin}/**`, async route => {
+    const second = route.request().url().includes('_2.html');
+    if (second) await gate;
+    const text = second ? '他走进房间，听见风吹过树林。' : '鐘聲響徹，燈籠搖曳。';
+    const html = makeNovelsChapter(48, second ? 2 : 1, 2)
+      .replaceAll('山間行旅', '小径')
+      .replace(
+        /window\.encryptedContent = .*?;<\/script>/,
+        `window.encryptedContent = "${encryptNovels(('<p>' + text + '</p>').repeat(60))}";</script>`
+      );
+    await route.fulfill({ contentType: 'text/html; charset=utf-8', body: html });
+  });
+  await addYingChuangUserscript(context);
+  await page.goto(novelsUrl(48));
+  await waitForMnrReader(page);
+  const root = page.locator('#mnr-reader-root');
+  await root.getByRole('button', { name: '打开设置', exact: true }).click();
+  await root.getByRole('button', { name: '简体', exact: true }).click();
+  const content = root.locator('.mnr-reader-content').first();
+  await expect(content).toContainText('钟声响彻，灯笼摇曳。');
+  release();
+  await expect(content).toContainText('他走进房间');
+  await expect(root.locator('.mnr-section-progress')).toHaveCount(0);
+  await expect(content).toContainText('钟声响彻，灯笼摇曳。');
+  await root.getByRole('button', { name: '原文', exact: true }).click();
+  await expect(content).toContainText('鐘聲響徹，燈籠搖曳。');
+  await root.getByRole('button', { name: '简体', exact: true }).click();
+  await expect(content).toContainText('钟声响彻，灯笼摇曳。');
+});

@@ -316,6 +316,31 @@ describe('reader store - section progress', () => {
     expect(mocks.html.mock.calls[0]?.[0]).toBe('<p>第四页</p>');
   });
 
+  it('keeps Simplified conversion incremental when a later section changes the source guess', async () => {
+    const store = useReaderStore();
+    await store.applyTextConversion('sc');
+    const { entryId } = startMerge(store);
+    mocks.html.mockClear();
+    await store.appendChapterSection(entryId, {
+      content: '<p>第二页</p>',
+      rawContent: '<p>raw2</p>',
+      sourceScript: 'hans',
+      loaded: 2,
+      total: 2,
+    });
+    expect(mocks.html).toHaveBeenCalledTimes(1);
+    expect(mocks.html.mock.calls[0]?.[0]).toBe('<p>第二页</p>');
+    mocks.html.mockClear();
+    await store.completeChapterSections(
+      entryId,
+      makeChapter({
+        content: fold('<p>第一页</p>', '<p>第二页</p>'),
+        sourceScript: 'hans',
+      })
+    );
+    expect(mocks.html).not.toHaveBeenCalled();
+  });
+
   it('runs one authoritative conversion when the merged source script changed', async () => {
     const store = useReaderStore();
     await store.applyTextConversion('tc');

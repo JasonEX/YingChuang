@@ -118,7 +118,10 @@ export async function appendChapterSection(
   const displayBefore = entry.chapter.content;
   // Publish the source before yielding: a concurrent mode change must include this page.
   ctx.originalContents.value.set(entryId, folded);
-  if (mode !== merge.convertedMode || delta.sourceScript !== merge.convertedScript) {
+  if (
+    mode !== merge.convertedMode ||
+    (mode === 'tc' && delta.sourceScript !== merge.convertedScript)
+  ) {
     await ctx.applyConversionToChapterEntry(entryId, mode);
   } else {
     const displayDelta =
@@ -228,8 +231,9 @@ export async function completeChapterSections(
 /**
  * Align the displayed text with the finished chapter.
  *
- * Deltas are converted page by page, which matches converting the whole chapter except when
- * the cumulative source script changed along the way. Redo the pass only in that case.
+ * Simplification is identical for deltas and complete chapters regardless of language guesses.
+ * Traditional mode retains its source-language protection; only that mode needs reconciliation
+ * when the cumulative source script changes.
  */
 async function reconcileMergedConversion(
   ctx: NavigationContext,
@@ -246,7 +250,7 @@ async function reconcileMergedConversion(
     return;
   }
 
-  if (convertedScript !== merged.sourceScript || convertedMode !== mode) {
+  if (convertedMode !== mode || (mode === 'tc' && convertedScript !== merged.sourceScript)) {
     await ctx.applyConversionToChapterEntry(entryId, mode);
   }
 }

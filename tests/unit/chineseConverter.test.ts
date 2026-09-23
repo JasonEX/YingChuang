@@ -56,17 +56,17 @@ describe('ChineseConverter', () => {
     );
   });
 
-  it('convertText still normalizes Japanese shinjitai source in sc mode', async () => {
+  it('does not guess Japanese-only variant mappings in sc mode', async () => {
     await expect(convertText('壊 / 黒 / 竜', 'sc', { sourceScript: 'jpan' })).resolves.toBe(
-      '坏 / 黑 / 龙'
+      '壊 / 黒 / 竜'
     );
   });
 
-  it('convertText converts Traditional, variants and Japanese shinjitai to Simplified', async () => {
+  it('convertText converts dictionary-supported Traditional and variant characters', async () => {
     await expect(convertText('臺灣小説網 言情小說 説明', 'sc')).resolves.toBe(
       '台湾小说网 言情小说 说明'
     );
-    await expect(convertText('黒 歩 壊 竜 亜 広', 'sc')).resolves.toBe('黑 步 坏 龙 亚 广');
+    await expect(convertText('黒 歩 壊 竜 亜 広', 'sc')).resolves.toBe('黒 歩 壊 竜 亜 広');
   });
 
   it('convertText avoids Japanese-mode false positives on common Traditional words', async () => {
@@ -81,21 +81,21 @@ describe('ChineseConverter', () => {
     );
   });
 
-  it('keeps Japanese repairs, phrase conversion and 著 word protection in the same passage', async () => {
+  it('keeps ambiguous and Japanese-only spellings while converting Chinese text', async () => {
     await expect(
       convertText('彼は広場で読書。連忙聯絡著名學者，看著乾涸的河流，想起乾坤。', 'sc', {
         sourceScript: 'jpan',
       })
-    ).resolves.toBe('彼は广场で读书。连忙联络著名学者，看着干涸的河流，想起乾坤。');
+    ).resolves.toBe('彼は広场で読书。连忙联络著名学者，看著干涸的河流，想起乾坤。');
   });
 
-  it('convertText preserves semantic Traditional words while normalizing aspect 著', async () => {
+  it('convertText preserves ambiguous 著 spellings and dictionary exceptions', async () => {
     await expect(convertText('著作 原著 著名 看著 挥动著 乾坤 乾涸', 'sc')).resolves.toBe(
-      '著作 原著 著名 看着 挥动着 乾坤 干涸'
+      '著作 原著 著名 看著 挥动著 乾坤 干涸'
     );
   });
 
-  it.each(['unknown', 'mixed'] as const)(
+  it.each(['unknown', 'mixed', 'hans', 'hant', 'jpan'] as const)(
     'converts characters outside the detection alphabet for %s source',
     async sourceScript => {
       await expect(convertText('鐘聲響徹，燈籠搖曳。', 'sc', { sourceScript })).resolves.toBe(
@@ -109,19 +109,19 @@ describe('ChineseConverter', () => {
     }
   );
 
-  it.each(['unknown', 'mixed'] as const)(
+  it.each(['unknown', 'mixed', 'hans', 'hant', 'jpan'] as const)(
     'preserves Simplified names in %s text while converting adjacent Traditional nodes',
     async sourceScript => {
       await expect(convertText('沈默', 'sc', { sourceScript })).resolves.toBe('沈默');
       await expect(convertText('車 龍 神 福 圧', 'sc', { sourceScript })).resolves.toBe(
-        '车 龙 神 福 压'
+        '车 龙 神 福 圧'
       );
       await expect(convertText('主角沈默走进房间。', 'sc', { sourceScript })).resolves.toBe(
         '主角沈默走进房间。'
       );
       await expect(
         convertText('沈默走向鐘樓，看著乾涸的河床，想起乾坤。', 'sc', { sourceScript })
-      ).resolves.toBe('沈默走向钟楼，看着干涸的河床，想起乾坤。');
+      ).resolves.toBe('沈默走向钟楼，看著干涸的河床，想起乾坤。');
       await expect(
         convertHTML('<p>主角沈默走进房间。</p><p>鐘聲響徹，燈籠搖曳。</p>', 'sc', {
           sourceScript,
@@ -130,8 +130,8 @@ describe('ChineseConverter', () => {
     }
   );
 
-  it('retains phrase normalization for explicitly Traditional sources', async () => {
-    await expect(convertText('沈默', 'sc', { sourceScript: 'hant' })).resolves.toBe('沉默');
+  it('preserves names even when a page is labeled Traditional', async () => {
+    await expect(convertText('沈默', 'sc', { sourceScript: 'hant' })).resolves.toBe('沈默');
   });
 
   it('convertText returns original text on converter error', async () => {
@@ -152,22 +152,20 @@ describe('ChineseConverter', () => {
     expect(result).toContain('<strong>');
     expect(result).toContain('src="/a.png"');
     expect(result).toContain('台湾小说网');
-    expect(result).toContain('看着干涸');
+    expect(result).toContain('看著干涸');
   });
 
-  it('convertHTML short-circuits known Simplified source before parsing tags', async () => {
-    const createElementSpy = vi.spyOn(document, 'createElement');
+  it('convertHTML preserves the original markup exactly when no text changes', async () => {
     const html = '<p>搁这说我坏话是吧</p>';
 
     await expect(convertHTML(html, 'sc', { sourceScript: 'hans' })).resolves.toBe(html);
-    expect(createElementSpy).not.toHaveBeenCalled();
   });
 
   it('converts mixed HTML without changing Simplified prose or attributes', async () => {
     const html = '<p>搁这说我坏话是吧</p><p title="黒竜">黒竜看著著作，連忙走過乾涸的河床。</p>';
 
     await expect(convertHTML(html, 'sc', { sourceScript: 'mixed' })).resolves.toBe(
-      '<p>搁这说我坏话是吧</p><p title="黒竜">黑龙看着著作，连忙走过干涸的河床。</p>'
+      '<p>搁这说我坏话是吧</p><p title="黒竜">黒竜看著著作，连忙走过干涸的河床。</p>'
     );
   });
 
