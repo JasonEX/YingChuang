@@ -8,11 +8,3 @@ import type { LoadSource } from './types';
 export function shouldPersistNavigationBlock(source: LoadSource): boolean {
   return source === 'manual';
 }
-
-/**
- * Backoff protects automatic retries from looking like polling. Manual actions
- * should remain available because they are explicit reading/navigation intent.
- */
-export function shouldUseNavigationFailureCooldown(source: LoadSource): boolean {
-  return source === 'auto';
-}

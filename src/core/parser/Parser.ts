@@ -10,6 +10,11 @@ import {
   type NavigationResult,
   type SectionDetectionResult,
 } from '@/core/detection';
+import {
+  getRequestCooldown,
+  getRetryAfterHeader,
+  recordRequestCooldown,
+} from '@/core/utils/requestPolicy';
 import { HookFetchOptions, HookHelpers, RuleMatchResult, SiteRule } from '@/core/rules/types';
 import { getRuleManager } from '@/core/rules/RuleManager';
 import { resolveAndValidateHttpUrl } from '@/core/utils/network';
@@ -716,6 +721,7 @@ export class Parser {
       return null;
     }
 
+    if (getRequestCooldown(resolved)) return null;
     const resolvedUrl = new URL(resolved);
     const timeoutMs = options.timeoutMs ?? 4000;
     const headers = options.headers ?? {};
@@ -737,8 +743,10 @@ export class Parser {
           headers: gmHeaders,
           timeout: timeoutMs,
           withCredentials,
-          onload: resp =>
-            resolve(resp.status >= 200 && resp.status < 300 ? resp.responseText || null : null),
+          onload: resp => {
+            recordRequestCooldown(resolved, resp.status, getRetryAfterHeader(resp.responseHeaders));
+            resolve(resp.status >= 200 && resp.status < 300 ? resp.responseText || null : null);
+          },
           onerror: () => resolve(null),
           ontimeout: () => resolve(null),
         });
@@ -761,6 +769,7 @@ export class Parser {
         signal: controller.signal,
       });
       window.clearTimeout(timer);
+      recordRequestCooldown(resolved, resp.status, resp.headers?.get?.('Retry-After'));
       if (!resp.ok) return null;
       return await resp.text();
     } catch {

@@ -29,16 +29,13 @@ import {
 } from './chapterListMutations';
 import { leadsOutOfBook, prepareChapterLoad } from './chapterLoadGuards';
 import { normalizeUrl, normalizeUrlForBlock, normalizeUrlForFetch } from './utils';
-import {
-  shouldPersistNavigationBlock,
-  shouldUseNavigationFailureCooldown,
-} from './navigationPolicy';
 import { detectTocPage } from './detection';
 import { fetchAndParseUrl } from '@/core/utils/network';
 import { getChapterDocumentBlockReason } from '@/core/detection';
 import type { NavigationContext } from './navigationContext';
 import { parseWithSectionMerge } from './section';
 import { recordDebugEvent } from '@/core/debug/events';
+import { shouldPersistNavigationBlock } from './navigationPolicy';
 import type { SiteRule } from '@/core/rules/types';
 import { trimCachedContents } from './trim';
 
@@ -77,14 +74,9 @@ export function createNavigation(ctx: NavigationContext) {
         }
       }
 
-      // Backoff limits network retries, not reading content already held locally.
-      const failure = ctx.navFailures.get(load.navKey);
-      if (
-        shouldUseNavigationFailureCooldown(source) &&
-        failure &&
-        Date.now() < failure.nextRetryAt
-      ) {
-        outcome = 'cooldown';
+      // An exhausted automatic load requires explicit user intent, not a fresh retry budget.
+      if (source === 'auto' && ctx.navFailures.has(load.navKey)) {
+        outcome = 'failed-auto-load';
         return false;
       }
 
@@ -154,7 +146,7 @@ export function createNavigation(ctx: NavigationContext) {
       cleanupIframe?.();
 
       if (!parsed) {
-        const fetchDoc = await loadFetchDocument(ctx, load, runId, referer);
+        const fetchDoc = await loadFetchDocument(ctx, load, runId, referer, source);
         if (fetchDoc === 'abort') {
           outcome = 'abort';
           return false;

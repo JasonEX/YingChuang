@@ -24,7 +24,7 @@ export function trimCachedContents(
 }
 
 /**
- * Trim navFailures to maxNavFailures using LRU eviction (by nextRetryAt).
+ * Trim navFailures to maxNavFailures using LRU eviction (by failedAt).
  */
 export function trimNavFailures(
   navFailures: Map<string, NavFailureRecord>,
@@ -33,9 +33,7 @@ export function trimNavFailures(
   const limit = Math.max(0, maxNavFailures);
   if (navFailures.size <= limit) return;
 
-  const entries = Array.from(navFailures.entries()).sort(
-    (a, b) => a[1].nextRetryAt - b[1].nextRetryAt
-  );
+  const entries = Array.from(navFailures.entries()).sort((a, b) => a[1].failedAt - b[1].failedAt);
 
   const toDeleteCount = Math.min(entries.length, navFailures.size - limit);
   for (let i = 0; i < toDeleteCount; i++) {

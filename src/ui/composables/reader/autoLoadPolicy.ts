@@ -13,7 +13,6 @@ export interface AutoLoadPolicyInput {
   /** The chapter being read is still merging its own section pages. */
   currentChapterMerging: boolean;
   enabled: boolean;
-  failureCooldownUntil: number;
   graceUntil: number;
   hasChapter: boolean;
   hasNext: boolean;
@@ -53,12 +52,6 @@ export function decideAutoLoadNext(
     return { type: 'schedule', dueAt: input.graceUntil };
   }
 
-  if (input.now < input.failureCooldownUntil) {
-    return shouldRetryAfterCooldown(reason)
-      ? { type: 'schedule', dueAt: input.failureCooldownUntil }
-      : { type: 'idle', clearTimer: false };
-  }
-
   if (requiresNearBottom(reason) && !input.isNearBottom) {
     return { type: 'idle', clearTimer: false };
   }
@@ -81,10 +74,6 @@ function canAutoLoadBase(input: AutoLoadPolicyInput): boolean {
     !input.pageHidden &&
     (input.unreadBufferState === 'empty' || input.unreadBufferState === 'short')
   );
-}
-
-function shouldRetryAfterCooldown(reason: AutoLoadReason): boolean {
-  return reason !== 'state';
 }
 
 function requiresNearBottom(reason: AutoLoadReason): boolean {

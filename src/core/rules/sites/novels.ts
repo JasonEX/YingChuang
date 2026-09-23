@@ -31,8 +31,6 @@ export const novelsRule: SiteRule = {
   },
   advanced: {
     checkSection: true,
-    // The live site returns 429 when section requests arrive in a burst.
-    sectionDelayMs: 1000,
   },
   hooks: {
     normalizeChapterUrl: normalizeNovelsUrl,

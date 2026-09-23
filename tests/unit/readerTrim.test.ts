@@ -44,10 +44,10 @@ describe('Reader trim helpers', () => {
     expect(cachedContents.size).toBe(2);
   });
 
-  it('trimNavFailures evicts oldest entries by nextRetryAt to enforce the limit', () => {
+  it('trimNavFailures evicts oldest entries by failedAt to enforce the limit', () => {
     const navFailures = new Map<string, NavFailureRecord>();
     for (let i = 0; i < 11; i++) {
-      navFailures.set(`k${i}`, { count: 1, nextRetryAt: i });
+      navFailures.set(`k${i}`, { count: 1, failedAt: i });
     }
 
     trimNavFailures(navFailures, 10);
@@ -59,7 +59,7 @@ describe('Reader trim helpers', () => {
   it('trimNavFailures trims all excess entries when massively over the limit', () => {
     const navFailures = new Map<string, NavFailureRecord>();
     for (let i = 0; i < 20; i++) {
-      navFailures.set(`k${i}`, { count: 1, nextRetryAt: i });
+      navFailures.set(`k${i}`, { count: 1, failedAt: i });
     }
 
     trimNavFailures(navFailures, 10);

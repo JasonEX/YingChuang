@@ -41,7 +41,8 @@ describe('SectionMerger (base url + maxPages)', () => {
     expect(fetchAndParseUrl).toHaveBeenCalledTimes(1);
     expect(fetchAndParseUrl).toHaveBeenCalledWith(
       'https://example.com/123.html?page=1',
-      'https://example.com/123.html?page=2'
+      'https://example.com/123.html?page=2',
+      { retryRateLimit: undefined }
     );
     expect(parser.parse).toHaveBeenCalledWith(baseDoc, 'https://example.com/123.html?page=1');
   });

@@ -1,4 +1,5 @@
 import type { BeforeParseHook, SiteRule } from '../types';
+import { getRequestCooldown, recordRequestCooldown } from '@/core/utils/requestPolicy';
 
 const SUBSTEP_READY_TIMEOUT_MS = 4000;
 const MAPPED_VISIBLE_ATTRIBUTE = 'data-mnr-hetushu-visible';
@@ -151,14 +152,17 @@ async function restoreSubstepContent(
   const chapterId = parsedUrl.pathname.match(/\/(\d+)\.html$/)?.[1];
   if (!chapterId || parsedUrl.hostname !== 'www.hetushu.com') return false;
 
+  const requestUrl = new URL(`r${chapterId}.json`, parsedUrl).href;
+  if (getRequestCooldown(requestUrl)) return false;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), SUBSTEP_READY_TIMEOUT_MS);
   try {
-    const response = await fetch(new URL(`r${chapterId}.json`, parsedUrl).href, {
+    const response = await fetch(requestUrl, {
       credentials: 'include',
       headers: { 'X-Requested-With': 'XMLHttpRequest' },
       signal: controller.signal,
     });
+    recordRequestCooldown(requestUrl, response.status, response.headers?.get?.('Retry-After'));
     if (!response.ok) return false;
     const token = response.headers.get('token');
     const mapping = token ? decodeSubstepMapping(token) : null;

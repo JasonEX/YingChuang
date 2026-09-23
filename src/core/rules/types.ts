@@ -106,10 +106,7 @@ interface AdvancedConfig {
   checkSection?: boolean;
   /** Maximum total section pages to merge for this site (default: 10) */
   sectionMaxPages?: number;
-  /**
-   * Delay between fetching consecutive section pages.
-   * Useful for sites with aggressive request-frequency limits.
-   */
+  /** Override the global 1200ms delay between section pages when a site needs different pacing. */
   sectionDelayMs?: number;
   /**
    * Disable section merging

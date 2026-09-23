@@ -40,7 +40,6 @@ export const kudushuRule: SiteRule = {
     // Chapters are split across /{chapterId}_{n}/ pages.
     checkSection: true,
     // Cloudflare-fronted; keep the extra section requests spaced out.
-    sectionDelayMs: 800,
   },
   meta: {
     source: 'builtin',
