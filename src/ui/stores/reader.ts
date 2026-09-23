@@ -42,6 +42,7 @@ import { createCacheAll } from './reader/cacheAll';
 import { createChapterEntryId } from './reader/types';
 import { createNavigation } from './reader/navigation';
 import { createReaderRuntime } from './reader/runtime';
+import { leadsOutOfBook } from './reader/chapterLoadGuards';
 import { syncHostPageToChapter } from './reader/hostPage';
 
 // Re-export reader types used by UI modules.
@@ -130,6 +131,10 @@ export const useReaderStore = defineStore('reader', () => {
     const lastChapter = chapters.value[chapters.value.length - 1];
     const nextUrl = lastChapter?.chapter.nextUrl;
     if (!nextUrl) return false;
+    const targetUrl = normalizeUrlForFetch(nextUrl);
+    const hasCacheCandidate =
+      cachedContents.value.has(targetUrl) || persistedUrls.value.has(targetUrl);
+    if (leadsOutOfBook(targetUrl, lastChapter, hasCacheCandidate)) return false;
     if (blockedNavUrls.value.has(normalizeUrlForBlock(nextUrl))) return false;
     return !isVipBlockedUrl(nextUrl);
   });
@@ -137,6 +142,10 @@ export const useReaderStore = defineStore('reader', () => {
     const firstChapter = chapters.value[0];
     const prevUrl = firstChapter?.chapter.prevUrl;
     if (!prevUrl) return false;
+    const targetUrl = normalizeUrlForFetch(prevUrl);
+    const hasCacheCandidate =
+      cachedContents.value.has(targetUrl) || persistedUrls.value.has(targetUrl);
+    if (leadsOutOfBook(targetUrl, firstChapter, hasCacheCandidate)) return false;
     if (blockedNavUrls.value.has(normalizeUrlForBlock(prevUrl))) return false;
     return !isVipBlockedUrl(prevUrl);
   });
@@ -255,8 +264,9 @@ export const useReaderStore = defineStore('reader', () => {
 
   function getPersistedCachedChapterForCurrentBook(url: string): CachedChapter | null {
     const cacheBook = getCurrentBookCacheKey(chapter.value?.indexUrl);
-    if (!cacheBook) return null;
-    return getPersistedCachedChapter(cacheBook, url);
+    const cached = cacheBook ? getPersistedCachedChapter(cacheBook, url) : null;
+    if (!cached) persistedUrls.value.delete(url);
+    return cached;
   }
 
   function persistCache(skipChapterUrls?: ReadonlySet<string>): void {

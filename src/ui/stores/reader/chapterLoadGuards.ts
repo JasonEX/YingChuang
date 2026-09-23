@@ -1,10 +1,6 @@
 import type { ChapterEntry, LoadSource } from './types';
 import { normalizeUrl, normalizeUrlForBlock, normalizeUrlForFetch } from './utils';
 import { SECTION_INCOMPLETE_TOAST, SECTION_MERGING_TOAST, VIP_BLOCK_TOAST } from './types';
-import {
-  shouldPersistNavigationBlock,
-  shouldUseNavigationFailureCooldown,
-} from './navigationPolicy';
 
 import { isInvalidChapterUrl } from './detection';
 import type { NavigationContext } from './navigationContext';
@@ -23,6 +19,26 @@ export interface PreparedChapterLoad {
   /** Set once a progressive merge hands back its handle; not reactive state. */
   sectionMerge: PendingSectionMerge | null;
   targetUrl: string;
+}
+
+function isBookIndexUrl(targetUrl: string, refChapter: ChapterEntry): boolean {
+  const indexUrl = refChapter.chapter.indexUrl;
+  return !!indexUrl && normalizeUrl(normalizeUrlForFetch(targetUrl)) === normalizeUrl(indexUrl);
+}
+
+/**
+ * The book index is a boundary; other URL checks are heuristics.
+ * Cached chapters take precedence over those heuristics, including offline cache candidates.
+ */
+export function leadsOutOfBook(
+  targetUrl: string,
+  refChapter: ChapterEntry,
+  hasCacheCandidate = false
+): boolean {
+  return (
+    isBookIndexUrl(targetUrl, refChapter) ||
+    (!hasCacheCandidate && isInvalidChapterUrl(targetUrl, refChapter.chapter.url))
+  );
 }
 
 /** An end-of-book claim is only honest once the boundary chapter has all of its pages. */
@@ -68,13 +84,10 @@ export function prepareChapterLoad(
     }
   }
 
-  if (
-    refChapter.chapter.indexUrl &&
-    normalizeUrl(targetUrl) === normalizeUrl(refChapter.chapter.indexUrl)
-  ) {
-    if (shouldPersistNavigationBlock(source)) {
-      ctx.blockedNavUrls.value.add(normalizeUrlForBlock(targetUrl));
-    }
+  // Availability uses the same cache-aware check, so no block needs recording.
+  const hasCacheCandidate =
+    ctx.cachedContents.value.has(targetUrl) || ctx.persistedUrls.value.has(targetUrl);
+  if (leadsOutOfBook(targetUrl, refChapter, hasCacheCandidate)) {
     if (source === 'manual') {
       ctx.showToast(endMessage, 'info');
     }
@@ -94,11 +107,6 @@ export function prepareChapterLoad(
     return null;
   }
 
-  const failure = ctx.navFailures.get(navKey);
-  if (shouldUseNavigationFailureCooldown(source) && failure && Date.now() < failure.nextRetryAt) {
-    return null;
-  }
-
   if (ctx.loadedUrls.value.has(targetUrl)) {
     return null;
   }
@@ -115,23 +123,4 @@ export function prepareChapterLoad(
     sectionMerge: null,
     targetUrl,
   };
-}
-
-export function validateTargetChapterUrl(
-  ctx: NavigationContext,
-  load: PreparedChapterLoad,
-  source: LoadSource
-): boolean {
-  if (!isInvalidChapterUrl(load.targetUrl, load.refChapter.chapter.url)) {
-    return true;
-  }
-
-  load.isLoadingRef.value = false;
-  if (shouldPersistNavigationBlock(source)) {
-    ctx.blockedNavUrls.value.add(load.navKey);
-  }
-  if (source === 'manual') {
-    ctx.showToast(load.endMessage, 'info');
-  }
-  return false;
 }

@@ -27,15 +27,18 @@ import {
   insertParsedChapter,
   rebuildChaptersFromCache,
 } from './chapterListMutations';
+import { leadsOutOfBook, prepareChapterLoad } from './chapterLoadGuards';
 import { normalizeUrl, normalizeUrlForBlock, normalizeUrlForFetch } from './utils';
-import { prepareChapterLoad, validateTargetChapterUrl } from './chapterLoadGuards';
+import {
+  shouldPersistNavigationBlock,
+  shouldUseNavigationFailureCooldown,
+} from './navigationPolicy';
 import { detectTocPage } from './detection';
 import { fetchAndParseUrl } from '@/core/utils/network';
 import { getChapterDocumentBlockReason } from '@/core/detection';
 import type { NavigationContext } from './navigationContext';
 import { parseWithSectionMerge } from './section';
 import { recordDebugEvent } from '@/core/debug/events';
-import { shouldPersistNavigationBlock } from './navigationPolicy';
 import type { SiteRule } from '@/core/rules/types';
 import { trimCachedContents } from './trim';
 
@@ -65,17 +68,30 @@ export function createNavigation(ctx: NavigationContext) {
           trimCachedContents(ctx.cachedContents.value, MAX_SESSION_CACHE);
           return await insertCachedChapter(ctx, sessionCached, load.isNext ? 'append' : 'prepend');
         }
+
+        // An offline index may outlive its chapter body. Recheck before fetching on a miss.
+        if (leadsOutOfBook(load.targetUrl, load.refChapter)) {
+          outcome = 'invalid-url';
+          if (source === 'manual') ctx.showToast(load.endMessage, 'info');
+          return false;
+        }
+      }
+
+      // Backoff limits network retries, not reading content already held locally.
+      const failure = ctx.navFailures.get(load.navKey);
+      if (
+        shouldUseNavigationFailureCooldown(source) &&
+        failure &&
+        Date.now() < failure.nextRetryAt
+      ) {
+        outcome = 'cooldown';
+        return false;
       }
 
       // Cancel in-flight request
       if (load.pendingAbortRef.value) {
         load.pendingAbortRef.value();
         load.pendingAbortRef.value = null;
-      }
-
-      if (!validateTargetChapterUrl(ctx, load, source)) {
-        outcome = 'invalid-url';
-        return false;
       }
 
       const referer = load.refChapter.chapter.url;
@@ -184,6 +200,9 @@ export function createNavigation(ctx: NavigationContext) {
         outcome = 'toc';
         if (shouldPersistNavigationBlock(source)) {
           ctx.blockedNavUrls.value.add(load.navKey);
+        } else {
+          // A preload cannot conclude the book ended; it backs off like any failed preload.
+          recordNavFailure(ctx.navFailures, load.navKey, { maxFailures: MAX_NAV_FAILURES });
         }
         if (source === 'manual') {
           ctx.showToast(load.endMessage, 'info');

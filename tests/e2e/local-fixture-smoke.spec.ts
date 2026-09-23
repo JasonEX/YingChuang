@@ -2690,6 +2690,130 @@ test('novels failed preparation preserves the host and allows manual recovery an
   await expect(entry).toBeVisible();
 });
 
+for (const missing of [false, true]) {
+  test(`reconciles ${missing ? 'missing' : 'available'} offline content before ending at a shallow chapter URL`, async ({
+    context,
+    page,
+  }) => {
+    const firstUrl = 'http://mnr.test/book/1/1.html';
+    const nextUrl = 'http://mnr.test/2.html';
+    const indexUrl = 'http://mnr.test/book/1/';
+    const bookId = 'mnr.test_book_1_';
+    const requests: string[] = [];
+    await context.route('http://mnr.test/**', route => {
+      requests.push(route.request().url());
+      return route.fulfill({
+        contentType: 'text/html; charset=utf-8',
+        body: `<!doctype html>
+        <html lang="zh-CN"><head><title>第1章 起程 - 测试小说</title></head><body>
+        <h1>第1章 起程</h1><div id="content">${paragraphs}</div>
+        <nav><a href="${indexUrl}">目录</a><a href="${nextUrl}">下一章</a></nav>
+        </body></html>`,
+      });
+    });
+    const records: Record<string, unknown> = {
+      [`mnr_cache_v2_index_${bookId}`]: {
+        version: 2,
+        bookId,
+        indexUrl,
+        urls: [nextUrl],
+        lastUpdated: Date.now(),
+      },
+    };
+    if (!missing) {
+      records[`mnr_cache_v2_chapter_${bookId}_${Buffer.from(nextUrl).toString('base64url')}`] = {
+        chapter: {
+          title: '第2章 离线正文',
+          content: '<p>这是已经缓存的章节正文。</p>',
+          rawContent: '<p>这是已经缓存的章节正文。</p>',
+          url: nextUrl,
+          indexUrl,
+          prevUrl: firstUrl,
+          confidence: 1,
+          method: 'rule',
+        },
+        cachedAt: Date.now(),
+      };
+    }
+    const seed = `for (const [key, value] of Object.entries(${JSON.stringify(records)})) {
+      window.GM_setValue(key, JSON.stringify(value));
+    }`;
+    const script = fs.readFileSync(getMnrE2eConfig().userScriptPath, 'utf8');
+    await context.addInitScript({ content: createGmMockScript() + '\n' + seed + '\n' + script });
+    await page.goto(firstUrl);
+    await waitForMnrReader(page);
+    const root = page.locator('#mnr-reader-root');
+    if (missing) {
+      await expect(root.locator('article')).toHaveCount(1);
+      await expect(root.locator('.mnr-chapter-end-text')).toHaveText('— 已是最后一章 —');
+    } else {
+      const cached = root.locator(`article[data-chapter-url="${nextUrl}"]`);
+      await expect(cached).toContainText('这是已经缓存的章节正文。');
+      await page.keyboard.press('ArrowRight');
+      await expect(page).toHaveURL(nextUrl);
+    }
+    expect(requests).toEqual([firstUrl]);
+  });
+}
+
+test('ends the reading list truthfully at a book-page link and a paywalled chapter', async ({
+  context,
+  page,
+}) => {
+  const lastUrl = 'http://mnr.test/chapter/400.html';
+  const bookUrl = 'http://mnr.test/info/7.html';
+  const freeUrl = 'http://mnr.test/chapter/500.html';
+  const vipUrl = 'http://mnr.test/chapter/501.html';
+  const requests: string[] = [];
+  const chapterPage = (title: string, nextHref: string) => `<!doctype html>
+    <html lang="zh-CN">
+      <head><meta charset="utf-8"><title>${title} - 测试小说</title></head>
+      <body>
+        <main>
+          <h1>${title}</h1>
+          <div id="content">${paragraphs}</div>
+          <nav>
+            <a href="/chapter/399.html">上一章</a>
+            <a href="/info/7.html">目录</a>
+            <a href="${nextHref}">下一章</a>
+          </nav>
+        </main>
+      </body>
+    </html>`;
+  await context.route('http://mnr.test/**', route => {
+    const url = route.request().url();
+    requests.push(url);
+    const body =
+      url === lastUrl
+        ? chapterPage('第400章 终章', '/info/7.html')
+        : url === freeUrl
+          ? chapterPage('第500章 免费章节', '/chapter/501.html')
+          : url === vipUrl
+            ? '<!doctype html><html><body><h1>第501章</h1><p>本章为VIP章节，请订阅后阅读。</p></body></html>'
+            : '<!doctype html><html><body></body></html>';
+    return route.fulfill({ body, contentType: 'text/html; charset=utf-8' });
+  });
+  await addYingChuangUserscript(context);
+  const root = page.locator('#mnr-reader-root');
+
+  // The next link is the book page itself, so the list ends at once without loading it.
+  await page.goto(lastUrl);
+  await waitForMnrReader(page);
+  await expect(root.locator('.mnr-chapter-end-text')).toHaveText('— 已是最后一章 —');
+  const diagnostic = await copyReaderDiagnostic(page);
+  expect(diagnostic.reader.last.nextUrl).toBe(bookUrl);
+  expect(requests).not.toContain(bookUrl);
+
+  // A paywalled next chapter is not the end of the book.
+  await page.goto(freeUrl);
+  await waitForMnrReader(page);
+  await expect(root.locator('.mnr-chapter-end-text')).toHaveText(
+    '— 该章节为VIP/付费内容，无法加载 —',
+    { timeout: 15_000 }
+  );
+  expect(requests.filter(url => url === vipUrl)).toHaveLength(1);
+});
+
 for (const touch of [false, true]) {
   test.describe(`UI state colors (${touch ? 'touch' : 'mouse'})`, () => {
     test.use({
