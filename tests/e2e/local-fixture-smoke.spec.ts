@@ -2690,6 +2690,72 @@ test('novels failed preparation preserves the host and allows manual recovery an
   await expect(entry).toBeVisible();
 });
 
+for (const missing of [false, true]) {
+  test(`reconciles ${missing ? 'missing' : 'available'} offline content before ending at a shallow chapter URL`, async ({
+    context,
+    page,
+  }) => {
+    const firstUrl = 'http://mnr.test/book/1/1.html';
+    const nextUrl = 'http://mnr.test/2.html';
+    const indexUrl = 'http://mnr.test/book/1/';
+    const bookId = 'mnr.test_book_1_';
+    const requests: string[] = [];
+    await context.route('http://mnr.test/**', route => {
+      requests.push(route.request().url());
+      return route.fulfill({
+        contentType: 'text/html; charset=utf-8',
+        body: `<!doctype html>
+        <html lang="zh-CN"><head><title>第1章 起程 - 测试小说</title></head><body>
+        <h1>第1章 起程</h1><div id="content">${paragraphs}</div>
+        <nav><a href="${indexUrl}">目录</a><a href="${nextUrl}">下一章</a></nav>
+        </body></html>`,
+      });
+    });
+    const records: Record<string, unknown> = {
+      [`mnr_cache_v2_index_${bookId}`]: {
+        version: 2,
+        bookId,
+        indexUrl,
+        urls: [nextUrl],
+        lastUpdated: Date.now(),
+      },
+    };
+    if (!missing) {
+      records[`mnr_cache_v2_chapter_${bookId}_${Buffer.from(nextUrl).toString('base64url')}`] = {
+        chapter: {
+          title: '第2章 离线正文',
+          content: '<p>这是已经缓存的章节正文。</p>',
+          rawContent: '<p>这是已经缓存的章节正文。</p>',
+          url: nextUrl,
+          indexUrl,
+          prevUrl: firstUrl,
+          confidence: 1,
+          method: 'rule',
+        },
+        cachedAt: Date.now(),
+      };
+    }
+    const seed = `for (const [key, value] of Object.entries(${JSON.stringify(records)})) {
+      window.GM_setValue(key, JSON.stringify(value));
+    }`;
+    const script = fs.readFileSync(getMnrE2eConfig().userScriptPath, 'utf8');
+    await context.addInitScript({ content: createGmMockScript() + '\n' + seed + '\n' + script });
+    await page.goto(firstUrl);
+    await waitForMnrReader(page);
+    const root = page.locator('#mnr-reader-root');
+    if (missing) {
+      await expect(root.locator('article')).toHaveCount(1);
+      await expect(root.locator('.mnr-chapter-end-text')).toHaveText('— 已是最后一章 —');
+    } else {
+      const cached = root.locator(`article[data-chapter-url="${nextUrl}"]`);
+      await expect(cached).toContainText('这是已经缓存的章节正文。');
+      await page.keyboard.press('ArrowRight');
+      await expect(page).toHaveURL(nextUrl);
+    }
+    expect(requests).toEqual([firstUrl]);
+  });
+}
+
 test('ends the reading list truthfully at a book-page link and a paywalled chapter', async ({
   context,
   page,

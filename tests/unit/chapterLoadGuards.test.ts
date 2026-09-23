@@ -113,7 +113,7 @@ describe('chapterLoadGuards', () => {
     expect(autoMissingCtx.showToast).not.toHaveBeenCalled();
   });
 
-  it('blocks index, VIP, known blocked, auto recent failure, and already loaded targets', () => {
+  it('blocks index, VIP, known blocked, and already loaded targets', () => {
     // The index is a URL fact that availability derives too, so nothing is recorded.
     const indexCtx = createContext({ chapter: { nextUrl: 'https://example.com/book/' } });
     expect(prepareChapterLoad(indexCtx, 'next', 'manual')).toBeNull();
@@ -136,25 +136,6 @@ describe('chapterLoadGuards', () => {
     expect(prepareChapterLoad(blockedCtx, 'next', 'manual')).toBeNull();
     expect(blockedCtx.showToast).toHaveBeenCalledWith('已经是最后一章了', 'info');
 
-    const failedCtx = createContext({
-      navFailures: new Map([
-        ['https://example.com/book/2.html', { count: 1, nextRetryAt: Date.now() + 1000 }],
-      ]),
-    });
-    expect(prepareChapterLoad(failedCtx, 'next', 'auto')).toBeNull();
-    expect(failedCtx.showToast).not.toHaveBeenCalledWith(
-      '加载失败过于频繁，请稍后重试',
-      'info',
-      2000
-    );
-
-    const manualRetryCtx = createContext({
-      navFailures: new Map([
-        ['https://example.com/book/2.html', { count: 1, nextRetryAt: Date.now() + 1000 }],
-      ]),
-    });
-    expect(prepareChapterLoad(manualRetryCtx, 'next', 'manual')).not.toBeNull();
-
     const loadedCtx = createContext({
       loadedUrls: new Set(['https://example.com/book/2.html']),
     });
@@ -173,6 +154,17 @@ describe('chapterLoadGuards', () => {
     const autoInvalidCtx = createContext({ chapter: { nextUrl: 'https://example.com/' } });
     expect(prepareChapterLoad(autoInvalidCtx, 'next', 'auto')).toBeNull();
     expect(autoInvalidCtx.showToast).not.toHaveBeenCalled();
+  });
+
+  it('keeps confirmed index, VIP and navigation blocks above cache hints', () => {
+    for (const kind of ['index', 'vip', 'blocked']) {
+      const target = 'https://example.com/book/2.html';
+      const ctx = createContext({ chapter: kind === 'index' ? { indexUrl: target } : {} });
+      ctx.persistedUrls.value.add(target);
+      if (kind === 'vip') ctx.vipBlockedUrls.value.add(target);
+      if (kind === 'blocked') ctx.blockedNavUrls.value.add(target);
+      expect(prepareChapterLoad(ctx, 'next', 'manual')).toBeNull();
+    }
   });
 
   it('treats the book index and non-chapter URLs as leading out of the book', () => {

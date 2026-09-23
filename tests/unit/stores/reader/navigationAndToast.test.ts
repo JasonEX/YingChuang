@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { getCurrentBookCacheKey, persistCachedChapter } from '@/ui/stores/reader/persistence';
+import type { ParsedChapter } from '@/core/parser';
 import { useReaderStore } from '@/ui/stores/reader';
 
 import { createGmStorageMock, stubGmStorage } from '../../../testUtils/gmStorage';
@@ -83,6 +85,74 @@ describe('ReaderStore - navigation & toast', () => {
 
     store.clearError();
   });
+
+  for (const direction of ['next', 'prev'] as const) {
+    for (const cache of ['session', 'persisted', 'missing'] as const) {
+      it(`${direction} navigation reconciles ${cache} cache before URL heuristics`, async () => {
+        const store = useReaderStore();
+        const targetUrl = 'https://example.com/2.html';
+        const first: ParsedChapter = {
+          title: '第1章',
+          content: '<p>first</p>',
+          rawContent: '<p>first</p>',
+          url: 'https://example.com/book/1/1.html',
+          indexUrl: 'https://example.com/book/1/index.html',
+          [direction === 'next' ? 'nextUrl' : 'prevUrl']: `${targetUrl}#content`,
+          confidence: 1,
+          method: 'rule',
+        };
+        store.setChapter(first);
+        const available = () => (direction === 'next' ? store.hasNext : store.hasPrev);
+        const load = (source: 'auto' | 'manual') =>
+          direction === 'next' ? store.loadNextChapter(source) : store.loadPrevChapter(source);
+        // The URL shape alone looks like a non-chapter, but parsed content is stronger evidence.
+        expect(available()).toBe(false);
+        const cached = {
+          chapter: {
+            ...first,
+            url: targetUrl,
+            content: '<p>cached chapter</p>',
+            nextUrl: undefined,
+            prevUrl: undefined,
+          },
+          cachedAt: Date.now(),
+        };
+        if (cache === 'session') {
+          store.cachedContents.set(targetUrl, cached);
+        } else {
+          store.persistedUrls.add(targetUrl);
+          if (cache === 'persisted') {
+            persistCachedChapter(getCurrentBookCacheKey(first.indexUrl)!, targetUrl, cached);
+          }
+        }
+        const read = vi.mocked(GM_getValue);
+        read.mockClear();
+        expect(available()).toBe(true);
+        expect(read).not.toHaveBeenCalled(); // Computed UI state never reads chapter bodies.
+        const request = vi.fn();
+        vi.stubGlobal('GM_xmlhttpRequest', request);
+        expect(await load('auto')).toBe(cache !== 'missing');
+        expect(request).not.toHaveBeenCalled();
+        expect(store.isLoadingNext).toBe(false);
+        expect(store.isLoadingPrev).toBe(false);
+        expect(store.error).toBeNull();
+        if (cache === 'missing') {
+          expect(store.persistedUrls.has(targetUrl)).toBe(false);
+          expect(available()).toBe(false);
+          read.mockClear();
+          expect(await load('manual')).toBe(false);
+          expect(read).not.toHaveBeenCalled();
+          expect(store.error).toBe(direction === 'next' ? '已经是最后一章了' : '已经是第一章了');
+        } else {
+          expect(store.chapters).toHaveLength(2);
+          expect(store.chapters[direction === 'next' ? 1 : 0].chapter.content).toBe(
+            '<p>cached chapter</p>'
+          );
+        }
+        store.deactivate();
+      });
+    }
+  }
 
   it('setError auto-dismisses after 3 seconds', () => {
     vi.useFakeTimers();

@@ -19889,18 +19889,12 @@ ul, ol {
 			}
 		}
 	}
-	function shouldPersistNavigationBlock(source) {
-		return source === "manual";
-	}
-	function shouldUseNavigationFailureCooldown(source) {
-		return source === "auto";
-	}
 	function isBookIndexUrl(targetUrl, refChapter) {
 		const indexUrl = refChapter.chapter.indexUrl;
 		return !!indexUrl && normalizeUrl(normalizeUrlForFetch(targetUrl)) === normalizeUrl(indexUrl);
 	}
-	function leadsOutOfBook(targetUrl, refChapter) {
-		return isBookIndexUrl(targetUrl, refChapter) || isInvalidChapterUrl(targetUrl, refChapter.chapter.url);
+	function leadsOutOfBook(targetUrl, refChapter, hasCacheCandidate = false) {
+		return isBookIndexUrl(targetUrl, refChapter) || !hasCacheCandidate && isInvalidChapterUrl(targetUrl, refChapter.chapter.url);
 	}
 	function boundaryMessage(refChapter, endMessage) {
 		if (refChapter?.sectionProgress) return SECTION_MERGING_TOAST;
@@ -19925,7 +19919,7 @@ ul, ol {
 			if (isNext) refChapter.chapter.nextUrl = targetUrl;
 			else refChapter.chapter.prevUrl = targetUrl;
 		}
-		if (leadsOutOfBook(targetUrl, refChapter)) {
+		if (leadsOutOfBook(targetUrl, refChapter, ctx.cachedContents.value.has(targetUrl) || ctx.persistedUrls.value.has(targetUrl))) {
 			if (source === "manual") ctx.showToast(endMessage, "info");
 			return null;
 		}
@@ -19938,8 +19932,6 @@ ul, ol {
 			if (source === "manual") ctx.showToast(endMessage, "info");
 			return null;
 		}
-		const failure = ctx.navFailures.get(navKey);
-		if (shouldUseNavigationFailureCooldown(source) && failure && Date.now() < failure.nextRetryAt) return null;
 		if (ctx.loadedUrls.value.has(targetUrl)) return null;
 		return {
 			direction,
@@ -19953,6 +19945,12 @@ ul, ol {
 			sectionMerge: null,
 			targetUrl
 		};
+	}
+	function shouldPersistNavigationBlock(source) {
+		return source === "manual";
+	}
+	function shouldUseNavigationFailureCooldown(source) {
+		return source === "auto";
 	}
 	function createNavigation(ctx) {
 		async function loadChapter(direction, source) {
@@ -19976,6 +19974,16 @@ ul, ol {
 						trimCachedContents(ctx.cachedContents.value, 500);
 						return await insertCachedChapter(ctx, sessionCached, load.isNext ? "append" : "prepend");
 					}
+					if (leadsOutOfBook(load.targetUrl, load.refChapter)) {
+						outcome = "invalid-url";
+						if (source === "manual") ctx.showToast(load.endMessage, "info");
+						return false;
+					}
+				}
+				const failure = ctx.navFailures.get(load.navKey);
+				if (shouldUseNavigationFailureCooldown(source) && failure && Date.now() < failure.nextRetryAt) {
+					outcome = "cooldown";
+					return false;
 				}
 				if (load.pendingAbortRef.value) {
 					load.pendingAbortRef.value();
@@ -20283,14 +20291,18 @@ ul, ol {
 		const hasNext = computed(() => {
 			const lastChapter = chapters.value[chapters.value.length - 1];
 			const nextUrl = lastChapter?.chapter.nextUrl;
-			if (!nextUrl || leadsOutOfBook(nextUrl, lastChapter)) return false;
+			if (!nextUrl) return false;
+			const targetUrl = normalizeUrlForFetch(nextUrl);
+			if (leadsOutOfBook(targetUrl, lastChapter, cachedContents.value.has(targetUrl) || persistedUrls.value.has(targetUrl))) return false;
 			if (blockedNavUrls.value.has(normalizeUrlForBlock(nextUrl))) return false;
 			return !isVipBlockedUrl(nextUrl);
 		});
 		const hasPrev = computed(() => {
 			const firstChapter = chapters.value[0];
 			const prevUrl = firstChapter?.chapter.prevUrl;
-			if (!prevUrl || leadsOutOfBook(prevUrl, firstChapter)) return false;
+			if (!prevUrl) return false;
+			const targetUrl = normalizeUrlForFetch(prevUrl);
+			if (leadsOutOfBook(targetUrl, firstChapter, cachedContents.value.has(targetUrl) || persistedUrls.value.has(targetUrl))) return false;
 			if (blockedNavUrls.value.has(normalizeUrlForBlock(prevUrl))) return false;
 			return !isVipBlockedUrl(prevUrl);
 		});
@@ -20378,8 +20390,9 @@ ul, ol {
 		}
 		function getPersistedCachedChapterForCurrentBook(url) {
 			const cacheBook = getCurrentBookCacheKey(chapter.value?.indexUrl);
-			if (!cacheBook) return null;
-			return getPersistedCachedChapter(cacheBook, url);
+			const cached = cacheBook ? getPersistedCachedChapter(cacheBook, url) : null;
+			if (!cached) persistedUrls.value.delete(url);
+			return cached;
 		}
 		function persistCache$1(skipChapterUrls) {
 			const cacheBook = getCurrentBookCacheKey(chapter.value?.indexUrl);

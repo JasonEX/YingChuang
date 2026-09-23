@@ -130,14 +130,22 @@ export const useReaderStore = defineStore('reader', () => {
   const hasNext = computed(() => {
     const lastChapter = chapters.value[chapters.value.length - 1];
     const nextUrl = lastChapter?.chapter.nextUrl;
-    if (!nextUrl || leadsOutOfBook(nextUrl, lastChapter)) return false;
+    if (!nextUrl) return false;
+    const targetUrl = normalizeUrlForFetch(nextUrl);
+    const hasCacheCandidate =
+      cachedContents.value.has(targetUrl) || persistedUrls.value.has(targetUrl);
+    if (leadsOutOfBook(targetUrl, lastChapter, hasCacheCandidate)) return false;
     if (blockedNavUrls.value.has(normalizeUrlForBlock(nextUrl))) return false;
     return !isVipBlockedUrl(nextUrl);
   });
   const hasPrev = computed(() => {
     const firstChapter = chapters.value[0];
     const prevUrl = firstChapter?.chapter.prevUrl;
-    if (!prevUrl || leadsOutOfBook(prevUrl, firstChapter)) return false;
+    if (!prevUrl) return false;
+    const targetUrl = normalizeUrlForFetch(prevUrl);
+    const hasCacheCandidate =
+      cachedContents.value.has(targetUrl) || persistedUrls.value.has(targetUrl);
+    if (leadsOutOfBook(targetUrl, firstChapter, hasCacheCandidate)) return false;
     if (blockedNavUrls.value.has(normalizeUrlForBlock(prevUrl))) return false;
     return !isVipBlockedUrl(prevUrl);
   });
@@ -256,8 +264,9 @@ export const useReaderStore = defineStore('reader', () => {
 
   function getPersistedCachedChapterForCurrentBook(url: string): CachedChapter | null {
     const cacheBook = getCurrentBookCacheKey(chapter.value?.indexUrl);
-    if (!cacheBook) return null;
-    return getPersistedCachedChapter(cacheBook, url);
+    const cached = cacheBook ? getPersistedCachedChapter(cacheBook, url) : null;
+    if (!cached) persistedUrls.value.delete(url);
+    return cached;
   }
 
   function persistCache(skipChapterUrls?: ReadonlySet<string>): void {

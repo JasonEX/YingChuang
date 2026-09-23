@@ -1226,6 +1226,19 @@ describe('ReaderStore - workflows', () => {
     expect(await store.loadNextChapter('auto')).toBe(false);
     expect(mockFetchAndParseUrl).toHaveBeenCalledTimes(1);
     expect(store.error).toBeNull();
+
+    // Cache-all can supply the chapter during backoff; reading it needs no network retry.
+    const cachedChapter = {
+      ...store.chapters[0].chapter,
+      url: 'https://example.com/book/1/2.html',
+      title: '第2章',
+      content: '<p>已经缓存的正文</p>',
+      nextUrl: undefined,
+    };
+    store.cachedContents.set(cachedChapter.url, { chapter: cachedChapter, cachedAt: Date.now() });
+    expect(await store.loadNextChapter('auto')).toBe(true);
+    expect(store.chapters.at(-1)?.chapter.content).toBe(cachedChapter.content);
+    expect(mockFetchAndParseUrl).toHaveBeenCalledTimes(1);
   });
 
   it('persists a terminal block when manual next receives a TOC-like page', async () => {
