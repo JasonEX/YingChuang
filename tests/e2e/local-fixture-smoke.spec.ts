@@ -1029,7 +1029,7 @@ test('applies the Sto9 adapter and loads its complete dynamic catalog', async ({
   const originalContent = await readerContent.first().innerHTML();
   await readerRoot.getByRole('button', { name: '打开设置', exact: true }).click();
   await readerRoot.getByRole('button', { name: '简体', exact: true }).click();
-  await expect(readerContent.first()).toContainText('黒竜看著著作，连忙穿过干涸的河床。车龙神福。');
+  await expect(readerContent.first()).toContainText('黑龙看着著作，连忙穿过干涸的河床。车龙神福。');
   await readerRoot.getByRole('button', { name: '关闭设置', exact: true }).click();
   await readerRoot.getByRole('button', { name: '打开目录', exact: true }).click();
   await expect(readerRoot.locator('.mnr-chapter-button').last()).toContainText('援军到了');
