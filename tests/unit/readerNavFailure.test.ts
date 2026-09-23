@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { clearNavFailure, recordNavFailure } from '@/ui/stores/reader/navFailure';
 import {
-  calculateBackoff,
   extractBookId,
   extractChapterNumber,
   extractTocPaginationSeed,
@@ -15,34 +15,10 @@ import {
   normalizeUrlForFetch,
   resolveUrl,
 } from '@/ui/stores/reader/utils';
-import { clearNavFailure, recordNavFailure } from '@/ui/stores/reader/navFailure';
 import { MAX_NAV_FAILURES, MAX_SESSION_CACHE } from '@/ui/stores/reader/types';
 import { normalizeTextForVipDetection } from '@/core/detection';
 
-type NavFailureMap = Map<string, { count: number; nextRetryAt: number }>;
-
-describe('calculateBackoff', () => {
-  it('returns base delay for first failure', () => {
-    expect(calculateBackoff(1)).toBe(1500);
-  });
-
-  it('doubles delay for each subsequent failure', () => {
-    expect(calculateBackoff(2)).toBe(3000);
-    expect(calculateBackoff(3)).toBe(6000);
-    expect(calculateBackoff(4)).toBe(12000);
-  });
-
-  it('caps at maxMs', () => {
-    expect(calculateBackoff(10)).toBe(30000);
-    expect(calculateBackoff(20)).toBe(30000);
-  });
-
-  it('respects custom baseMs and maxMs', () => {
-    expect(calculateBackoff(1, 1000, 5000)).toBe(1000);
-    expect(calculateBackoff(3, 1000, 5000)).toBe(4000);
-    expect(calculateBackoff(4, 1000, 5000)).toBe(5000); // capped
-  });
-});
+type NavFailureMap = Map<string, { count: number; failedAt: number }>;
 
 describe('recordNavFailure', () => {
   let failures: NavFailureMap;
@@ -57,22 +33,20 @@ describe('recordNavFailure', () => {
     vi.useRealTimers();
   });
 
-  it('records first failure with count=1 and correct backoff', () => {
+  it('records first failure with count=1 and its occurrence time', () => {
     const count = recordNavFailure(failures, 'url1', { maxFailures: 200 });
     expect(count).toBe(1);
     expect(failures.get('url1')).toBeDefined();
     expect(failures.get('url1')!.count).toBe(1);
-    // backoff for count=1 is 1500ms
-    expect(failures.get('url1')!.nextRetryAt).toBe(Date.now() + 1500);
+    expect(failures.get('url1')!.failedAt).toBe(Date.now());
   });
 
-  it('increments count on subsequent failures with exponential backoff', () => {
+  it('increments count on subsequent failures without granting a new retry window', () => {
     recordNavFailure(failures, 'url1', { maxFailures: 200 });
     const count2 = recordNavFailure(failures, 'url1', { maxFailures: 200 });
     expect(count2).toBe(2);
     expect(failures.get('url1')!.count).toBe(2);
-    // backoff for count=2 is 3000ms
-    expect(failures.get('url1')!.nextRetryAt).toBe(Date.now() + 3000);
+    expect(failures.get('url1')!.failedAt).toBe(Date.now());
   });
 
   it('trims failures when exceeding maxFailures', () => {
@@ -87,7 +61,7 @@ describe('recordNavFailure', () => {
     vi.setSystemTime(new Date(Date.now() + 5000));
     recordNavFailure(failures, 'url_new', { maxFailures: 3 });
     expect(failures.size).toBe(3);
-    // url0 had the earliest nextRetryAt, should be trimmed
+    // url0 had the earliest failedAt, should be trimmed
     expect(failures.has('url0')).toBe(false);
     expect(failures.has('url_new')).toBe(true);
   });
@@ -96,8 +70,8 @@ describe('recordNavFailure', () => {
 describe('clearNavFailure', () => {
   it('removes the failure record for a key', () => {
     const failures: NavFailureMap = new Map();
-    failures.set('url1', { count: 3, nextRetryAt: Date.now() + 10000 });
-    failures.set('url2', { count: 1, nextRetryAt: Date.now() + 1000 });
+    failures.set('url1', { count: 3, failedAt: Date.now() + 10000 });
+    failures.set('url2', { count: 1, failedAt: Date.now() + 1000 });
 
     clearNavFailure(failures, 'url1');
     expect(failures.has('url1')).toBe(false);
@@ -106,7 +80,7 @@ describe('clearNavFailure', () => {
 
   it('is a no-op for non-existent key', () => {
     const failures: NavFailureMap = new Map();
-    failures.set('url1', { count: 1, nextRetryAt: Date.now() });
+    failures.set('url1', { count: 1, failedAt: Date.now() });
 
     clearNavFailure(failures, 'nonexistent');
     expect(failures.size).toBe(1);

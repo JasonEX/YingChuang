@@ -106,7 +106,6 @@ export const deqixsRule: SiteRule = {
   },
   advanced: {
     checkSection: true,
-    sectionDelayMs: 800,
   },
   meta: {
     source: 'builtin',

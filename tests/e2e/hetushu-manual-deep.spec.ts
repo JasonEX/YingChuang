@@ -257,7 +257,7 @@ async function openDrawer(page: Page): Promise<ReaderDeepState> {
     return true;
   });
   if (!openedByClick) {
-    await page.keyboard.press('Tab');
+    await page.keyboard.press('c');
   }
   await page.waitForFunction(
     () => {

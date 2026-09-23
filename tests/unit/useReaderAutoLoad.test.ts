@@ -101,6 +101,7 @@ describe('useReaderAutoLoad', () => {
     }
     const readerStore = reactive({
       chapters,
+      cacheProgress: { running: false },
       currentChapterIndex: overrides.currentChapterIndex ?? 0,
       hasNext: overrides.hasNext ?? true,
       isLoadingNext: overrides.isLoadingNext ?? false,
@@ -140,6 +141,32 @@ describe('useReaderAutoLoad', () => {
     await Promise.resolve();
     await nextTick();
   }
+
+  it('pauses speculative loading while batch caching owns the background work', async () => {
+    const mainEl = document.createElement('main');
+    defineScrollMetrics(mainEl, { scrollHeight: 5000, scrollTop: 2900, clientHeight: 600 });
+    const opts = createAutoLoadOptions({
+      mainRef: mainEl,
+      readerStore: { cacheProgress: { running: true } },
+    });
+    const result = useReaderAutoLoad(opts);
+    await vi.advanceTimersByTimeAsync(60_000);
+    result.scheduleAutoLoadNext('sentinel');
+    expect(opts.readerStore.loadNextChapter).not.toHaveBeenCalled();
+    opts.readerStore.cacheProgress.running = false;
+    await flushPromises();
+    expect(opts.readerStore.loadNextChapter).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not preload past an incomplete current chapter', async () => {
+    const mainEl = document.createElement('main');
+    defineScrollMetrics(mainEl, { scrollHeight: 500, scrollTop: 0, clientHeight: 600 });
+    const entry = { ...makeChapter('https://example.com/chapter/1'), sectionsIncomplete: true };
+    const opts = createAutoLoadOptions({ mainRef: mainEl, chapters: [entry] });
+    useReaderAutoLoad(opts);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(opts.readerStore.loadNextChapter).not.toHaveBeenCalled();
+  });
 
   it('does nothing when mainRef is null', () => {
     const opts = createAutoLoadOptions({ mainRef: null });
@@ -600,7 +627,7 @@ describe('useReaderAutoLoad', () => {
     expect(opts.readerStore.loadNextChapter).toHaveBeenCalledWith('auto');
   });
 
-  it('applies a short cooldown after failed auto preload and retries only after a later trigger', async () => {
+  it('does not grant another retry budget after a failed auto preload', async () => {
     const mainEl = document.createElement('div');
     defineScrollMetrics(mainEl, { scrollHeight: 5000, scrollTop: 2900, clientHeight: 600 });
     const opts = createAutoLoadOptions({ mainRef: mainEl });
@@ -620,10 +647,10 @@ describe('useReaderAutoLoad', () => {
     expect(opts.readerStore.loadNextChapter).toHaveBeenCalledTimes(1);
 
     vi.advanceTimersByTime(1);
-    expect(opts.readerStore.loadNextChapter).toHaveBeenCalledTimes(2);
+    expect(opts.readerStore.loadNextChapter).toHaveBeenCalledTimes(1);
   });
 
-  it('also cools down when auto preload rejects', async () => {
+  it('also stops automatic loading when preload rejects', async () => {
     const mainEl = document.createElement('div');
     defineScrollMetrics(mainEl, { scrollHeight: 5000, scrollTop: 2900, clientHeight: 600 });
     const opts = createAutoLoadOptions({ mainRef: mainEl });
@@ -638,9 +665,9 @@ describe('useReaderAutoLoad', () => {
     expect(opts.readerStore.loadNextChapter).toHaveBeenCalledTimes(1);
 
     result.scheduleAutoLoadNext('sentinel');
-    vi.advanceTimersByTime(6000);
+    vi.advanceTimersByTime(60_000);
 
-    expect(opts.readerStore.loadNextChapter).toHaveBeenCalledTimes(2);
+    expect(opts.readerStore.loadNextChapter).toHaveBeenCalledTimes(1);
   });
 
   it('clearAutoLoadTimer clears the pending hard-gate timer', () => {

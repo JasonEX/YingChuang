@@ -45,6 +45,7 @@ describe('site request lifecycle', () => {
         setAbort,
         onResult,
         timeoutMs: 100,
+        retries: 0,
       });
       if (reason === 'cancelled') setAbort.mock.calls[0][0]();
       else await vi.advanceTimersByTimeAsync(100);
@@ -158,7 +159,13 @@ describe('site request lifecycle', () => {
     vi.stubGlobal('fetch', fetchMock);
     vi.stubGlobal('GM_xmlhttpRequest', gm);
     const setAbort = vi.fn();
-    const pending = requestSiteData(url, { responseType: 'text', parse, setAbort, timeoutMs: 100 });
+    const pending = requestSiteData(url, {
+      responseType: 'text',
+      parse,
+      setAbort,
+      timeoutMs: 100,
+      retries: 0,
+    });
     await vi.advanceTimersByTimeAsync(100);
     expect(await pending).toBeNull();
     expect(gm).not.toHaveBeenCalled();
@@ -173,7 +180,11 @@ describe('site request lifecycle', () => {
         'fetch',
         vi.fn(async () => {
           if (failure === 'network') throw new Error('offline');
-          return { ok: failure !== 'http', text: async () => '<html>challenge</html>' };
+          return {
+            status: failure === 'http' ? 403 : 200,
+            ok: failure !== 'http',
+            text: async () => '<html>challenge</html>',
+          };
         })
       );
       const gm = vi.fn((options: GM_xmlhttpRequestOptions) => {
@@ -219,6 +230,7 @@ describe('site request lifecycle', () => {
         parse,
         setAbort,
         timeoutMs: 100,
+        retries: 0,
       });
       if (reason === 'cancel') setAbort.mock.calls[0][0]();
       else await vi.advanceTimersByTimeAsync(100);
@@ -240,7 +252,7 @@ describe('site request lifecycle', () => {
         return { abort: vi.fn() };
       });
       expect(
-        await requestSiteData(url, { responseType: 'json', parse, setAbort: vi.fn() })
+        await requestSiteData(url, { responseType: 'json', parse, setAbort: vi.fn(), retries: 0 })
       ).toBeNull();
       expect(vi.getTimerCount()).toBe(0);
     }
@@ -263,4 +275,35 @@ describe('site request lifecycle', () => {
     ).toBeNull();
     expect(gm).not.toHaveBeenCalled();
   });
+});
+
+it('does not switch to GM or retry a rate-limited directory request', async () => {
+  const rateUrl = 'https://site-rate-limit.test/catalog';
+  const native = vi.fn(
+    async () => new Response('', { status: 429, headers: { 'Retry-After': '30' } })
+  );
+  const gm = vi.fn();
+  vi.stubGlobal('unsafeWindow', { fetch: native });
+  vi.stubGlobal('GM_xmlhttpRequest', gm);
+  const onResult = vi.fn();
+  expect(
+    await requestSiteData(rateUrl, { responseType: 'text', parse, setAbort: vi.fn(), onResult })
+  ).toBeNull();
+  expect(native).toHaveBeenCalledTimes(1);
+  expect(gm).not.toHaveBeenCalled();
+  expect(onResult).toHaveBeenCalledWith(expect.objectContaining({ status: 429, reason: 'http' }));
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it('counts a transport fallback within the three-attempt operation budget', async () => {
+  vi.stubGlobal('unsafeWindow', { fetch: vi.fn(async () => ({ ok: false, status: 403 })) });
+  const gm = vi.fn((options: GM_xmlhttpRequestOptions) => {
+    options.onload(response('', 503));
+    return { abort: vi.fn() };
+  });
+  vi.stubGlobal('GM_xmlhttpRequest', gm);
+  const pending = requestSiteData(url, { responseType: 'text', parse, setAbort: vi.fn() });
+  await vi.runAllTimersAsync();
+  expect(await pending).toBeNull();
+  expect(gm).toHaveBeenCalledTimes(2);
 });

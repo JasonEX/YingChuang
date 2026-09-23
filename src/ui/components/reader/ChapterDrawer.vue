@@ -53,10 +53,10 @@
         <button
           class="mnr-offline-action primary"
           type="button"
-          :disabled="loading"
-          @click="emit('cacheAll')"
+          :disabled="loading || chapters.length === 0"
+          @click="handleCacheAction"
         >
-          {{ cacheProgress.running ? '取消' : '缓存本书' }}
+          {{ cacheActionLabel }}
         </button>
       </div>
 
@@ -88,9 +88,9 @@
           v-if="persistedCount > 0"
           class="mnr-offline-action danger"
           type="button"
-          @click="emit('clearCache')"
+          @click="confirm('clear', () => emit('clearCache'))"
         >
-          清除缓存
+          {{ armed === 'clear' ? '确认清除' : '清除缓存' }}
         </button>
       </div>
     </section>
@@ -100,7 +100,10 @@
       <span>加载目录中...</span>
     </div>
 
-    <div v-else-if="chapters.length === 0" class="mnr-drawer-state">暂无目录</div>
+    <div v-else-if="chapters.length === 0" class="mnr-drawer-state">
+      <span>暂无目录</span>
+      <button class="mnr-offline-action" type="button" @click="emit('reloadToc')">重新加载</button>
+    </div>
 
     <div v-else-if="filteredChapters.length === 0" class="mnr-drawer-state">没有匹配的章节</div>
 
@@ -112,16 +115,25 @@
         <li v-for="ch in visibleChapters" :key="ch.url">
           <button
             class="mnr-chapter-button"
-            :class="{
-              active: ch.isCurrent,
-              persisted: ch.isPersisted && !ch.isCurrent,
-            }"
+            :class="{ active: ch.isCurrent }"
             :aria-current="ch.isCurrent ? 'page' : undefined"
             @click="handleSelect(ch)"
           >
             <span
-              v-if="ch.isPersisted && !ch.isCurrent"
-              class="mnr-cache-mark"
+              v-if="ch.access === 'locked'"
+              class="mnr-chapter-mark mnr-lock-mark"
+              role="img"
+              aria-label="付费章节"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="5" y="11" width="14" height="10" rx="2" />
+                <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+              </svg>
+            </span>
+            <span
+              v-else-if="ch.isPersisted && !ch.isCurrent"
+              class="mnr-chapter-mark mnr-cache-mark"
+              role="img"
               aria-label="已离线缓存"
             >
               <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -139,6 +151,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
 import { useEventListener } from '@/ui/composables/useEventListener';
+import { useTwoStepConfirm } from '@/ui/composables/useTwoStepConfirm';
 import type { CacheProgressState, TocEntryWithStatus } from '@/ui/stores/reader';
 import { MnrSpinner } from '@/ui/components/common';
 import { getDeepActiveElement } from '@/ui/focus';
@@ -155,6 +168,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   close: [];
   select: [entry: TocEntryWithStatus];
+  reloadToc: [];
   cacheAll: [];
   retryCache: [];
   clearCache: [];
@@ -180,7 +194,18 @@ const currentChapterNumber = computed(() => {
   const index = props.chapters.findIndex(chapter => chapter.isCurrent);
   return index >= 0 ? index + 1 : 0;
 });
+const { armed, confirm, disarm } = useTwoStepConfirm<'cache' | 'clear'>();
+/** Chapters a full-book cache would still save; locked chapters are never cached. */
+const uncachedCount = computed(
+  () => props.chapters.filter(chapter => chapter.access !== 'locked' && !chapter.isPersisted).length
+);
+const cacheActionLabel = computed(() => {
+  if (props.cacheProgress.running) return '取消';
+  return armed.value === 'cache' ? '开始缓存' : '缓存本书';
+});
 const offlineStatus = computed(() => {
+  if (armed.value === 'cache') return `将缓存 ${uncachedCount.value} 章，再点一次开始`;
+  if (armed.value === 'clear') return `将删除已保存的 ${props.persistedCount} 章，再点一次确认`;
   if (props.cacheProgress.running) {
     return props.cacheProgress.total > 0
       ? `已缓存 ${props.cacheProgress.done} / ${props.cacheProgress.total} 章`
@@ -239,6 +264,16 @@ function handleSelect(entry: TocEntryWithStatus) {
   emit('close');
 }
 
+function handleCacheAction() {
+  // Cancelling, or a book with nothing left to save, starts no requests and needs no second click.
+  if (props.cacheProgress.running || uncachedCount.value === 0) {
+    disarm();
+    emit('cacheAll');
+    return;
+  }
+  confirm('cache', () => emit('cacheAll'));
+}
+
 function trapFocus(event: globalThis.KeyboardEvent) {
   const drawer = drawerRef.value;
   if (!drawer) return;
@@ -280,13 +315,16 @@ useEventListener('keydown', handleDialogKeydown, { capture: true });
 watch(
   () => props.isOpen,
   async open => {
-    if (open) {
-      query.value = '';
-      await scrollCurrentIntoView();
-      closeButtonRef.value?.focus({
-        preventScroll: true,
-      });
+    if (!open) {
+      // A confirmation armed before closing must not carry over to the next opening.
+      disarm();
+      return;
     }
+    query.value = '';
+    await scrollCurrentIntoView();
+    closeButtonRef.value?.focus({
+      preventScroll: true,
+    });
   },
   { flush: 'post' }
 );
@@ -475,9 +513,9 @@ watch(
   justify-content: center;
   gap: 10px;
   padding: 40px 20px;
-  color: var(--mnr-text, #666);
+  /* Dim the text only, so the retry button keeps its full contrast. */
+  color: color-mix(in srgb, var(--mnr-text, #666) 78%, transparent);
   text-align: center;
-  opacity: 0.78;
 }
 
 .mnr-drawer-content {
@@ -543,18 +581,22 @@ watch(
   font-weight: 600;
 }
 
-.mnr-chapter-button.persisted,
-.mnr-cache-mark {
-  color: #388e3c;
-}
-
-.mnr-cache-mark {
+.mnr-chapter-mark {
   flex: 0 0 auto;
   width: 14px;
   height: 14px;
 }
 
-.mnr-cache-mark svg {
+/* Only the icon carries the cached color; titles keep the readable text color. */
+.mnr-cache-mark {
+  color: #388e3c;
+}
+
+.mnr-lock-mark {
+  opacity: 0.6;
+}
+
+.mnr-chapter-mark svg {
   display: block;
   width: 100%;
   height: 100%;

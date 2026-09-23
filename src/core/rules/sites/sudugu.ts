@@ -30,7 +30,6 @@ export const suduguRule: SiteRule = {
   },
   advanced: {
     checkSection: true,
-    sectionDelayMs: 800,
   },
   meta: {
     source: 'builtin',

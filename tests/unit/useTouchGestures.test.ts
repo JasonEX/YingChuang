@@ -322,6 +322,45 @@ describe('useTouchGestures', () => {
     expect(onSwipeLeft).toHaveBeenCalledTimes(1);
   });
 
+  it('leaves edge swipes to system back gestures but keeps boundary pulls there', () => {
+    vi.spyOn(window, 'getSelection').mockReturnValue({ toString: () => '' } as Selection);
+    Object.defineProperty(window, 'innerWidth', { value: 390, configurable: true });
+    const onBoundaryPull = vi.fn();
+    const { onSwipeLeft, onSwipeRight, handleTouchStart, handleTouchEnd } = createGestures({
+      getBoundaryDirection: () => null,
+      onBoundaryPull,
+    });
+
+    handleTouchStart(makeTouchEvent('touchstart', [{ identifier: 0, clientX: 10, clientY: 200 }]));
+    expect(
+      handleTouchEnd(
+        makeTouchEvent('touchend', [], [{ identifier: 0, clientX: 250, clientY: 200 }])
+      )
+    ).toBe(false);
+    handleTouchStart(makeTouchEvent('touchstart', [{ identifier: 0, clientX: 380, clientY: 200 }]));
+    expect(
+      handleTouchEnd(
+        makeTouchEvent('touchend', [], [{ identifier: 0, clientX: 140, clientY: 200 }])
+      )
+    ).toBe(false);
+    expect(onSwipeRight).not.toHaveBeenCalled();
+    expect(onSwipeLeft).not.toHaveBeenCalled();
+
+    const pull = createGestures({ getBoundaryDirection: () => 'next', onBoundaryPull });
+    pull.handleTouchStart(
+      makeTouchEvent('touchstart', [{ identifier: 0, clientX: 10, clientY: 500 }])
+    );
+    pull.handleTouchMove(
+      makeTouchEvent('touchmove', [{ identifier: 0, clientX: 10, clientY: 430 }])
+    );
+    expect(
+      pull.handleTouchEnd(
+        makeTouchEvent('touchend', [], [{ identifier: 0, clientX: 10, clientY: 430 }])
+      )
+    ).toBe(true);
+    expect(onBoundaryPull).toHaveBeenCalledWith('next');
+  });
+
   it('ignores swipe where vertical movement dominates at the end', () => {
     vi.spyOn(window, 'getSelection').mockReturnValue({ toString: () => '' } as Selection);
 

@@ -21,18 +21,18 @@ import {
   type HostPageSnapshot,
   restoreHostPageSnapshot,
 } from '@/ui/stores/reader/hostPage';
-import { createApp, defineComponent, h, ref } from 'vue';
 import { getPageKind, getPageKindFromUrl, type PageKind } from '@/core/auto-enable/PageKind';
 import { installGlobalDebugErrorListeners, recordDebugEvent } from '@/core/debug/events';
-import { ReaderEntryButton, ReaderEntryPrompt } from '@/ui/components/entry';
 import { redactUrl, toDebugValue } from '@/core/debug/diagnostics';
 import { toProtectionOptions, useConfigStore } from '@/ui/stores/config';
+import { createApp } from 'vue';
 import { createPinia } from 'pinia';
 import { createShadowMount } from '@/ui/shadowMount';
 import { getRuleManager } from '@/core/rules/RuleManager';
 import { getRuleStorage } from '@/core/rules/RuleStorage';
 import { getSiteProtection } from '@/core/protection';
 import { normalizeUrlForFetch } from '@/core/utils/network';
+import { ReaderEntryButton } from '@/ui/components/entry';
 import { ReaderView } from '@/ui/components/reader';
 import { useReaderStore } from '@/ui/stores/reader';
 
@@ -191,75 +191,17 @@ async function runAutoEnable(): Promise<void> {
     return;
   }
 
-  // Set up prompt callback
-  manager.setPromptCallback(showPrompt);
-
   // Set up launch callback
   manager.setLaunchCallback(launchReader);
 
   // Execute the flow (will use cached decision)
   await manager.execute(document);
 
-  // If an explicit/detected chapter page failed to auto-launch, keep a manual entry visible.
+  // Medium-confidence detection and failed launches both leave a manual entry instead.
   if (!appState.isActive && decision.shouldEnable) {
     getSiteProtection().deactivate();
     showReaderEntry();
   }
-}
-
-/**
- * Show detection prompt to user
- */
-async function showPrompt(): Promise<{
-  accepted: boolean;
-  rememberForSite: boolean;
-}> {
-  return new Promise(resolve => {
-    // Create Shadow DOM mount point for CSS isolation
-    const { mountPoint, cleanup } = createShadowMount('mnr-entry-prompt-root');
-
-    // Track response
-    const promptVisible = ref(true);
-    let promptApp: ReturnType<typeof createApp> | null = null;
-    let settled = false;
-
-    const finish = (response: { accepted: boolean; rememberForSite: boolean }) => {
-      if (settled) return;
-      settled = true;
-      promptVisible.value = false;
-      window.setTimeout(() => {
-        promptApp?.unmount();
-        promptApp = null;
-        cleanup();
-        resolve(response);
-      }, 300);
-    };
-
-    // Create prompt component wrapper
-    const PromptWrapper = defineComponent({
-      setup() {
-        const handleRespond = (response: { accepted: boolean; rememberForSite: boolean }) => {
-          finish(response);
-        };
-
-        return () =>
-          h(ReaderEntryPrompt, {
-            visible: promptVisible.value,
-            onRespond: handleRespond,
-          });
-      },
-    });
-
-    try {
-      promptApp = createApp(PromptWrapper);
-      promptApp.mount(mountPoint);
-    } catch (e) {
-      settled = true;
-      cleanup();
-      console.error('[MNR] Failed to mount reader entry prompt:', e);
-      resolve({ accepted: false, rememberForSite: false });
-    }
-  });
 }
 
 /**
@@ -345,7 +287,7 @@ function hideOriginalContent(): void {
   const style = document.createElement('style');
   style.id = 'mnr-hide-original';
   style.textContent = `
-    body > *:not(#mnr-reader-root):not(#mnr-entry-prompt-root):not(script):not(style) {
+    body > *:not(#mnr-reader-root):not(script):not(style) {
       display: none !important;
     }
   `;
@@ -683,6 +625,19 @@ function registerMenuCommands(): void {
   GM_registerMenuCommand('复制诊断信息', () => {
     copyDiagnosticsFromMenu().catch(e => console.error('[MNR] Copy diagnostics error:', e));
   });
+
+  GM_registerMenuCommand('清空自定义 CSS', () => {
+    clearCustomCSSFromMenu().catch(e => console.error('[MNR] Clear custom CSS error:', e));
+  });
+}
+
+/** Custom CSS can hide the settings panel that edits it, so the menu keeps a way out. */
+async function clearCustomCSSFromMenu(): Promise<void> {
+  await ensureInitialized();
+  if (!pinia) return;
+  const configStore = useConfigStore(pinia);
+  configStore.setCustomCSS('');
+  await configStore.flushSave();
 }
 
 async function copyDiagnosticsFromMenu(): Promise<void> {

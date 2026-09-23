@@ -57,6 +57,9 @@ describe('ConfigStore - behavior', () => {
     expect(host.style.getPropertyValue('--mnr-on-link')).toBe(
       THEMES.find(t => t.id === 'dark')!.onLink
     );
+    expect(host.style.getPropertyValue('--mnr-danger')).toBe(
+      THEMES.find(t => t.id === 'dark')!.danger
+    );
     expect(document.documentElement.style.getPropertyValue('--mnr-bg')).toBe('');
   });
 
@@ -65,6 +68,7 @@ describe('ConfigStore - behavior', () => {
       expect(contrastRatio(theme.background, theme.text), theme.id).toBeGreaterThanOrEqual(7);
       expect(contrastRatio(theme.background, theme.link), theme.id).toBeGreaterThanOrEqual(4.5);
       expect(contrastRatio(theme.link, theme.onLink), theme.id).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(theme.background, theme.danger), theme.id).toBeGreaterThanOrEqual(4.5);
     }
   });
 

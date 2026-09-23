@@ -20,15 +20,15 @@ import {
   loadFetchDocument,
   parseCandidateDocument,
 } from './chapterFetch';
+import { CLOUDFLARE_TOAST, MAX_NAV_FAILURES, MAX_SESSION_CACHE, VIP_BLOCK_TOAST } from './types';
 import { getParser, type ParsedChapter } from '@/core/parser';
 import {
   insertCachedChapter,
   insertParsedChapter,
   rebuildChaptersFromCache,
 } from './chapterListMutations';
-import { MAX_NAV_FAILURES, MAX_SESSION_CACHE, VIP_BLOCK_TOAST } from './types';
+import { leadsOutOfBook, prepareChapterLoad } from './chapterLoadGuards';
 import { normalizeUrl, normalizeUrlForBlock, normalizeUrlForFetch } from './utils';
-import { prepareChapterLoad, validateTargetChapterUrl } from './chapterLoadGuards';
 import { detectTocPage } from './detection';
 import { fetchAndParseUrl } from '@/core/utils/network';
 import { getChapterDocumentBlockReason } from '@/core/detection';
@@ -65,17 +65,25 @@ export function createNavigation(ctx: NavigationContext) {
           trimCachedContents(ctx.cachedContents.value, MAX_SESSION_CACHE);
           return await insertCachedChapter(ctx, sessionCached, load.isNext ? 'append' : 'prepend');
         }
+
+        // An offline index may outlive its chapter body. Recheck before fetching on a miss.
+        if (leadsOutOfBook(load.targetUrl, load.refChapter)) {
+          outcome = 'invalid-url';
+          if (source === 'manual') ctx.showToast(load.endMessage, 'info');
+          return false;
+        }
+      }
+
+      // An exhausted automatic load requires explicit user intent, not a fresh retry budget.
+      if (source === 'auto' && ctx.navFailures.has(load.navKey)) {
+        outcome = 'failed-auto-load';
+        return false;
       }
 
       // Cancel in-flight request
       if (load.pendingAbortRef.value) {
         load.pendingAbortRef.value();
         load.pendingAbortRef.value = null;
-      }
-
-      if (!validateTargetChapterUrl(ctx, load, source)) {
-        outcome = 'invalid-url';
-        return false;
       }
 
       const referer = load.refChapter.chapter.url;
@@ -138,7 +146,7 @@ export function createNavigation(ctx: NavigationContext) {
       cleanupIframe?.();
 
       if (!parsed) {
-        const fetchDoc = await loadFetchDocument(ctx, load, runId, referer);
+        const fetchDoc = await loadFetchDocument(ctx, load, runId, referer, source);
         if (fetchDoc === 'abort') {
           outcome = 'abort';
           return false;
@@ -184,6 +192,9 @@ export function createNavigation(ctx: NavigationContext) {
         outcome = 'toc';
         if (shouldPersistNavigationBlock(source)) {
           ctx.blockedNavUrls.value.add(load.navKey);
+        } else {
+          // A preload cannot conclude the book ended; it backs off like any failed preload.
+          recordNavFailure(ctx.navFailures, load.navKey, { maxFailures: MAX_NAV_FAILURES });
         }
         if (source === 'manual') {
           ctx.showToast(load.endMessage, 'info');
@@ -329,7 +340,7 @@ export function createNavigation(ctx: NavigationContext) {
 
     const blockReason = getChapterDocumentBlockReason(result.doc);
     if (blockReason === 'cloudflare') {
-      ctx.showToast('Cloudflare 验证页面，请完成验证后重试', 'info', 4000);
+      ctx.showToast(CLOUDFLARE_TOAST, 'info', 4000);
       return;
     }
     if (blockReason === 'vip') {

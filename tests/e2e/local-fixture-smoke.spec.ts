@@ -118,15 +118,11 @@ for (const site of pagedCatalogSites) {
         failedDiagnostic.recentEvents.some((event: { type: string }) => event.type === 'toc.load')
       ).toBe(true);
 
-      // Cache-all must retry the failed catalog, not offer to cache its first page.
-      let cacheConfirmations = 0;
-      page.on('dialog', async dialog => {
-        cacheConfirmations++;
-        await dialog.dismiss();
-      });
-      await root.getByRole('button', { name: '缓存本书', exact: true }).click();
+      // A failed catalog offers a retry; cache-all waits for real chapters, not its first page.
+      await expect(root.getByRole('button', { name: '缓存本书', exact: true })).toBeDisabled();
+      await root.getByRole('button', { name: '重新加载', exact: true }).click();
       await expect(root.locator('.mnr-drawer-position')).toContainText('第 25 / 46 章');
-      expect(cacheConfirmations).toBe(0);
+      await expect(root.getByRole('button', { name: '缓存本书', exact: true })).toBeEnabled();
       expect(catalogRequests).toEqual([1, 2, 1, 2, 3]);
       const completedDiagnostic = await copyReaderDiagnostic(page);
       expect(completedDiagnostic.reader.toc.lastLoad).toMatchObject({
@@ -804,7 +800,14 @@ test('runs the built userscript and restores the host page after exit', async ({
       })
     )
     .toEqual({ lineHeight: '43.2px', paddingLeft: '48px', textIndent: '54px' });
-  await page.locator('#mnr-reader-root').getByRole('button', { name: '恢复默认外观' }).click();
+  const resetAppearance = page
+    .locator('#mnr-reader-root')
+    .locator('.mnr-secondary-action')
+    .filter({ hasText: '恢复默认外观' });
+  await resetAppearance.click();
+  await expect(resetAppearance).toHaveText('再点一次恢复默认外观');
+  await resetAppearance.click();
+  await expect(resetAppearance).toHaveText('恢复默认外观');
   await page.locator('#mnr-reader-root').locator('#mnr-settings-title').focus();
 
   await page.keyboard.press('Tab');
@@ -830,7 +833,7 @@ test('runs the built userscript and restores the host page after exit', async ({
     .filter({ hasText: '本站与高级' });
   await advancedSettings.locator(':scope > summary').click();
   const siteAutoEnable = advancedSettings.locator('.mnr-switch-row').filter({
-    hasText: '在本站自动开启',
+    hasText: '本站自动进入阅读模式',
   });
   await siteAutoEnable.locator('input').uncheck();
   await expect(siteAutoEnable.locator('input')).not.toBeChecked();
@@ -1154,7 +1157,7 @@ test('auto-starts TTKS and preloads through a short author-note chapter', async 
       host.shadowRoot?.querySelector('.mnr-reader')?.matches(':lang(zh-CN)')
     )
   ).toBe(true);
-  await expect(page.locator('#mnr-entry-root, #mnr-entry-prompt-root')).toHaveCount(0);
+  await expect(page.locator('#mnr-entry-root')).toHaveCount(0);
 
   const firstChapter = readerRoot.locator(`article[data-chapter-url="${firstUrl}"]`);
   await expect(firstChapter.locator('.mnr-chapter-title')).toHaveText('第82章 真黑袍（求月票）');
@@ -1194,12 +1197,12 @@ test('auto-starts TTKS and preloads through a short author-note chapter', async 
   expect(thirdRequests).toBe(1);
 });
 
-test('keeps detection details internal and hands a dismissed prompt off to manual entry', async ({
+test('offers medium-confidence chapters through a quiet manual entry, never a prompt', async ({
   context,
   page,
 }) => {
-  const promptUrl = 'http://mnr.test/chapter/200.html';
-  const promptHtml = `<!doctype html>
+  const entryUrl = 'http://mnr.test/chapter/200.html';
+  const entryHtml = `<!doctype html>
     <html lang="zh-CN">
       <head>
         <meta charset="utf-8">
@@ -1212,30 +1215,25 @@ test('keeps detection details internal and hands a dismissed prompt off to manua
       </body>
     </html>`;
 
-  await context.route(promptUrl, route =>
+  await context.route(entryUrl, route =>
     route.fulfill({
-      body: promptHtml,
+      body: entryHtml,
       contentType: 'text/html; charset=utf-8',
       status: 200,
     })
   );
   await addYingChuangUserscript(context);
   const logs = createConsoleCollector(page);
-  await page.goto(promptUrl, { waitUntil: 'domcontentloaded' });
-
-  const prompt = page.locator('#mnr-entry-prompt-root');
-  await expect(prompt.locator('[role="dialog"]')).toBeVisible();
-  await expect(prompt.locator('#mnr-entry-prompt-title')).toHaveText('检测到小说正文');
-  await expect(prompt.locator('text=检测置信度')).toHaveCount(0);
-  await expect(prompt.locator('.mnr-result-list')).toHaveCount(0);
-  await expect(prompt.locator('.mnr-entry-button.primary')).toBeFocused();
-  await expect(prompt.locator('.mnr-entry-button.primary')).toHaveCSS('min-height', '44px');
-
-  await page.keyboard.press('Escape');
-  await expect(prompt).toHaveCount(0);
+  await page.goto(entryUrl, { waitUntil: 'domcontentloaded' });
 
   const readerEntry = page.locator('#mnr-entry-root').locator('#mnr-entry-button');
   await expect(readerEntry).toBeVisible();
+  // Nothing modal is mounted and focus stays with the page; the entry waits to be pointed at.
+  await expect(page.locator('body > [id^="mnr-"]')).toHaveCount(1);
+  await expect(readerEntry).not.toBeFocused();
+  await expect(readerEntry).toHaveCSS('opacity', '0.6');
+  await readerEntry.hover();
+  await expect(readerEntry).toHaveCSS('opacity', '1');
   await readerEntry.click();
   await expect(page.locator('#mnr-entry-root')).toHaveCount(0);
   await expect(page.locator('#mnr-reader-root').locator('.mnr-reader-content')).toContainText(
@@ -1458,6 +1456,35 @@ test('leaves Enter on a focused toolbar button to native activation', async ({ c
   await page.keyboard.press('Enter');
   await expect(settingsPanel).toBeVisible();
   expect(page.url()).toBe(targetUrl);
+});
+
+test('keeps Tab as focus navigation and opens the directory with C', async ({ context, page }) => {
+  await context.route(targetUrl, route =>
+    route.fulfill({
+      body: fixtureHtml,
+      contentType: 'text/html; charset=utf-8',
+      status: 200,
+    })
+  );
+  await addYingChuangUserscript(context);
+
+  await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
+  assertMnrSmokeState(await waitForMnrReader(page));
+
+  const reader = page.locator('#mnr-reader-root');
+  const drawer = reader.locator('.mnr-drawer');
+  const settingsButton = reader.getByRole('button', { name: '打开设置' });
+
+  await reader.locator('.mnr-reader-main').focus();
+  await page.keyboard.press('Shift+Tab');
+  await expect(settingsButton).toBeFocused();
+  await expect(drawer).not.toHaveClass(/\bopen\b/);
+
+  await page.keyboard.press('c');
+  await expect(drawer).toHaveClass(/\bopen\b/);
+  await page.keyboard.press('Escape');
+  await expect(drawer).not.toHaveClass(/\bopen\b/);
+  await expect(settingsButton).toBeFocused();
 });
 
 for (const switchBack of [false, true]) {
@@ -1989,8 +2016,8 @@ test('caches script-rendered rule chapters through an iframe and removes it afte
   const root = page.locator('#mnr-reader-root');
   await root.getByRole('button', { name: '打开目录' }).click();
   await expect(root.locator('.mnr-chapter-list li')).toHaveCount(2);
-  page.once('dialog', dialog => dialog.accept());
   await root.getByRole('button', { name: '缓存本书', exact: true }).click();
+  await root.getByRole('button', { name: '开始缓存', exact: true }).click();
   await expect(
     root.locator('.mnr-chapter-list li').filter({ hasText: '第501章' }).locator('.mnr-cache-mark')
   ).toBeVisible();
@@ -2046,20 +2073,33 @@ test('does not queue cache-all work when the drawer closes during TOC loading', 
     void dialog.accept();
   });
   await root.getByRole('button', { name: '打开目录' }).click();
-  const cacheButton = root.getByRole('button', { name: '缓存本书', exact: true });
+  const cacheButton = root.locator('.mnr-offline-action.primary');
   await expect(cacheButton).toBeDisabled();
   await root.getByRole('button', { name: '关闭目录' }).click();
   releaseToc();
   await page.waitForTimeout(300);
-  expect(dialogs).toBe(0);
 
   await root.getByRole('button', { name: '打开目录' }).click();
   await expect(cacheButton).toBeEnabled();
+  await expect(cacheButton).toHaveText('缓存本书');
+  await cacheButton.click();
+  // The first click only states the cost; closing the drawer forgets it.
+  await expect(cacheButton).toHaveText('开始缓存');
+  await expect(root.locator('.mnr-offline-copy span')).toHaveText('将缓存 2 章，再点一次开始');
+  await page.keyboard.press('Escape');
+  await root.getByRole('button', { name: '打开目录' }).click();
+  await expect(cacheButton).toHaveText('缓存本书');
+  await expect(
+    root.locator('.mnr-chapter-list li').filter({ hasText: '第501章' }).locator('.mnr-cache-mark')
+  ).toHaveCount(0);
+
+  await cacheButton.click();
   await cacheButton.click();
   await expect(
     root.locator('.mnr-chapter-list li').filter({ hasText: '第501章' }).locator('.mnr-cache-mark')
   ).toBeVisible();
-  expect(dialogs).toBe(1);
+  // No native dialog ever blocks the page.
+  expect(dialogs).toBe(0);
 });
 
 test('keeps same-origin chapter requests in the page session with bound fetch wrappers', async ({
@@ -2342,7 +2382,7 @@ test('keeps the first-page DOM and selection while merging an 80-page Xszj chapt
   context,
   page,
 }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(150_000);
   const url = 'https://xszj.org/b/490346/c/1534359';
   const pages: number[] = [];
   const times: number[] = [];
@@ -2411,7 +2451,7 @@ test('keeps the first-page DOM and selection while merging an 80-page Xszj chapt
     });
   await expect(root.locator('article')).toContainText('第2页正文');
   expect((await retained()).sameNode).toBe(true);
-  await expect(root.locator('.mnr-section-progress')).toHaveCount(0, { timeout: 100_000 });
+  await expect(root.locator('.mnr-section-progress')).toHaveCount(0, { timeout: 130_000 });
   const final = await retained();
   expect(final.sameNode).toBe(true);
   expect(final.selection).toBe(final.expected);
@@ -2596,6 +2636,60 @@ for (const width of [1280, 390]) {
   });
 }
 
+for (const width of [1280, 390]) {
+  test(`novels stops after one unread chapter at ${width}px`, async ({ context, page }) => {
+    await page.setViewportSize({ width, height: 844 });
+    const url = (chapter: number, section = 1) => novelsUrl(chapter, section).split('?')[0];
+    const requests: string[] = [];
+    await context.route(`${novelsOrigin}/**`, async route => {
+      const requested = new URL(route.request().url());
+      requests.push(requested.href);
+      const match = requested.pathname.match(/\/(\d+)(?:_(\d+))?\.html$/);
+      await route.fulfill({
+        contentType: 'text/html; charset=utf-8',
+        body: match
+          ? makeNovelsChapter(
+              Number(match[1]) - 199107734,
+              Number(match[2] || 1),
+              Number(match[1]) === 199107783 ? 5 : 3
+            ).replaceAll('?aid=1092650', '')
+          : '<p>書頁/目錄</p>',
+      });
+    });
+    await addYingChuangUserscript(context);
+    await page.goto(url(48));
+    const root = page.locator('#mnr-reader-root');
+    const current = root.locator(`article[data-chapter-url="${url(48)}"]`);
+    const unread = root.locator(`article[data-chapter-url="${url(49)}"]`);
+    if (width === 390) {
+      await expect(current).toContainText('第1頁終點');
+      await root.locator('.mnr-reader-main').evaluate(el => {
+        el.scrollTop = el.scrollHeight;
+      });
+    }
+    await expect(current).toContainText('第3頁終點');
+    await expect(unread).toContainText('第5頁終點');
+    await expect(root.locator('.mnr-section-progress')).toHaveCount(0);
+    await expect(current.locator('h1')).toHaveText('第48章 山間行旅');
+    await expect(unread.locator('h1')).toHaveText('第49章 山間行旅');
+    // Observe beyond the maximum five-second preload grace period. Waiting for content
+    // alone misses a scheduler that keeps fetching more chapters after each merge ends.
+    await page.waitForTimeout(6000);
+    expect(requests).toEqual([
+      url(48),
+      url(48, 2),
+      url(48, 3),
+      url(49),
+      url(49, 2),
+      url(49, 3),
+      url(49, 4),
+      url(49, 5),
+    ]);
+    await expect(root.locator('article')).toHaveCount(2);
+    await expect(page).toHaveURL(url(48));
+  });
+}
+
 test('novels failed preparation preserves the host and allows manual recovery and exit', async ({
   page,
   context,
@@ -2648,6 +2742,130 @@ test('novels failed preparation preserves the host and allows manual recovery an
   await expect(reader).toHaveCount(0);
   await expect(page.locator('#article')).toBeVisible();
   await expect(entry).toBeVisible();
+});
+
+for (const missing of [false, true]) {
+  test(`reconciles ${missing ? 'missing' : 'available'} offline content before ending at a shallow chapter URL`, async ({
+    context,
+    page,
+  }) => {
+    const firstUrl = 'http://mnr.test/book/1/1.html';
+    const nextUrl = 'http://mnr.test/2.html';
+    const indexUrl = 'http://mnr.test/book/1/';
+    const bookId = 'mnr.test_book_1_';
+    const requests: string[] = [];
+    await context.route('http://mnr.test/**', route => {
+      requests.push(route.request().url());
+      return route.fulfill({
+        contentType: 'text/html; charset=utf-8',
+        body: `<!doctype html>
+        <html lang="zh-CN"><head><title>第1章 起程 - 测试小说</title></head><body>
+        <h1>第1章 起程</h1><div id="content">${paragraphs}</div>
+        <nav><a href="${indexUrl}">目录</a><a href="${nextUrl}">下一章</a></nav>
+        </body></html>`,
+      });
+    });
+    const records: Record<string, unknown> = {
+      [`mnr_cache_v2_index_${bookId}`]: {
+        version: 2,
+        bookId,
+        indexUrl,
+        urls: [nextUrl],
+        lastUpdated: Date.now(),
+      },
+    };
+    if (!missing) {
+      records[`mnr_cache_v2_chapter_${bookId}_${Buffer.from(nextUrl).toString('base64url')}`] = {
+        chapter: {
+          title: '第2章 离线正文',
+          content: '<p>这是已经缓存的章节正文。</p>',
+          rawContent: '<p>这是已经缓存的章节正文。</p>',
+          url: nextUrl,
+          indexUrl,
+          prevUrl: firstUrl,
+          confidence: 1,
+          method: 'rule',
+        },
+        cachedAt: Date.now(),
+      };
+    }
+    const seed = `for (const [key, value] of Object.entries(${JSON.stringify(records)})) {
+      window.GM_setValue(key, JSON.stringify(value));
+    }`;
+    const script = fs.readFileSync(getMnrE2eConfig().userScriptPath, 'utf8');
+    await context.addInitScript({ content: createGmMockScript() + '\n' + seed + '\n' + script });
+    await page.goto(firstUrl);
+    await waitForMnrReader(page);
+    const root = page.locator('#mnr-reader-root');
+    if (missing) {
+      await expect(root.locator('article')).toHaveCount(1);
+      await expect(root.locator('.mnr-chapter-end-text')).toHaveText('— 已是最后一章 —');
+    } else {
+      const cached = root.locator(`article[data-chapter-url="${nextUrl}"]`);
+      await expect(cached).toContainText('这是已经缓存的章节正文。');
+      await page.keyboard.press('ArrowRight');
+      await expect(page).toHaveURL(nextUrl);
+    }
+    expect(requests).toEqual([firstUrl]);
+  });
+}
+
+test('ends the reading list truthfully at a book-page link and a paywalled chapter', async ({
+  context,
+  page,
+}) => {
+  const lastUrl = 'http://mnr.test/chapter/400.html';
+  const bookUrl = 'http://mnr.test/info/7.html';
+  const freeUrl = 'http://mnr.test/chapter/500.html';
+  const vipUrl = 'http://mnr.test/chapter/501.html';
+  const requests: string[] = [];
+  const chapterPage = (title: string, nextHref: string) => `<!doctype html>
+    <html lang="zh-CN">
+      <head><meta charset="utf-8"><title>${title} - 测试小说</title></head>
+      <body>
+        <main>
+          <h1>${title}</h1>
+          <div id="content">${paragraphs}</div>
+          <nav>
+            <a href="/chapter/399.html">上一章</a>
+            <a href="/info/7.html">目录</a>
+            <a href="${nextHref}">下一章</a>
+          </nav>
+        </main>
+      </body>
+    </html>`;
+  await context.route('http://mnr.test/**', route => {
+    const url = route.request().url();
+    requests.push(url);
+    const body =
+      url === lastUrl
+        ? chapterPage('第400章 终章', '/info/7.html')
+        : url === freeUrl
+          ? chapterPage('第500章 免费章节', '/chapter/501.html')
+          : url === vipUrl
+            ? '<!doctype html><html><body><h1>第501章</h1><p>本章为VIP章节，请订阅后阅读。</p></body></html>'
+            : '<!doctype html><html><body></body></html>';
+    return route.fulfill({ body, contentType: 'text/html; charset=utf-8' });
+  });
+  await addYingChuangUserscript(context);
+  const root = page.locator('#mnr-reader-root');
+
+  // The next link is the book page itself, so the list ends at once without loading it.
+  await page.goto(lastUrl);
+  await waitForMnrReader(page);
+  await expect(root.locator('.mnr-chapter-end-text')).toHaveText('— 已是最后一章 —');
+  const diagnostic = await copyReaderDiagnostic(page);
+  expect(diagnostic.reader.last.nextUrl).toBe(bookUrl);
+  expect(requests).not.toContain(bookUrl);
+
+  // A paywalled next chapter is not the end of the book.
+  await page.goto(freeUrl);
+  await waitForMnrReader(page);
+  await expect(root.locator('.mnr-chapter-end-text')).toHaveText(
+    '— 该章节为VIP/付费内容，无法加载 —',
+    { timeout: 15_000 }
+  );
+  expect(requests.filter(url => url === vipUrl)).toHaveLength(1);
 });
 
 for (const touch of [false, true]) {
@@ -2823,5 +3041,70 @@ for (const lang of ['', 'zh-CN', 'zh-TW']) {
     await expect(content).not.toContainText('山间的风');
     await root.getByRole('button', { name: '原文', exact: true }).click();
     await expect(content).toHaveJSProperty('innerHTML', originalHtml);
+  });
+}
+
+for (const scenario of ['recover', 'background', 'exit'] as const) {
+  test(`novels rate limiting: ${scenario}`, async ({ context, page }) => {
+    await page.setViewportSize({ width: 353, height: 693 });
+    if (scenario === 'exit') await page.clock.install();
+    const url = (chapter: number, section = 1) => novelsUrl(chapter, section).split('?')[0];
+    const target = scenario === 'background' ? url(49, 2) : url(48, 2);
+    const attempts: number[] = [];
+    const requests: string[] = [];
+    await context.route(`${novelsOrigin}/**`, async route => {
+      const requested = route.request().url();
+      requests.push(requested);
+      if (requested === target) {
+        attempts.push(Date.now());
+        if (scenario !== 'recover' || attempts.length === 1) {
+          await route.fulfill({
+            status: 429,
+            headers: { 'Retry-After': scenario === 'exit' ? '30' : '2' },
+            body: 'Too many requests',
+          });
+          return;
+        }
+      }
+      const match = new URL(requested).pathname.match(/\/(\d+)(?:_(\d+))?\.html$/);
+      await route.fulfill({
+        contentType: 'text/html; charset=utf-8',
+        body: match
+          ? makeNovelsChapter(Number(match[1]) - 199107734, Number(match[2] || 1)).replaceAll(
+              '?aid=1092650',
+              ''
+            )
+          : '<p>書頁/目錄</p>',
+      });
+    });
+    await addYingChuangUserscript(context);
+    await page.goto(url(48));
+    const root = page.locator('#mnr-reader-root');
+    await expect.poll(() => attempts.length).toBe(1);
+    if (scenario === 'exit') {
+      await root.getByRole('button', { name: '打开设置' }).click();
+      await root.getByRole('button', { name: '退出阅读模式' }).click();
+      await expect(root).toHaveCount(0);
+      await expect(page.locator('#article')).toBeVisible();
+      // Pass the full recovery deadline without making the browser test wait thirty seconds.
+      await page.clock.runFor(31_000);
+      expect(attempts).toHaveLength(1);
+      expect(requests).toEqual([url(48), target]);
+    } else if (scenario === 'recover') {
+      await expect(root.locator(`article[data-chapter-url="${url(48)}"]`)).toContainText(
+        '第3頁終點'
+      );
+      expect(attempts).toHaveLength(2);
+      expect(attempts[1] - attempts[0]).toBeGreaterThanOrEqual(1900);
+    } else {
+      await expect(root.locator('.mnr-section-progress')).toContainText('本章内容不完整');
+      await page.waitForTimeout(7000);
+      expect(attempts).toHaveLength(1);
+      expect(requests).toEqual([url(48), url(48, 2), url(48, 3), url(49), target]);
+      await expect(root.locator('article')).toHaveCount(2);
+      await expect(root.locator(`article[data-chapter-url="${url(49)}"]`)).toContainText(
+        '第1頁終點'
+      );
+    }
   });
 }

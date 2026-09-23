@@ -98,7 +98,9 @@
               </div>
             </fieldset>
 
-            <button class="mnr-secondary-action" @click="resetAppearance">恢复默认外观</button>
+            <button class="mnr-secondary-action" @click="confirm('reset', resetAppearance)">
+              {{ armed === 'reset' ? '再点一次恢复默认外观' : '恢复默认外观' }}
+            </button>
           </section>
 
           <details class="mnr-settings-group">
@@ -213,11 +215,11 @@
             <summary>本站与高级</summary>
             <div class="mnr-settings-group-content">
               <label class="mnr-switch-row">
-                <span>在本站自动开启</span>
+                <span>本站自动进入阅读模式</span>
                 <input type="checkbox" :checked="siteAutoEnable" @change="updateSiteAutoEnable" />
               </label>
 
-              <fieldset class="mnr-settings-fieldset">
+              <fieldset class="mnr-settings-fieldset" aria-describedby="mnr-protection-help">
                 <legend>网站防护</legend>
                 <div class="mnr-segmented-control">
                   <button
@@ -237,6 +239,9 @@
                     强力
                   </button>
                 </div>
+                <p id="mnr-protection-help" class="mnr-field-help mnr-protection-help">
+                  强力模式会额外停止页面定时器，清理可疑脚本和遮罩层，退出阅读后也无法恢复。
+                </p>
               </fieldset>
 
               <label class="mnr-field-label" for="mnr-custom-css">自定义 CSS</label>
@@ -352,6 +357,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
 import { useEventListener } from '@/ui/composables/useEventListener';
+import { useTwoStepConfirm } from '@/ui/composables/useTwoStepConfirm';
 import { getDeepActiveElement } from '@/ui/focus';
 import {
   THEMES,
@@ -392,6 +398,7 @@ const emit = defineEmits<{
 }>();
 
 const configStore = useConfigStore();
+const { armed, confirm, disarm } = useTwoStepConfirm<'reset'>();
 const panelRef = ref<HTMLElement | null>(null);
 const titleRef = ref<HTMLElement | null>(null);
 const customCleanupDraft = ref('');
@@ -410,14 +417,20 @@ const conversionOptions = [
   { label: '简体', value: 'sc' },
   { label: '繁體', value: 'tc' },
 ] as const;
+// Named by style, each listing the family names macOS, Windows and Linux actually ship,
+// because a stack with no installed face silently renders as the fallback.
 const fontOptions = [
   {
     label: '系统默认',
     value: 'system-ui, -apple-system, "Microsoft YaHei", sans-serif',
   },
-  { label: '思源宋体', value: "'Noto Serif SC', 'Source Han Serif SC', serif" },
-  { label: '苹方', value: "'PingFang SC', 'Hiragino Sans GB', sans-serif" },
-  { label: '楷体', value: "'Kaiti SC', 'STKaiti', serif" },
+  {
+    label: '宋体',
+    value:
+      "'Noto Serif SC', 'Source Han Serif SC', 'Noto Serif CJK SC', 'Songti SC', SimSun, serif",
+  },
+  { label: '楷体', value: "'Kaiti SC', STKaiti, KaiTi, serif" },
+  { label: '仿宋', value: 'STFangsong, FangSong, serif' },
 ] as const;
 
 function closePanel() {
@@ -538,6 +551,7 @@ watch(
 
     customCleanupDraft.value = '';
     customCleanupDraftError.value = '';
+    disarm();
     void configStore.flushSave();
   }
 );
@@ -550,7 +564,8 @@ watch(
   z-index: 1000;
   display: flex;
   justify-content: flex-end;
-  background: rgba(0, 0, 0, 0.5);
+  /* Light enough to judge theme and typography changes live behind the panel. */
+  background: rgba(0, 0, 0, 0.12);
 }
 
 .mnr-settings-panel {
@@ -561,6 +576,7 @@ watch(
   padding-right: env(safe-area-inset-right);
   background: var(--mnr-bg, #fff);
   color: var(--mnr-text, #333);
+  border-left: 1px solid var(--mnr-border, #e0e0e0);
   box-shadow: -4px 0 20px rgba(0, 0, 0, 0.15);
 }
 
@@ -867,9 +883,13 @@ watch(
   opacity: 0.72;
 }
 
+.mnr-protection-help {
+  margin: 8px 0 0;
+}
+
 .mnr-field-error {
   margin-top: 6px;
-  color: #c93f49;
+  color: var(--mnr-danger, #b3261e);
 }
 
 .mnr-settings-footer {
@@ -883,10 +903,10 @@ watch(
   width: 100%;
   min-height: 42px;
   padding: 9px 12px;
-  border: 1px solid #c93f49;
+  border: 1px solid var(--mnr-danger, #b3261e);
   border-radius: 8px;
   background: transparent;
-  color: #c93f49;
+  color: var(--mnr-danger, #b3261e);
   font-size: 14px;
   cursor: pointer;
 }

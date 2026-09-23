@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApp, h, nextTick, ref } from 'vue';
 
-import { ReaderEntryButton, ReaderEntryPrompt } from '@/ui/components/entry';
 import { THEMES, useConfigStore } from '@/ui/stores/config';
 import ChapterDrawer from '@/ui/components/reader/ChapterDrawer.vue';
+import chapterDrawerSource from '@/ui/components/reader/ChapterDrawer.vue?raw';
 import FloatingToolbar from '@/ui/components/reader/FloatingToolbar.vue';
+import { ReaderEntryButton } from '@/ui/components/entry';
 import SettingsPanel from '@/ui/components/settings/SettingsPanel.vue';
 import settingsPanelSource from '@/ui/components/settings/SettingsPanel.vue?raw';
 
@@ -33,43 +34,6 @@ describe('UI component smoke', () => {
 
     const gm = createGmStorageMock();
     stubGmStorage(gm);
-  });
-
-  it('ReaderEntryPrompt presents a product decision and emits respond on accept', async () => {
-    const onRespond = vi.fn();
-
-    const mountEl = document.createElement('div');
-    document.body.appendChild(mountEl);
-
-    const app = createApp({
-      render: () =>
-        h(ReaderEntryPrompt, {
-          visible: true,
-          onRespond,
-        }),
-    });
-
-    app.mount(mountEl);
-    await nextTick();
-
-    expect(document.querySelector('.mnr-entry-prompt-icon svg')).toBeInstanceOf(SVGElement);
-    expect(document.querySelector('.mnr-entry-prompt-card')?.textContent).not.toContain(
-      '检测置信度'
-    );
-    expect(document.querySelector('.mnr-entry-prompt-card')?.textContent).not.toContain(
-      '未找到下一章链接'
-    );
-    const acceptBtn = document.querySelector(
-      '.mnr-entry-button.primary'
-    ) as HTMLButtonElement | null;
-    expect(acceptBtn).not.toBeNull();
-    acceptBtn?.click();
-    await nextTick();
-
-    expect(onRespond).toHaveBeenCalledWith({ accepted: true, rememberForSite: true });
-
-    app.unmount();
-    mountEl.remove();
   });
 
   it('ReaderEntryButton exposes a clear manual reading action', async () => {
@@ -157,6 +121,34 @@ describe('UI component smoke', () => {
     );
     const fontSelect = document.querySelector<HTMLSelectElement>('#mnr-font-family');
     expect(fontSelect?.selectedOptions[0]?.textContent?.trim()).toBe('系统默认');
+    expect(Array.from(fontSelect!.options, option => option.textContent?.trim())).toEqual([
+      '系统默认',
+      '宋体',
+      '楷体',
+      '仿宋',
+    ]);
+    // Windows ships its Kaiti face as KaiTi; without it the option would render as SimSun.
+    expect(fontSelect!.options[2].value).toContain('KaiTi');
+    expect(
+      window.getComputedStyle(document.querySelector('.mnr-settings-overlay')!).backgroundColor
+    ).toBe('rgba(0, 0, 0, 0.12)');
+    expect(document.querySelector('#mnr-protection-help')?.textContent).toContain('无法恢复');
+    expect(
+      Array.from(document.querySelectorAll('.mnr-switch-row span'), span => span.textContent)
+    ).toContain('本站自动进入阅读模式');
+
+    configStore.updateReading({ fontSize: 24 });
+    const resetButton = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.mnr-secondary-action')
+    ).find(button => button.textContent?.trim() === '恢复默认外观');
+    resetButton?.click();
+    await nextTick();
+    expect(configStore.reading.fontSize).toBe(24);
+    expect(resetButton?.textContent?.trim()).toBe('再点一次恢复默认外观');
+    resetButton?.click();
+    await nextTick();
+    expect(configStore.reading.fontSize).toBe(18);
+    expect(resetButton?.textContent?.trim()).toBe('恢复默认外观');
 
     customCleanupDraft!.value = '测试广告$';
     customCleanupDraft!.dispatchEvent(new window.Event('input', { bubbles: true }));
@@ -254,16 +246,30 @@ describe('UI component smoke', () => {
     expect(document.querySelector('#mnr-offline-title')?.textContent).toBe('离线阅读');
     expect(document.querySelector('.mnr-offline-copy span')?.textContent).toBe('已保存 1 章');
     expect(document.querySelectorAll('.mnr-cache-mark svg')).toHaveLength(0);
+    const offlineStatus = () => document.querySelector('.mnr-offline-copy span')?.textContent;
     const cacheBookButton = document.querySelector<HTMLButtonElement>(
       '.mnr-offline-action.primary'
     );
     expect(cacheBookButton?.textContent?.trim()).toBe('缓存本书');
+    // The first click only states the cost; nothing is requested until the second.
     cacheBookButton?.click();
+    await nextTick();
+    expect(onCacheAll).not.toHaveBeenCalled();
+    expect(cacheBookButton?.textContent?.trim()).toBe('开始缓存');
+    expect(offlineStatus()).toBe('将缓存 1200 章，再点一次开始');
+    cacheBookButton?.click();
+    await nextTick();
     expect(onCacheAll).toHaveBeenCalledTimes(1);
+    expect(cacheBookButton?.textContent?.trim()).toBe('缓存本书');
     const clearCacheButton = Array.from(
       document.querySelectorAll<HTMLButtonElement>('.mnr-offline-action')
     ).find(button => button.textContent?.trim() === '清除缓存');
     expect(clearCacheButton).not.toBeNull();
+    clearCacheButton?.click();
+    await nextTick();
+    expect(onClearCache).not.toHaveBeenCalled();
+    expect(clearCacheButton?.textContent?.trim()).toBe('确认清除');
+    expect(offlineStatus()).toBe('将删除已保存的 1 章，再点一次确认');
     clearCacheButton?.click();
     expect(onClearCache).toHaveBeenCalledTimes(1);
     if (search) {
@@ -278,20 +284,33 @@ describe('UI component smoke', () => {
     mountEl.remove();
   });
 
-  it('ChapterDrawer disables cache-all while the TOC is loading', async () => {
+  it('ChapterDrawer offers cache-all only once the TOC has chapters and retries an empty TOC', async () => {
     const loading = ref(true);
+    const chapters = ref<
+      Array<{
+        title: string;
+        url: string;
+        isCached: boolean;
+        isPersisted: boolean;
+        isCurrent: boolean;
+        access?: 'locked';
+      }>
+    >([]);
     const onCacheAll = vi.fn();
+    const onReloadToc = vi.fn();
+    injectSfcStyle(chapterDrawerSource);
     const mountEl = document.createElement('div');
     document.body.appendChild(mountEl);
     const app = createApp({
       render: () =>
         h(ChapterDrawer, {
           isOpen: true,
-          chapters: [],
+          chapters: chapters.value,
           loading: loading.value,
           cacheProgress: { done: 0, total: 0, failed: 0, running: false },
           persistedCount: 0,
           onCacheAll,
+          onReloadToc,
         }),
     });
 
@@ -305,7 +324,56 @@ describe('UI component smoke', () => {
 
     loading.value = false;
     await nextTick();
+    expect(cacheButton?.disabled).toBe(true);
+    const retry = Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(
+      button => button.textContent?.trim() === '重新加载'
+    );
+    expect(document.querySelector('.mnr-drawer-state')?.textContent).toContain('暂无目录');
+    retry?.click();
+    expect(onReloadToc).toHaveBeenCalledTimes(1);
+
+    chapters.value = [
+      {
+        title: '第 1 章',
+        url: 'https://example.com/chapter/1',
+        isCached: true,
+        isPersisted: true,
+        isCurrent: false,
+      },
+      {
+        title: '第 2 章',
+        url: 'https://example.com/chapter/2',
+        isCached: false,
+        isPersisted: false,
+        isCurrent: true,
+      },
+      {
+        title: '第 3 章',
+        url: 'https://example.com/chapter/3',
+        isCached: false,
+        isPersisted: false,
+        isCurrent: false,
+        access: 'locked',
+      },
+    ];
+    await nextTick();
     expect(cacheButton?.disabled).toBe(false);
+    const rows = Array.from(document.querySelectorAll<HTMLButtonElement>('.mnr-chapter-button'));
+    expect(rows[0].querySelector('.mnr-cache-mark')?.getAttribute('aria-label')).toBe('已离线缓存');
+    expect(rows[2].querySelector('.mnr-lock-mark')?.getAttribute('aria-label')).toBe('付费章节');
+    // Only the mark is tinted; a cached title keeps the readable text color.
+    const cachedGreen = 'rgb(56, 142, 60)';
+    expect(window.getComputedStyle(rows[0].querySelector('.mnr-cache-mark')!).color).toBe(
+      cachedGreen
+    );
+    expect(window.getComputedStyle(rows[0]).color).not.toBe(cachedGreen);
+
+    // One free chapter is still unsaved, so cache-all states its cost before requesting.
+    cacheButton?.click();
+    await nextTick();
+    expect(document.querySelector('.mnr-offline-copy span')?.textContent).toBe(
+      '将缓存 1 章，再点一次开始'
+    );
     cacheButton?.click();
     expect(onCacheAll).toHaveBeenCalledTimes(1);
 

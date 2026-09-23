@@ -850,3 +850,38 @@ describe('SectionMerger (progressive section streaming)', () => {
     expect(s.ends[0]).toMatchObject({ loaded: 2, truncated: true });
   });
 });
+
+it.each([undefined, 3000])(
+  'paces real section fetches using %s override or the 1200ms default',
+  async sectionDelayMs => {
+    vi.useFakeTimers();
+    mockFetchAndParseUrl.mockReset();
+    const doc = new DOMParser().parseFromString('<h1>Chapter</h1>', 'text/html');
+    const url = 'https://section-pace.test/123.html';
+    const parser = {
+      parse: vi.fn(async (_doc: Document, requested: string) => ({
+        title: 'Chapter',
+        content: '<p>content</p>',
+        rawContent: '<p>content</p>',
+        url: requested,
+        nextUrl: requested === url ? url.replace('.html', '_2.html') : undefined,
+        confidence: 1,
+        method: 'rule',
+        rule: { advanced: { checkSection: true, sectionDelayMs } },
+      })),
+      detectSection: vi.fn(() => undefined),
+    };
+    mockFetchAndParseUrl.mockReturnValue({ promise: Promise.resolve({ doc }), abort: vi.fn() });
+    try {
+      const pending = new SectionMerger(parser as unknown as Parser).merge(doc, url);
+      await vi.advanceTimersByTimeAsync((sectionDelayMs ?? 1200) - 1);
+      expect(mockFetchAndParseUrl).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      await pending;
+      expect(mockFetchAndParseUrl).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+);

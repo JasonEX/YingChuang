@@ -47,8 +47,11 @@ const emit = defineEmits<{
   font-weight: 600;
   line-height: 1;
   cursor: pointer;
+  /* Stays out of the host page's way until pointed at or focused. */
+  opacity: 0.6;
   animation: mnr-entry-in 0.2s ease-out;
   transition:
+    opacity 0.18s ease,
     transform 0.18s ease,
     filter 0.18s ease,
     box-shadow 0.18s ease;
@@ -75,12 +78,14 @@ const emit = defineEmits<{
 }
 
 .mnr-reader-entry:focus-visible {
+  opacity: 1;
   outline: 3px solid color-mix(in srgb, var(--mnr-link, #1976d2) 48%, #fff);
   outline-offset: 3px;
 }
 
 @media (hover: hover) {
   .mnr-reader-entry:hover {
+    opacity: 1;
     filter: brightness(0.94);
     transform: translateY(-2px);
     box-shadow: 0 8px 22px rgba(0, 0, 0, 0.24);

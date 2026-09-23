@@ -3,8 +3,9 @@
  *
  * Flow:
  * 1. Check if built-in rule matches → auto-launch
- * 2. Run auto-detection → show prompt if confidence >= threshold
- * 3. User confirms → optionally remember site preference → launch reader
+ * 2. Run auto-detection → auto-launch at high confidence
+ * 3. Medium confidence → leave the page alone; the caller offers a manual entry, and entering
+ *    through it remembers the site
  */
 
 import {
@@ -43,17 +44,6 @@ export interface AutoEnableDecision {
   showManualEntry?: boolean;
 }
 
-/** User prompt response */
-export interface UserPromptResponse {
-  /** User accepted */
-  accepted: boolean;
-  /** Remember this site should auto-enable in future */
-  rememberForSite: boolean;
-}
-
-/** Callback for showing prompt to user */
-export type PromptCallback = () => Promise<UserPromptResponse>;
-
 /** Initial delivery mounts the reader; further events belong to that delivery only. */
 export type LaunchEvent =
   | {
@@ -69,9 +59,9 @@ export type LaunchCallback = (event: LaunchEvent) => SectionDelivery | void;
 
 /** Auto-enable options */
 export interface AutoEnableOptions {
-  /** Minimum confidence for auto-prompt (default: 0.6) */
+  /** Minimum confidence to offer the manual entry (default: 0.6) */
   confidenceThreshold?: number;
-  /** Minimum confidence for auto-launch without prompt (default: 0.9) */
+  /** Minimum confidence for auto-launch (default: 0.9) */
   autoLaunchThreshold?: number;
   /** Enable site protection measures */
   enableProtection?: boolean;
@@ -102,10 +92,8 @@ export class AutoEnableManager {
   private detectionEngine: DetectionEngine;
   private parser: Parser;
   private sectionMerger: ReturnType<typeof createSectionMerger>;
-  private promptCallback?: PromptCallback;
   private launchCallback?: LaunchCallback;
   private hasRun = false;
-  private launchVersion = 0;
   private pendingLaunch: Promise<'complete' | 'initial' | false> | null = null;
   private currentDecision?: AutoEnableDecision;
   private currentDecisionUrl?: string;
@@ -151,13 +139,6 @@ export class AutoEnableManager {
       });
       this.sectionMerger = createSectionMerger(this.parser);
     }
-  }
-
-  /**
-   * Set the callback for prompting user
-   */
-  setPromptCallback(callback: PromptCallback): void {
-    this.promptCallback = callback;
   }
 
   /**
@@ -363,23 +344,7 @@ export class AutoEnableManager {
       return;
     }
 
-    // Show prompt for medium confidence detection
-    if (this.promptCallback) {
-      this.deactivateProtection();
-      const launchVersion = this.launchVersion;
-      const response = await this.promptCallback();
-      // A manual entry supersedes the prompt, even if its parse has already finished.
-      if (launchVersion !== this.launchVersion) return;
-
-      if (response.accepted) {
-        const launched = await this.launch(doc, decision.rule);
-        if (launched && response.rememberForSite) {
-          this.rememberSiteEnabled(doc);
-        }
-      }
-      return;
-    }
-
+    // Medium confidence never interrupts the page; the caller keeps a manual entry instead.
     this.deactivateProtection();
   }
 
@@ -388,7 +353,6 @@ export class AutoEnableManager {
    */
   private launch(doc: Document, rule?: SiteRule): Promise<'complete' | 'initial' | false> {
     if (!this.pendingLaunch) {
-      this.launchVersion++;
       this.pendingLaunch = this.parseAndLaunch(doc, rule).finally(() => {
         this.pendingLaunch = null;
       });

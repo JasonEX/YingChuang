@@ -11,9 +11,11 @@ import { SectionMerger } from '../../src/core/auto-enable/SectionMerger';
 describe('SectionMerger (signal abort)', () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   it('should abort in-flight section fetch when signal aborts', async () => {
+    vi.useFakeTimers();
     const abort = vi.fn();
     vi.mocked(fetchAndParseUrl).mockReturnValue({
       promise: new Promise(() => {}),
@@ -46,10 +48,7 @@ describe('SectionMerger (signal abort)', () => {
       signal: controller.signal,
     });
 
-    // Wait until the section fetch starts.
-    for (let i = 0; i < 20 && vi.mocked(fetchAndParseUrl).mock.calls.length === 0; i++) {
-      await Promise.resolve();
-    }
+    await vi.advanceTimersByTimeAsync(1200);
 
     expect(fetchAndParseUrl).toHaveBeenCalledTimes(1);
     controller.abort();

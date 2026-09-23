@@ -530,3 +530,56 @@ describe('network utilities', () => {
     expect(() => fetchReq.abort()).not.toThrow();
   });
 });
+
+describe('shared request cooldown across native and GM transports', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it.each(['native', 'gm'] as const)(
+    'honors Retry-After via %s and gates a second operation',
+    async transport => {
+      const url = `https://cooldown-${transport}.test/chapter`;
+      let calls = 0;
+      const reply = () => (++calls === 1 ? 429 : 200);
+      if (transport === 'gm') {
+        vi.stubGlobal('GM_xmlhttpRequest', (options: GM_xmlhttpRequestOptions) => {
+          options.onload?.(
+            makeXhrResponse(options, {
+              status: reply(),
+              responseHeaders: 'Retry-After: 2\r\n',
+              responseText: '<p>recovered</p>',
+            })
+          );
+          return { abort: vi.fn() };
+        });
+      } else {
+        vi.stubGlobal('GM_xmlhttpRequest', undefined);
+        vi.stubGlobal(
+          'fetch',
+          vi.fn(
+            async () =>
+              new Response('<p>recovered</p>', {
+                status: reply(),
+                headers: { 'Retry-After': '2' },
+              })
+          )
+        );
+      }
+      const pending = fetchAndParseUrl(url);
+      await vi.advanceTimersByTimeAsync(1);
+      expect((await fetchAndParseUrl(url + '/other').promise).status).toBe(429);
+      expect(calls).toBe(1);
+      await vi.advanceTimersByTimeAsync(1999);
+      expect((await pending.promise).doc?.body.textContent).toBe('recovered');
+      expect(calls).toBe(2);
+      expect(vi.getTimerCount()).toBe(0);
+    }
+  );
+});
