@@ -24,7 +24,7 @@ const META_BASE = {
     'zh-TW': '螢窗',
   } satisfies LocalizedText,
   namespace: 'https://github.com/JasonEX',
-  author: 'JasonEX',
+  author: 'Yuqian',
   description: {
     '': '萤窗：小说阅读脚本，智能正文识别、连续阅读、阅读位置恢复、简繁转换',
     'zh-CN': '萤窗：小说阅读脚本，智能正文识别、连续阅读、阅读位置恢复、简繁转换',
