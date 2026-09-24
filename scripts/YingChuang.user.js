@@ -4675,6 +4675,29 @@
 		}
 	};
 	var twkan_exports$1 = __exportAll({ twkanRule: () => twkanRule });
+	function restoreCanvasText(doc) {
+		const content = doc.querySelector("#txtcontent0") || doc.querySelector(".txtnav");
+		if (!content) return;
+		const key = "jieqi2026abcd12";
+		const replacements = Array.from(content.querySelectorAll("canvas.sec-last"), (canvas) => {
+			const encoded = canvas.getAttribute("data-c");
+			const salt = canvas.getAttribute("data-v");
+			if (!encoded || !salt) throw new Error("TWKAN canvas text payload is missing");
+			const bytes = Uint8Array.from(atob(encoded), (char, index) => char.charCodeAt(0) ^ key.charCodeAt(index % 15) ^ salt.charCodeAt(index % salt.length));
+			const template = doc.createElement("template");
+			template.innerHTML = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+			const text = template.content.textContent || "";
+			if (!text.trim()) throw new Error("TWKAN canvas text is empty");
+			const replacement = doc.createDocumentFragment();
+			replacement.append(doc.createElement("br"));
+			for (const line of text.split(/\r?\n/)) replacement.append(doc.createTextNode(line), doc.createElement("br"));
+			return {
+				canvas,
+				replacement
+			};
+		});
+		for (const { canvas, replacement } of replacements) canvas.replaceWith(replacement);
+	}
 	var twkanRule = {
 		id: "twkan",
 		name: "台灣小說網",
@@ -4722,6 +4745,7 @@
 			bookSelector: "a[href*=\"/book/\"][href$=\"/index.html\"]"
 		},
 		advanced: { useIframe: true },
+		hooks: { beforeParse: restoreCanvasText },
 		meta: {
 			source: "builtin",
 			exampleUrl: "https://twkan.com/txt/93181/53052605"

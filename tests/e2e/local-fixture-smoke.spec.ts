@@ -11,6 +11,7 @@ import {
 } from './mnrE2e';
 
 import { makeNovelsChapter, novelsOrigin, novelsUrl } from '../testUtils/novels';
+import { twkanCanvasHtml, twkanCanvasLines } from '../testUtils/twkan';
 
 import {
   makeNovel543Chapter,
@@ -1291,7 +1292,44 @@ test('applies the Sto9 adapter and loads its complete dynamic catalog', async ({
   }
 });
 
-for (const width of [1280, 390]) {
+test('TWKAN preloads canvas prose without widening the first chapter view', async ({
+  context,
+  page,
+}) => {
+  await page.setViewportSize({ width: 1510, height: 844 });
+  const firstUrl = 'https://twkan.com/txt/85206/49880571';
+  const secondUrl = 'https://twkan.com/txt/85206/49880572';
+  let nextRequests = 0;
+  await context.route('https://twkan.com/**', route => {
+    const url = route.request().url();
+    if (url !== firstUrl && url !== secondUrl) return route.fulfill({ status: 404, body: '' });
+    const first = url === firstUrl;
+    if (!first) nextRequests++;
+    return route.fulfill({
+      contentType: 'text/html; charset=utf-8',
+      body: `<!doctype html><html><head><title>漢末昭烈行</title></head><body>
+        <a href="/book/85206/index.html">漢末昭烈行</a>
+        <div class="txtnav"><h1>${first ? '第一章 玄德' : '第二章 知命郎'}</h1>
+          <div id="txtcontent0">${paragraphs}${first ? '' : twkanCanvasHtml}</div>
+        </div>
+        <div class="page1">${first ? `<a href="${secondUrl}">下一章</a>` : ''}</div>
+      </body></html>`,
+    });
+  });
+  await addYingChuangUserscript(context);
+  await page.goto(firstUrl);
+  const reader = page.locator('#mnr-reader-root');
+  const next = reader.locator(`article[data-chapter-url="${secondUrl}"]`);
+  for (const line of twkanCanvasLines) await expect(next).toContainText(line);
+  await expect(page).toHaveURL(firstUrl);
+  await expect(reader.locator('article')).toHaveCount(2);
+  await expect(reader.locator('canvas')).toHaveCount(0);
+  const main = reader.locator('.mnr-reader-main');
+  expect(await main.evaluate(el => el.scrollWidth - el.clientWidth)).toBe(0);
+  expect(nextRequests).toBe(1);
+});
+
+for (const width of [1280, 390, 1510, 320]) {
   test(`TWKAN Precursor pages support automatic and manual entry at ${width}px`, async ({
     context,
     page,
@@ -1310,12 +1348,13 @@ for (const width of [1280, 390]) {
       return route.fulfill({
         contentType: 'text/html; charset=utf-8',
         body: `<!doctype html><html><head>
+          <meta name="viewport" content="width=device-width,initial-scale=1">
           <title>第${first ? 119 : 120}章 歸來-測試小說-作者-台灣小說網</title>
           <script src="${precursorPath}"></script>
         </head><body>
           <a href="/book/93181/index.html">測試小說</a>
           <div class="txtnav"><h1>第${first ? 119 : 120}章 歸來</h1>
-            <div id="txtcontent0">${paragraphs}</div>
+            <div id="txtcontent0">${paragraphs}${twkanCanvasHtml}</div>
           </div>
           <div class="page1">${
             first ? `<a href="${secondUrl}">下一章</a>` : `<a href="${firstUrl}">上一章</a>`
@@ -1350,17 +1389,44 @@ for (const width of [1280, 390]) {
     await expect(reader.locator(`article[data-chapter-url="${secondUrl}"]`)).toContainText(
       '第120章 歸來'
     );
+    const assertCanvasTextAndWidth = async () => {
+      const articles = reader.locator('article');
+      for (const article of await articles.all()) {
+        for (const line of twkanCanvasLines) await expect(article).toContainText(line);
+        await expect(article).not.toContainText('支持本站運營');
+      }
+      await expect(reader.locator('canvas')).toHaveCount(0);
+      expect(
+        await page.evaluate(() => {
+          const root = document.querySelector('#mnr-reader-root')!.shadowRoot!;
+          const main = root.querySelector('main')!;
+          return {
+            page: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+            main: main.scrollWidth - main.clientWidth,
+            articles: Array.from(
+              root.querySelectorAll('article'),
+              el => el.scrollWidth - el.clientWidth
+            ),
+          };
+        })
+      ).toEqual({ page: 0, main: 0, articles: Array(await articles.count()).fill(0) });
+    };
+    await assertCanvasTextAndWidth();
+    const originalContent = await reader.locator('article').first().innerHTML();
 
     await reader.getByRole('button', { name: '打开设置' }).click();
     await reader.getByRole('button', { name: '退出阅读模式' }).click();
     await expect(reader).toHaveCount(0);
     await expect(page.locator('#txtcontent0')).toBeVisible();
+    await expect(page.locator('#txtcontent0')).toContainText(twkanCanvasLines[0]);
     await expect(page.locator(`script[src="${precursorPath}"]`)).toHaveCount(2);
     await page.locator('#mnr-entry-root #mnr-entry-button').click();
     await expect(reader.locator('.mnr-reader')).toBeVisible();
     await expect(reader.locator(`article[data-chapter-url="${secondUrl}"]`)).toContainText(
       '第120章 歸來'
     );
+    await expect(reader.locator('article').first()).toHaveJSProperty('innerHTML', originalContent);
+    await assertCanvasTextAndWidth();
 
     // Previous navigation uses the rule's iframe loader and the shared document classifier.
     await reader.locator('.mnr-reader-main').focus();
@@ -1369,8 +1435,10 @@ for (const width of [1280, 390]) {
     await expect(reader.locator(`article[data-chapter-url="${firstUrl}"]`)).toContainText(
       '第119章 歸來'
     );
+    await assertCanvasTextAndWidth();
     await page.keyboard.press('ArrowRight');
     await expect(page).toHaveURL(secondUrl);
+    await assertCanvasTextAndWidth();
   });
 }
 
@@ -2398,7 +2466,7 @@ test('caches script-rendered rule chapters through an iframe and removes it afte
       if (request.isNavigationRequest() && request.frame() !== page.mainFrame()) iframeRequests++;
     }
     const id = path.endsWith('/501') ? 501 : 500;
-    const content = `<p>动态缓存章节 ${id}。</p>${paragraphs}`;
+    const content = `<p>动态缓存章节 ${id}。</p>${paragraphs}${twkanCanvasHtml}`;
     const body =
       path.startsWith('/book/') || path.startsWith('/ajax_novels/')
         ? `<title>离线测试</title><a href="${startUrl}">第500章 起程</a><a href="${cachedUrl}">第501章 归来</a>`
@@ -2427,6 +2495,10 @@ test('caches script-rendered rule chapters through an iframe and removes it afte
   await root.locator('.mnr-chapter-button').filter({ hasText: '第501章 归来' }).click();
   await expect(page).toHaveURL(cachedUrl);
   await expect(root.locator('.mnr-reader-content')).toContainText('动态缓存章节 501');
+  for (const line of twkanCanvasLines) {
+    await expect(root.locator('.mnr-reader-content')).toContainText(line);
+  }
+  await expect(root.locator('canvas')).toHaveCount(0);
   expect(cachedRequests).toBe(1);
   expect(logs.some(line => line.includes('pageerror'))).toBe(false);
 });

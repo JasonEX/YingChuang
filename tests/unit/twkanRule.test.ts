@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { twkanCanvasHtml, twkanCanvasLines } from '../testUtils/twkan';
 import { JSDOM } from 'jsdom';
 
 import { builtInRules } from '@/core/rules/builtInRules';
@@ -112,4 +113,89 @@ describe('Twkan rule', () => {
       )
     ).toBe(false);
   });
+
+  it.each(['live', 'detached'])(
+    'restores canvas text before cleanup in a %s document',
+    async kind => {
+      const source = makeDoc();
+      source
+        .querySelector('#txtcontent0')!
+        .insertAdjacentHTML('beforeend', `<br>${twkanCanvasHtml}`);
+      const doc =
+        kind === 'live'
+          ? source
+          : new DOMParser().parseFromString(source.documentElement.outerHTML, 'text/html');
+      const parser = new Parser();
+      const chapter = await parser.parse(doc, 'https://twkan.com/txt/93181/53052605');
+      expect(chapter).not.toBeNull();
+      const content = doc.createElement('div');
+      content.innerHTML = chapter!.content;
+      const lines = Array.from(content.querySelectorAll('p'), p => p.textContent);
+      expect(lines.slice(-twkanCanvasLines.length)).toEqual(twkanCanvasLines);
+      expect(chapter!.content).not.toContain('canvas');
+      expect(chapter!.rawContent).not.toContain('canvas');
+      expect(chapter!.content).not.toContain('支持本站運營');
+      expect(content.querySelector('約定')).toBeNull();
+      // Closing restores readable host text, and manual re-entry must not duplicate it.
+      expect(doc.querySelector('#txtcontent0')?.textContent).toContain(twkanCanvasLines[0]);
+      const again = await parser.parse(doc, 'https://twkan.com/txt/93181/53052605');
+      expect(again?.content).toBe(chapter!.content);
+      expect(again?.rawContent).toBe(chapter!.rawContent);
+    }
+  );
+
+  it('only decodes the site canvas inside the selected chapter container', async () => {
+    const doc = makeDoc();
+    doc.body.insertAdjacentHTML('beforeend', '<canvas class="sec-last" id="outside"></canvas>');
+    const content = doc.querySelector('#txtcontent0')!;
+    content.insertAdjacentHTML(
+      'beforeend',
+      `${twkanCanvasHtml}<canvas id="illustration"></canvas>`
+    );
+    await twkanRule.hooks!.beforeParse!(doc);
+    expect(content.querySelector('canvas.sec-last')).toBeNull();
+    expect(content.querySelector('#illustration')).not.toBeNull();
+    expect(doc.querySelector('#outside')).not.toBeNull();
+
+    // Older chapter markup uses .txtnav without #txtcontent0.
+    content.removeAttribute('id');
+    content.insertAdjacentHTML('beforeend', twkanCanvasHtml);
+    await twkanRule.hooks!.beforeParse!(doc);
+    expect(content.querySelector('canvas.sec-last')).toBeNull();
+
+    doc.querySelector('.txtnav')!.remove();
+    await twkanRule.hooks!.beforeParse!(doc);
+    expect(doc.querySelector('#outside')).not.toBeNull();
+  });
+
+  it.each([
+    ['missing payload', null, 'fixture-v1'],
+    ['missing salt', 'AAAA', null],
+    ['invalid base64', '!!!', 'fixture-v1'],
+    ['invalid UTF-8', '/w==', 'fixture-v1'],
+    ['empty text', 'LA==', 'fixture-v1'],
+  ])(
+    'rejects %s without publishing a partial chapter or mutating its source',
+    async (_, data, salt) => {
+      const doc = makeDoc();
+      const content = doc.querySelector('#txtcontent0')!;
+      content.insertAdjacentHTML('beforeend', twkanCanvasHtml + twkanCanvasHtml);
+      const canvas = content.querySelectorAll('canvas')[1]!;
+      if (data === null) canvas.removeAttribute('data-c');
+      else canvas.setAttribute('data-c', data);
+      if (salt === null) canvas.removeAttribute('data-v');
+      else canvas.setAttribute('data-v', salt);
+      const original = content.innerHTML;
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        await expect(
+          new Parser().parse(doc, 'https://twkan.com/txt/93181/53052605')
+        ).resolves.toBeNull();
+        expect(content.innerHTML).toBe(original);
+        expect(warn).toHaveBeenCalledWith('[Parser] beforeParse hook error:', expect.any(Error));
+      } finally {
+        warn.mockRestore();
+      }
+    }
+  );
 });
