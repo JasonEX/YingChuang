@@ -1291,6 +1291,89 @@ test('applies the Sto9 adapter and loads its complete dynamic catalog', async ({
   }
 });
 
+for (const width of [1280, 390]) {
+  test(`TWKAN Precursor pages support automatic and manual entry at ${width}px`, async ({
+    context,
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 844 });
+    const origin = 'https://twkan.com';
+    const firstUrl = `${origin}/txt/93181/53052420`;
+    const secondUrl = `${origin}/txt/93181/53052605`;
+    const precursorPath = '/cdn-cgi/challenge-platform/scripts/precursor/main.js';
+    await context.route(`${origin}/**`, route => {
+      const url = route.request().url();
+      if (url === `${origin}${precursorPath}`) {
+        return route.fulfill({ body: '', contentType: 'text/javascript' });
+      }
+      const first = url === firstUrl;
+      return route.fulfill({
+        contentType: 'text/html; charset=utf-8',
+        body: `<!doctype html><html><head>
+          <title>第${first ? 119 : 120}章 歸來-測試小說-作者-台灣小說網</title>
+          <script src="${precursorPath}"></script>
+        </head><body>
+          <a href="/book/93181/index.html">測試小說</a>
+          <div class="txtnav"><h1>第${first ? 119 : 120}章 歸來</h1>
+            <div id="txtcontent0">${paragraphs}</div>
+          </div>
+          <div class="page1">${
+            first ? `<a href="${secondUrl}">下一章</a>` : `<a href="${firstUrl}">上一章</a>`
+          }</div>
+          <script>
+            window.__CF$cv$params = { r: 'fixture-ray' };
+            const script = document.createElement('script');
+            script.src = '${precursorPath}';
+            document.head.appendChild(script);
+            // The live ad renderer transfers children until the source is empty.
+            window.addEventListener('load', () => {
+              const source = document.createElement('div');
+              source.innerHTML = '<script src="https://ads.example/blocked.js"><' + '/script><span>done</span>';
+              const target = document.createElement('div');
+              let moves = 0;
+              while (source.firstChild && moves < 4) {
+                target.appendChild(source.firstChild);
+                moves++;
+              }
+              document.body.dataset.hostTransfer = source.firstChild ? 'stalled' : 'complete';
+            });
+          </script>
+        </body></html>`,
+      });
+    });
+    await addYingChuangUserscript(context);
+    await page.goto(secondUrl, { waitUntil: 'domcontentloaded' });
+
+    const reader = page.locator('#mnr-reader-root');
+    await expect(reader.locator('.mnr-reader')).toBeVisible();
+    await expect(page.locator('body')).toHaveAttribute('data-host-transfer', 'complete');
+    await expect(reader.locator(`article[data-chapter-url="${secondUrl}"]`)).toContainText(
+      '第120章 歸來'
+    );
+
+    await reader.getByRole('button', { name: '打开设置' }).click();
+    await reader.getByRole('button', { name: '退出阅读模式' }).click();
+    await expect(reader).toHaveCount(0);
+    await expect(page.locator('#txtcontent0')).toBeVisible();
+    await expect(page.locator(`script[src="${precursorPath}"]`)).toHaveCount(2);
+    await page.locator('#mnr-entry-root #mnr-entry-button').click();
+    await expect(reader.locator('.mnr-reader')).toBeVisible();
+    await expect(reader.locator(`article[data-chapter-url="${secondUrl}"]`)).toContainText(
+      '第120章 歸來'
+    );
+
+    // Previous navigation uses the rule's iframe loader and the shared document classifier.
+    await reader.locator('.mnr-reader-main').focus();
+    await page.keyboard.press('ArrowLeft');
+    await expect(page).toHaveURL(firstUrl);
+    await expect(reader.locator(`article[data-chapter-url="${firstUrl}"]`)).toContainText(
+      '第119章 歸來'
+    );
+    await page.keyboard.press('ArrowRight');
+    await expect(page).toHaveURL(secondUrl);
+  });
+}
+
 test('keeps normal Cloudflare JS Detection pages readable across previous navigation', async ({
   context,
   page,

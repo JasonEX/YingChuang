@@ -60,27 +60,47 @@ describe('SiteProtection', () => {
       expect(isCloudflareChallenge(localDom.window.document)).toBe(false);
     });
 
-    it('does not misclassify readable pages with Cloudflare JS detection', () => {
-      const localDom = new JSDOM(
-        `<!DOCTYPE html>
+    it.each(['jsd', 'precursor'])(
+      'does not misclassify readable pages with Cloudflare %s detection',
+      detection => {
+        const localDom = new JSDOM(
+          `<!DOCTYPE html>
         <html>
           <head>
             <title>第一章 - 示例小说</title>
-            <script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>
+            <link rel="preload" as="script" href="/cdn-cgi/challenge-platform/scripts/${detection}/main.js">
+            <script src="/cdn-cgi/challenge-platform/scripts/${detection}/main.js"></script>
           </head>
           <body>
             <main id="content"><p>这是正常显示的章节正文。</p></main>
             <script>
               window.__CF$cv$params = { r: 'ray-id' };
               const script = document.createElement('script');
-              script.src = '/cdn-cgi/challenge-platform/scripts/jsd/main.js';
+              script.src = '/cdn-cgi/challenge-platform/scripts/${detection}/main.js';
             </script>
           </body>
         </html>`,
-        { url: 'https://www.hetushu.com/book/9145/6567989.html' }
+          { url: 'https://www.hetushu.com/book/9145/6567989.html' }
+        );
+
+        expect(isCloudflareChallenge(localDom.window.document)).toBe(false);
+      }
+    );
+
+    it.each([
+      '<script src="/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1"></script>',
+      '<script>window._cf_chl_opt = { cType: "managed" };</script>',
+      '<iframe src="https://challenges.cloudflare.com/turnstile/v0/"></iframe>',
+      '<title>Just a moment...</title>',
+    ])('still detects a challenge alongside Precursor: %s', marker => {
+      const localDom = new JSDOM(
+        `<!doctype html><html><head>
+          <script src="/cdn-cgi/challenge-platform/scripts/precursor/main.js"></script>
+        </head><body>${marker}</body></html>`,
+        { url: 'https://twkan.com/txt/93181/53052605' }
       );
 
-      expect(isCloudflareChallenge(localDom.window.document)).toBe(false);
+      expect(isCloudflareChallenge(localDom.window.document)).toBe(true);
     });
 
     it('detects Cloudflare challenge pages by /cdn-cgi/ path', () => {
@@ -153,12 +173,33 @@ describe('SiteProtection', () => {
       expect(() => protection.deactivate()).not.toThrow();
     });
 
-    it('should be able to reactivate after deactivation', () => {
-      protection.activate();
-      protection.deactivate();
-      // Should be able to activate again
-      expect(() => protection.activate()).not.toThrow();
-    });
+    it.each(['appendChild', 'insertBefore'] as const)(
+      'restores host %s behavior on exit and protects again on re-entry',
+      method => {
+        const doc = dom.window.document;
+        const original = dom.window.Node.prototype[method];
+        const target = doc.createElement('div');
+
+        for (const enabled of [true, false, true]) {
+          if (enabled) protection.activate();
+          else protection.deactivate();
+
+          const source = doc.createElement('template');
+          source.innerHTML = '<script src="https://evil.example/x.js"></script>';
+          const script = source.content.firstChild!;
+          const result =
+            method === 'appendChild'
+              ? target.appendChild(script)
+              : target.insertBefore(script, null);
+
+          expect(result).toBe(script);
+          expect(source.content.childNodes).toHaveLength(0);
+          expect(target.contains(script)).toBe(!enabled);
+          if (!enabled) expect(dom.window.Node.prototype[method]).toBe(original);
+          target.replaceChildren();
+        }
+      }
+    );
   });
 
   describe('enableRightClick', () => {
@@ -251,6 +292,32 @@ describe('SiteProtection', () => {
       const injected = dom.window.document.querySelector('script[src="https://evil.example/x.js"]');
       expect(injected).toBeNull();
     });
+
+    it.each(['appendChild', 'insertBefore'] as const)(
+      'consumes blocked nodes so host %s transfer loops can finish',
+      method => {
+        protection.activate();
+        const source = dom.window.document.createElement('div');
+        source.innerHTML =
+          '<p>before</p><script src="https://evil.example/x.js"></script><p>after</p>';
+        const target = dom.window.document.body;
+        let moves = 0;
+
+        // Bound the host's while(firstChild) loop so a regression fails instead of hanging.
+        while (source.firstChild && moves < 4) {
+          const child = source.firstChild;
+          const result =
+            method === 'appendChild' ? target.appendChild(child) : target.insertBefore(child, null);
+          expect(result).toBe(child);
+          moves++;
+        }
+
+        expect(source.childNodes).toHaveLength(0);
+        expect(moves).toBe(3);
+        expect(target.textContent).toBe('beforeafter');
+        expect(target.querySelector('script')).toBeNull();
+      }
+    );
 
     it('does not scan descendants for plain leaf nodes', () => {
       const p = new SiteProtection({

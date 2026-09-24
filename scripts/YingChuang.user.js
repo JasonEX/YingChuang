@@ -3,7 +3,7 @@
 // @name:zh-CN         萤窗
 // @name:zh-TW         螢窗
 // @namespace          https://github.com/JasonEX
-// @version            1.0.11
+// @version            1.0.12
 // @author             JasonEX
 // @description        萤窗：小说阅读脚本，智能正文识别、连续阅读、阅读位置恢复、简繁转换
 // @description:zh-CN  萤窗：小说阅读脚本，智能正文识别、连续阅读、阅读位置恢复、简繁转换
@@ -6985,7 +6985,7 @@
 		if (Array.from(doc.querySelectorAll("script[src], link[href]")).some((element) => {
 			const resourceUrl = element.getAttribute("src") || element.getAttribute("href") || "";
 			if (!/\/cdn-cgi\/challenge-platform\//i.test(resourceUrl)) return false;
-			return !/\/cdn-cgi\/challenge-platform\/scripts\/jsd\//i.test(resourceUrl);
+			return !/\/cdn-cgi\/challenge-platform\/scripts\/(?:jsd|precursor)\//i.test(resourceUrl);
 		})) return true;
 		const title = (doc.title || "").trim().toLowerCase();
 		if (title === "just a moment..." || title === "attention required! | cloudflare") return true;
@@ -7109,11 +7109,17 @@
 			return false;
 		};
 		NodeCtor.prototype.appendChild = function(node) {
-			if (shouldBlockNode(node)) return node;
+			if (shouldBlockNode(node)) {
+				node.parentNode?.removeChild(node);
+				return node;
+			}
 			return originalAppendChild.call(this, node);
 		};
 		NodeCtor.prototype.insertBefore = function(newNode, referenceNode) {
-			if (shouldBlockNode(newNode)) return newNode;
+			if (shouldBlockNode(newNode)) {
+				newNode.parentNode?.removeChild(newNode);
+				return newNode;
+			}
 			return originalInsertBefore.call(this, newNode, referenceNode);
 		};
 		const originalWrite = document.write?.bind(document);
@@ -9077,7 +9083,7 @@
 		else if (options) managerInstance.updateOptions(options);
 		return managerInstance;
 	}
-	var VERSION = "1.0.11";
+	var VERSION = "1.0.12";
 	var BUILD_DATE = "2026-09-23";
 	function buildDiagnosticInfo(options = {}) {
 		return {

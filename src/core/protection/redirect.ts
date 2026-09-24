@@ -137,7 +137,12 @@ export function blockRedirects(options: RedirectProtectionOptions = {}): () => v
   };
 
   NodeCtor.prototype.appendChild = function <T extends Node>(node: T): T {
-    if (shouldBlockNode(node)) return node;
+    if (shouldBlockNode(node)) {
+      // Host renderers may move children in a while(firstChild) loop. Consume
+      // the source node even when its destination insertion is blocked.
+      node.parentNode?.removeChild(node);
+      return node;
+    }
     return originalAppendChild.call(this, node) as T;
   };
 
@@ -145,7 +150,10 @@ export function blockRedirects(options: RedirectProtectionOptions = {}): () => v
     newNode: T,
     referenceNode: Node | null
   ): T {
-    if (shouldBlockNode(newNode)) return newNode;
+    if (shouldBlockNode(newNode)) {
+      newNode.parentNode?.removeChild(newNode);
+      return newNode;
+    }
     return originalInsertBefore.call(this, newNode, referenceNode) as T;
   };
 

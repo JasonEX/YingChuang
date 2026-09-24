@@ -55,9 +55,9 @@ export const isCloudflareChallenge = (doc: Document = document): boolean => {
     const resourceUrl = element.getAttribute('src') || element.getAttribute('href') || '';
     if (!/\/cdn-cgi\/challenge-platform\//i.test(resourceUrl)) return false;
 
-    // Cloudflare also injects JS Detection on otherwise readable pages. It is an
-    // anti-bot signal, not an interactive challenge that should block parsing.
-    return !/\/cdn-cgi\/challenge-platform\/scripts\/jsd\//i.test(resourceUrl);
+    // JS Detection and its successor Precursor run in the background on readable
+    // pages. Their presence alone does not mean the page is a challenge.
+    return !/\/cdn-cgi\/challenge-platform\/scripts\/(?:jsd|precursor)\//i.test(resourceUrl);
   });
   if (hasManagedChallengeResource) return true;
 
