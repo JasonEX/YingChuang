@@ -615,6 +615,7 @@ function makeSto9Fixture(options: {
           <div class="txtright">右側文字廣告</div>
           <div class="txtad">正文頂部廣告</div>
           &emsp;&emsp;s🎤to9.com為您提供最快的小說更新<br><br>
+          &emsp;&emsp;获取最新章节更新，请访问st☕9.com<br><br>
           ${content}
           &emsp;&emsp;黒竜看著著作，連忙穿過乾涸的河床。車龍神福。<br><br>
           <div class="txtcenter">章中廣告</div>
@@ -1260,6 +1261,7 @@ test('applies the Sto9 adapter and loads its complete dynamic catalog', async ({
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '');
   expect(normalizedReaderText).not.toContain('sto9com');
+  await expect(readerContent).not.toContainText('st☕9.com');
 
   await readerRoot.locator('[aria-label="打开目录"]').click();
   await expect

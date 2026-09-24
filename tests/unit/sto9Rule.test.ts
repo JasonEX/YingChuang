@@ -110,4 +110,38 @@ describe('Sto9 rule', () => {
       expect(chapter?.content).toContain('城樓上的兩人看得清清楚楚。');
     }
   );
+
+  it.each([
+    ['获取最新章节更新，请访问st☕9.com', 'br'],
+    ['獲取最新章節更新，請訪問st☕️9.com', 'p'],
+    ['获取最新章节更新, 请访问 ST☕︎9.COM。', 'p'],
+  ])('removes a standalone coffee-substituted promotion: %s (%s)', async (promotion, tag) => {
+    const doc = makeDoc();
+    const paragraph =
+      tag === 'p' ? `<p>\u2003\u2003${promotion}</p>` : `<br><br>\u2003\u2003${promotion}<br><br>`;
+    doc.querySelector('.txtnav')!.insertAdjacentHTML('beforeend', `${paragraph}援軍終於到了。`);
+    const sourceHtml = doc.querySelector('.txtnav')!.innerHTML;
+
+    const chapter = await new Parser().parse(doc, sto9Rule.meta?.exampleUrl);
+
+    expect(chapter?.content).not.toContain(promotion);
+    expect(chapter?.content).not.toContain('☕');
+    expect(chapter?.content).toContain('將士們握緊兵器，守住房城。');
+    expect(chapter?.content).toContain('援軍終於到了。');
+    expect(doc.querySelector('.txtnav')!.innerHTML).toBe(sourceHtml);
+  });
+
+  it.each([
+    '紙上寫著 st☕9.com，將士繼續趕路。',
+    '他念道：「获取最新章节更新，请访问st☕9.com」。',
+    '获取最新章节更新，请访问st☕9.com，這句話被他劃掉了。',
+    '获取最新章节更新，请访问st9.com',
+  ])('preserves prose and unconfirmed domain variants: %s', async prose => {
+    const doc = makeDoc();
+    doc.querySelector('.txtnav')!.insertAdjacentHTML('beforeend', `<p>${prose}</p>`);
+
+    const chapter = await new Parser().parse(doc, sto9Rule.meta?.exampleUrl);
+
+    expect(chapter?.content).toContain(prose);
+  });
 });

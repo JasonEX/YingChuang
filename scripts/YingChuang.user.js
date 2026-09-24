@@ -4565,6 +4565,10 @@
 			selector: ".txtnav",
 			remove: "ins, .txtright, .txtad",
 			replace: [{
+				pattern: "(^|>)\\s*[獲获]取最新章[節节]更新[，,]\\s*[請请][訪访][問问]\\s*st☕[\\uFE0E\\uFE0F]?9\\.com[。！!]?\\s*(?=<|$)",
+				replacement: "$1",
+				flags: "gi"
+			}, {
 				pattern: "[（(]\\s*還有更新耶\\s*[）)]",
 				replacement: ""
 			}]
