@@ -1,6 +1,6 @@
 {
   "name": "yingchuang",
-  "version": "1.0.12",
+  "version": "1.0.13",
   "buildDate": "2026-09-23",
   "type": "module",
   "description": "萤窗 - 小说阅读脚本，统一阅读样式，智能内容检测，自动翻页",
@@ -50,7 +50,7 @@
   "homepage": "https://github.com/JasonEX/YingChuang#readme",
   "dependencies": {
     "chinese-conv": "^4.0.0",
-    "dompurify": "^3.4.15",
+    "dompurify": "^3.4.16",
     "opencc-js": "^1.4.2"
   },
   "devDependencies": {
@@ -66,7 +66,7 @@
     "eslint": "^10.11.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.6",
-    "eslint-plugin-vue": "^10.11.0",
+    "eslint-plugin-vue": "^10.11.1",
     "husky": "^9.1.7",
     "jsdom": "^30.1.1",
     "lint-staged": "^17.5.1",
