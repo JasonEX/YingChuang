@@ -4,7 +4,7 @@
 // @name:zh-TW         螢窗
 // @namespace          https://github.com/JasonEX
 // @version            1.0.13
-// @author             JasonEX
+// @author             Yuqian
 // @description        萤窗：小说阅读脚本，智能正文识别、连续阅读、阅读位置恢复、简繁转换
 // @description:zh-CN  萤窗：小说阅读脚本，智能正文识别、连续阅读、阅读位置恢复、简繁转换
 // @description:zh-TW  螢窗：小說閱讀腳本，智慧正文識別、連續閱讀、閱讀位置恢復、簡繁轉換
