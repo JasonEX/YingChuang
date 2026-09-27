@@ -33,6 +33,168 @@ import {
 
 const targetUrl = 'http://mnr.test/chapter/100.html';
 
+test.describe('chapter drawer positioning', () => {
+  const origin = 'https://www.shudugu.org';
+  const chapterUrl = (chapter: number, section = 1) =>
+    `${origin}/325/${1000 + chapter}${section > 1 ? `-${section}` : ''}.html`;
+  const catalog = `<main id="dir">${Array.from(
+    { length: 100 },
+    (_, i) => `<a href="${chapterUrl(i + 1)}">第${i + 1}章 山间行旅</a>`
+  ).join('')}</main>`;
+
+  function chapterHtml(chapter: number, section = 1) {
+    const next =
+      chapter === 50
+        ? `<a href="${section < 3 ? chapterUrl(chapter, section + 1) : chapterUrl(51)}">下一${section < 3 ? '页' : '章'}</a>`
+        : '';
+    return `<!doctype html><html><head><title>第${chapter}章 山间行旅-速读谷</title></head><body>
+      <div class="submenu"><h1><a href="/325/">山间行旅</a> &gt; 第${chapter}章 山间行旅</h1></div>
+      <div class="con"><p>第${section}页正文。${'旅人沿着熟悉的山路向前走去，树林深处传来了清脆的钟声。'.repeat(70)}</p></div>
+      <div class="prenext"><span><a href="${chapterUrl(chapter - 1)}">上一章</a></span><a href="/325/#dir">目录</a><span>${next}</span></div>
+      </body></html>`;
+  }
+
+  // Observe automatic positioning without counting the browser's native wheel scrolling.
+  async function observePositioning(page: Page) {
+    await page.addInitScript(() => {
+      const native = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop')!;
+      const writes: number[] = [];
+      (window as any).__drawerScrollWrites = writes;
+      Object.defineProperty(Element.prototype, 'scrollTop', {
+        ...native,
+        set(value: number) {
+          if (this.classList.contains('mnr-drawer-content')) writes.push(value);
+          native.set!.call(this, value);
+        },
+      });
+    });
+  }
+
+  const positioningCount = (page: Page) =>
+    page.evaluate(() => (window as any).__drawerScrollWrites.length as number);
+
+  for (const width of [1280, 390]) {
+    test(`preserves manual catalog scrolling during merging and preloading at ${width}px`, async ({
+      context,
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 844 });
+      let releaseSections!: () => void;
+      const sectionsReady = new Promise<void>(resolve => {
+        releaseSections = resolve;
+      });
+      let catalogRequests = 0;
+      await context.route(`${origin}/**`, async route => {
+        const path = new URL(route.request().url()).pathname;
+        if (path === '/325/') {
+          catalogRequests++;
+          return route.fulfill({ contentType: 'text/html; charset=utf-8', body: catalog });
+        }
+        const match = path.match(/\/(\d+)(?:-(\d+))?\.html$/)!;
+        const chapter = Number(match[1]) - 1000;
+        const section = Number(match[2] || 1);
+        if (section > 1) await sectionsReady;
+        return route.fulfill({
+          contentType: 'text/html; charset=utf-8',
+          body: chapterHtml(chapter, section),
+        });
+      });
+      await observePositioning(page);
+      await addYingChuangUserscript(context);
+      await page.goto(chapterUrl(50));
+      const root = page.locator('#mnr-reader-root');
+      await root.getByRole('button', { name: '打开目录', exact: true }).click();
+      const list = root.locator('.mnr-drawer-content');
+      await expect(root.locator('.mnr-drawer-position')).toHaveText('第 50 / 100 章');
+      await expect(root.locator('.mnr-chapter-button.active')).toBeInViewport();
+      await expect.poll(() => positioningCount(page)).toBe(1);
+      await expect(root.getByRole('button', { name: '关闭目录', exact: true })).toBeFocused();
+
+      await list.hover();
+      await page.mouse.wheel(0, -10000);
+      await expect(list).toHaveJSProperty('scrollTop', 0);
+      releaseSections();
+      await expect(root.locator(`article[data-chapter-url="${chapterUrl(50)}"]`)).toContainText(
+        '第3页正文'
+      );
+      await expect(root.locator(`article[data-chapter-url="${chapterUrl(51)}"]`)).toContainText(
+        '第1页正文'
+      );
+      await expect(root.locator('.mnr-section-progress')).toHaveCount(0);
+      await expect(list).toHaveJSProperty('scrollTop', 0);
+      expect(await positioningCount(page)).toBe(1);
+
+      // Reopening clears a search that removed the list and positions the restored list once.
+      const search = root.getByRole('searchbox', { name: '搜索章节' });
+      await search.fill('没有这一章');
+      await expect(root.locator('.mnr-drawer-state')).toHaveText('没有匹配的章节');
+      await page.keyboard.press('Escape');
+      const beforeReopen = await positioningCount(page);
+      await root.getByRole('button', { name: '打开目录', exact: true }).click();
+      await expect(search).toHaveValue('');
+      await expect(root.locator('.mnr-chapter-button.active')).toBeInViewport();
+      expect(await positioningCount(page)).toBe(beforeReopen + 1);
+
+      // Selecting a chapter closes the drawer; the next opening uses that chapter.
+      await search.fill('第51章');
+      await root.getByRole('button', { name: '第51章 山间行旅', exact: true }).click();
+      await expect(page).toHaveURL(chapterUrl(51));
+      await expect(root.locator('.mnr-drawer')).not.toHaveClass(/\bopen\b/);
+      const beforeNavigationReopen = await positioningCount(page);
+      await root.getByRole('button', { name: '打开目录', exact: true }).click();
+      await expect(root.locator('.mnr-drawer-position')).toHaveText('第 51 / 100 章');
+      await expect(root.locator('.mnr-chapter-button.active')).toBeInViewport();
+      expect(await positioningCount(page)).toBe(beforeNavigationReopen + 1);
+      expect(catalogRequests).toBe(1);
+    });
+  }
+
+  test('waits for a retried catalog and leaves a closed drawer unpositioned', async ({
+    context,
+    page,
+  }) => {
+    let releaseCatalog!: () => void;
+    const catalogReady = new Promise<void>(resolve => {
+      releaseCatalog = resolve;
+    });
+    let catalogRequests = 0;
+    await context.route(`${origin}/**`, async route => {
+      if (new URL(route.request().url()).pathname === '/325/') {
+        catalogRequests++;
+        if (catalogRequests > 1) await catalogReady;
+        return route.fulfill({
+          contentType: 'text/html; charset=utf-8',
+          body: catalogRequests === 1 ? '<main>目录暂不可用</main>' : catalog,
+        });
+      }
+      return route.fulfill({
+        contentType: 'text/html; charset=utf-8',
+        body: chapterHtml(51),
+      });
+    });
+    await observePositioning(page);
+    await addYingChuangUserscript(context);
+    await page.goto(chapterUrl(51));
+    const root = page.locator('#mnr-reader-root');
+    await root.getByRole('button', { name: '打开目录', exact: true }).click();
+    await expect(root.locator('.mnr-drawer-state')).toContainText('暂无目录');
+    expect(await positioningCount(page)).toBe(0);
+    await root.getByRole('button', { name: '重新加载', exact: true }).click();
+    await expect(root.locator('.mnr-drawer-state')).toContainText('加载目录中');
+    await root.getByRole('button', { name: '关闭目录', exact: true }).click();
+    releaseCatalog();
+    await expect(root.locator('.mnr-drawer-position')).toHaveText('第 51 / 100 章');
+    await expect(root.locator('.mnr-drawer-content')).toHaveJSProperty('scrollTop', 0);
+    expect(await positioningCount(page)).toBe(0);
+    await expect(root.getByRole('button', { name: '打开目录', exact: true })).toBeFocused();
+
+    await root.getByRole('button', { name: '打开目录', exact: true }).click();
+    await expect(root.locator('.mnr-chapter-button.active')).toBeInViewport();
+    expect(await positioningCount(page)).toBe(1);
+    expect(catalogRequests).toBe(2);
+  });
+});
+
 async function copyReaderDiagnostic(page: Page) {
   await page.evaluate(() => {
     const target = window as Window & {

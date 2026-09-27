@@ -247,7 +247,7 @@ function resetVirtualWindow() {
 async function scrollCurrentIntoView() {
   await nextTick();
   const content = contentRef.value;
-  if (!content || query.value) return;
+  if (!props.isOpen || props.loading || !content || query.value) return;
   const currentIndex = props.chapters.findIndex(chapter => chapter.isCurrent);
   if (currentIndex < 0) return;
   const targetTop = Math.max(
@@ -321,7 +321,8 @@ watch(
       return;
     }
     query.value = '';
-    await scrollCurrentIntoView();
+    await nextTick();
+    if (!props.isOpen) return;
     closeButtonRef.value?.focus({
       preventScroll: true,
     });
@@ -330,9 +331,10 @@ watch(
 );
 
 watch(
-  () => [props.loading, props.chapters.length, currentChapterNumber.value],
-  () => {
-    if (props.isOpen) void scrollCurrentIntoView();
+  // Position once when an opening is ready; background chapter/cache updates must not scroll.
+  () => props.isOpen && !props.loading,
+  ready => {
+    if (ready) void scrollCurrentIntoView();
   },
   { flush: 'post' }
 );
