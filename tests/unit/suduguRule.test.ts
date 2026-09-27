@@ -69,7 +69,7 @@ const page2Html = chapterHtml({
 });
 
 const page3Html = chapterHtml({
-  body: `PAGE3 ${'第三页正文。'.repeat(260)}`,
+  body: `PAGE3 ${'第三页正文。'.repeat(260)}</p><p>前往必搜索</p><p>后续正文。`,
   nextHref: '/109/1226047-4.html',
   nextText: '下一页',
   prevHref: '/109/1226047-2.html',
@@ -141,6 +141,22 @@ describe('Sudugu rule', () => {
     expect(chapter?.content).toContain('PAGE1');
   });
 
+  it('removes the leftover search promotion without trimming adjacent prose', async () => {
+    const html = chapterHtml({
+      body: '正文前句。</p><p>前往必搜索</p><p>正文后句。',
+      nextHref: '/109/1236002.html',
+      nextText: '下一章',
+      prevHref: '/109/1226046.html',
+      prevText: '上一章',
+    });
+    const chapter = await new Parser().parse(makeDoc(html, page3Url), page3Url);
+
+    expect(chapter?.content).toContain('正文前句。');
+    expect(chapter?.content).toContain('正文后句。');
+    expect(chapter?.content).not.toContain('前往必搜索');
+    expect(chapter?.content).not.toContain('<p></p>');
+  });
+
   it('merges paged chapters and keeps the real next chapter URL', async () => {
     const pages = new Map<string, string>([
       [page1Url, page1Html],
@@ -163,6 +179,8 @@ describe('Sudugu rule', () => {
     expect(result?.content).toContain('PAGE2');
     expect(result?.content).toContain('PAGE3');
     expect(result?.content).toContain('PAGE4');
+    expect(result?.content).toContain('后续正文。');
+    expect(result?.content).not.toContain('前往必搜索');
   });
 
   it('loads catalog entries from the book index page', async () => {

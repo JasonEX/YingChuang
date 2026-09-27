@@ -12,6 +12,7 @@ export const suduguRule: SiteRule = {
   content: {
     selector: '.con',
     remove: 'ins',
+    replace: [{ pattern: '前往必搜索', replacement: '' }],
   },
   navigation: {
     prev: '.prenext span:first-child a',

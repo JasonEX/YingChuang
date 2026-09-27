@@ -3,7 +3,7 @@
 // @name:zh-CN         萤窗
 // @name:zh-TW         螢窗
 // @namespace          https://github.com/JasonEX
-// @version            1.0.14
+// @version            1.0.15
 // @author             Yuqian
 // @description        萤窗：小说阅读脚本，智能正文识别、连续阅读、阅读位置恢复、简繁转换
 // @description:zh-CN  萤窗：小说阅读脚本，智能正文识别、连续阅读、阅读位置恢复、简繁转换
@@ -4660,7 +4660,11 @@
 		match: { pattern: "^https?://www\\.shudugu\\.org/\\d+/\\d+(?:-\\d+)?\\.html(?:[?#].*)?$" },
 		content: {
 			selector: ".con",
-			remove: "ins"
+			remove: "ins",
+			replace: [{
+				pattern: "前往必搜索",
+				replacement: ""
+			}]
 		},
 		navigation: {
 			prev: ".prenext span:first-child a",
@@ -9175,7 +9179,7 @@
 		else if (options) managerInstance.updateOptions(options);
 		return managerInstance;
 	}
-	var VERSION = "1.0.14";
+	var VERSION = "1.0.15";
 	var BUILD_DATE = "2026-09-26";
 	function buildDiagnosticInfo(options = {}) {
 		return {
