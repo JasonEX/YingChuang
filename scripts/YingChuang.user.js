@@ -19013,6 +19013,7 @@ ul, ol {
 			});
 			return entries;
 		}
+		const nextTocPage = getRuleManager().matchRule(currentUrl)?.rule.hooks?.nextTocPage;
 		const visitedPages = new Set();
 		const seenChapterUrls = new Set();
 		const allCandidates = [];
@@ -19085,7 +19086,7 @@ ul, ol {
 					report({ reason: "no-new-chapters" });
 					break;
 				}
-				const nextPageUrl = rule?.hooks?.nextTocPage ? rule.hooks.nextTocPage(result.doc, effectivePageUrl) : findNextTocPageUrl(result.doc, effectivePageUrl, indexUrl);
+				const nextPageUrl = nextTocPage ? nextTocPage(result.doc, effectivePageUrl) : findNextTocPageUrl(result.doc, effectivePageUrl, indexUrl);
 				report({ nextUrl: nextPageUrl });
 				if (!nextPageUrl) {
 					report({ reason: "last-page" });

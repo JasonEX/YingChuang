@@ -81,7 +81,9 @@ describe('Wfxs mobile adapter', () => {
     );
   });
 
-  it('loads each catalog page once through the existing bounded loader', async () => {
+  it.each(['runtime', 'persisted'])('loads each catalog page once with a %s rule', async source => {
+    const rule =
+      source === 'persisted' ? (JSON.parse(JSON.stringify(wfxsRule)) as typeof wfxsRule) : wfxsRule;
     const requests: string[] = [];
     vi.stubGlobal('GM_xmlhttpRequest', (opts: GM_xmlhttpRequestOptions) => {
       requests.push(opts.url);
@@ -97,7 +99,7 @@ describe('Wfxs mobile adapter', () => {
       });
       return { abort: vi.fn() };
     });
-    const entries = await loadTocEntriesPaged(wfxsIndexUrl, wfxsChapterUrl(4), wfxsRule, vi.fn());
+    const entries = await loadTocEntriesPaged(wfxsIndexUrl, wfxsChapterUrl(4), rule, vi.fn());
     expect(entries.map(e => e.url)).toEqual(
       Array.from({ length: 9 }, (_, i) => wfxsChapterUrl(i + 1))
     );

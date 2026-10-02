@@ -16,6 +16,7 @@ import { type SpecialTocLoaderContext, specialTocLoaders } from './tocProviders'
 import type { ConversionMode } from '@/core/converter';
 import { fetchAndParseUrl } from '@/core/utils/network';
 import { getParser } from '@/core/parser';
+import { getRuleManager } from '@/core/rules/RuleManager';
 import type { ParsedChapter } from '@/core/parser';
 import { recordDebugEvent } from '@/core/debug/events';
 import type { SiteRequestDiagnostic } from '@/core/utils/siteRequest';
@@ -69,6 +70,8 @@ export async function loadTocEntriesPaged(
     return entries;
   }
 
+  // Persisted rule snapshots lose functions; resolve the hook once from the runtime rule.
+  const nextTocPage = getRuleManager().matchRule(currentUrl)?.rule.hooks?.nextTocPage;
   const visitedPages = new Set<string>();
   const seenChapterUrls = new Set<string>();
   const allCandidates: TocEntry[] = [];
@@ -134,8 +137,8 @@ export async function loadTocEntriesPaged(
         report({ reason: 'no-new-chapters' });
         break;
       }
-      const nextPageUrl: string | null = rule?.hooks?.nextTocPage
-        ? rule.hooks.nextTocPage(result.doc, effectivePageUrl)
+      const nextPageUrl: string | null = nextTocPage
+        ? nextTocPage(result.doc, effectivePageUrl)
         : findNextTocPageUrl(result.doc, effectivePageUrl, indexUrl);
       report({ nextUrl: nextPageUrl });
       if (!nextPageUrl) {
