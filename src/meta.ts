@@ -68,6 +68,9 @@ const META_BASE = {
     '*://*/*/*/*.htm',
     '*://*/*/*/*/*.html',
 
+    // Wfxs mobile chapters use extensionless URLs.
+    '*://m.wfxs.tw/xiaoshuo/*/*/',
+
     // Common route patterns
     '*://*/txt/*/*',
     '*://*/book/*/*',

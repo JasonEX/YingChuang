@@ -3,7 +3,7 @@
 // @name:zh-CN         萤窗
 // @name:zh-TW         螢窗
 // @namespace          https://github.com/JasonEX
-// @version            1.0.16
+// @version            1.0.17
 // @author             Yuqian
 // @description        萤窗：小说阅读脚本，智能正文识别、连续阅读、阅读位置恢复、简繁转换
 // @description:zh-CN  萤窗：小说阅读脚本，智能正文识别、连续阅读、阅读位置恢复、简繁转换
@@ -23,6 +23,7 @@
 // @match              *://*/*/*/*.html
 // @match              *://*/*/*/*.htm
 // @match              *://*/*/*/*/*.html
+// @match              *://m.wfxs.tw/xiaoshuo/*/*/
 // @match              *://*/txt/*/*
 // @match              *://*/book/*/*
 // @match              *://*/read/*/*
@@ -4846,6 +4847,57 @@
 			exampleUrl: "https://www.uuread.tw/chapter/1880014/2545609.html"
 		}
 	};
+	var wfxs_exports = __exportAll({
+		nextWfxsTocPage: () => nextWfxsTocPage,
+		wfxsRule: () => wfxsRule
+	});
+	function nextWfxsTocPage(doc, currentUrl) {
+		const current = new URL(currentUrl);
+		const match = current.pathname.match(/^\/booklist\/(\d+)(?:\/(\d+))?\.html$/);
+		if (current.hostname !== "m.wfxs.tw" || !match) return null;
+		const [, bookId, page] = match;
+		const currentPage = Number(page || 1);
+		const pages = new Map();
+		for (const anchor of doc.querySelectorAll("a[href]")) {
+			let url;
+			try {
+				url = new URL(anchor.getAttribute("href"), currentUrl);
+			} catch {
+				continue;
+			}
+			if (url.origin !== current.origin) continue;
+			const candidate = url.pathname.match(/^\/booklist\/(\d+)\/(\d+)\.html$/);
+			if (candidate?.[1] !== bookId) continue;
+			pages.set(Number(candidate[2]), url.href);
+		}
+		if (!pages.has(currentPage)) throw new Error("Wfxs catalog pagination controls are missing");
+		const next = pages.get(currentPage + 1);
+		if (next) return next;
+		if ([...pages.keys()].some((value) => value > currentPage)) throw new Error("Wfxs catalog is missing the next page link");
+		return null;
+	}
+	var wfxsRule = {
+		id: "wfxs",
+		name: "微风小说网（移动版）",
+		version: 1,
+		match: { pattern: "^https?://m\\.wfxs\\.tw/xiaoshuo/\\d+/\\d+/(?:[?#].*)?$" },
+		content: { selector: "#read_conent_box" },
+		title: {
+			selector: "h1.title",
+			bookSelector: ".h_header h2"
+		},
+		navigation: {
+			prev: ".page li:first-child a",
+			index: ".page a[href*=\"/booklist/\"]",
+			next: ".page li:last-child a"
+		},
+		toc: { selector: "#html_box" },
+		hooks: { nextTocPage: nextWfxsTocPage },
+		meta: {
+			source: "builtin",
+			exampleUrl: "https://m.wfxs.tw/xiaoshuo/9074406/84446392/"
+		}
+	};
 	var wxsl_exports = __exportAll({ wxslRule: () => wxslRule });
 	var wxslRule = {
 		id: "wxsl",
@@ -4905,6 +4957,7 @@
 		"./ttks.ts": ttks_exports,
 		"./twkan.ts": twkan_exports$1,
 		"./uuread.ts": uuread_exports,
+		"./wfxs.ts": wfxs_exports,
 		"./wxsl.ts": wxsl_exports,
 		"./xszj.ts": xszj_exports
 	});
@@ -9179,7 +9232,7 @@
 		else if (options) managerInstance.updateOptions(options);
 		return managerInstance;
 	}
-	var VERSION = "1.0.16";
+	var VERSION = "1.0.17";
 	var BUILD_DATE = "2026-10-02";
 	function buildDiagnosticInfo(options = {}) {
 		return {
@@ -19032,7 +19085,7 @@ ul, ol {
 					report({ reason: "no-new-chapters" });
 					break;
 				}
-				const nextPageUrl = findNextTocPageUrl(result.doc, effectivePageUrl, indexUrl);
+				const nextPageUrl = rule?.hooks?.nextTocPage ? rule.hooks.nextTocPage(result.doc, effectivePageUrl) : findNextTocPageUrl(result.doc, effectivePageUrl, indexUrl);
 				report({ nextUrl: nextPageUrl });
 				if (!nextPageUrl) {
 					report({ reason: "last-page" });

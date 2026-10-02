@@ -1,3 +1,11 @@
+import {
+  wfxsCatalog,
+  wfxsChapter,
+  wfxsChapterUrl,
+  wfxsIndexUrl,
+  wfxsOrigin,
+} from '../testUtils/wfxs';
+
 import { expect, type Locator, type Page, test } from '@playwright/test';
 import fs from 'node:fs';
 
@@ -3680,5 +3688,63 @@ for (const scenario of ['recover', 'background', 'exit'] as const) {
         '第1頁終點'
       );
     }
+  });
+}
+
+for (const width of [390, 1280]) {
+  test(`Wfxs mobile adapter preserves entry, paged catalog, navigation and exit at ${width}px`, async ({
+    context,
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 844 });
+    const catalogRequests: string[] = [];
+    await context.route(`${wfxsOrigin}/**`, route => {
+      const url = new URL(route.request().url());
+      if (url.pathname.startsWith('/booklist/')) {
+        catalogRequests.push(url.href);
+        const number = Number(url.pathname.match(/\/(\d+)\.html$/)?.[1]);
+        return route.fulfill({
+          contentType: 'text/html; charset=utf-8',
+          body: wfxsCatalog(number === 9074406 ? 1 : number),
+        });
+      }
+      const chapter = Number(url.pathname.match(/\/xiaoshuo\/9074406\/(\d+)\/$/)?.[1]);
+      if (!chapter) return route.fulfill({ status: 404, body: 'Not found' });
+      return route.fulfill({ contentType: 'text/html; charset=utf-8', body: wfxsChapter(chapter) });
+    });
+    await addYingChuangUserscript(context);
+    await page.goto(wfxsChapterUrl(4));
+    await waitForMnrReader(page);
+    const root = page.locator('#mnr-reader-root');
+    await expect(root.locator('article').first()).toContainText('第4章正文');
+    await expect(root.locator('.mnr-reader-content')).not.toContainText('广告推荐文字');
+    expect(catalogRequests).toHaveLength(0);
+
+    // Closing restores the original page; manual reopening follows the same entry flow.
+    await root.getByRole('button', { name: '打开设置' }).click();
+    await root.getByRole('button', { name: '退出阅读模式' }).click();
+    await expect(root).toHaveCount(0);
+    await expect(page.locator('#read_conent_box')).toBeVisible();
+    await page.locator('#mnr-entry-root #mnr-entry-button').click();
+    await expect(root.locator('.mnr-reader')).toBeVisible();
+    await root.getByRole('button', { name: '打开目录' }).click();
+    await expect(root.locator('.mnr-chapter-list li')).toHaveCount(9);
+    expect(catalogRequests).toEqual([
+      wfxsIndexUrl,
+      `${wfxsOrigin}/booklist/9074406/2.html`,
+      `${wfxsOrigin}/booklist/9074406/3.html`,
+    ]);
+    await root.getByRole('button', { name: '第8章 山间', exact: true }).click();
+    await expect(page).toHaveURL(wfxsChapterUrl(8));
+    await expect(root.locator(`article[data-chapter-url="${wfxsChapterUrl(8)}"]`)).toContainText(
+      '第8章正文'
+    );
+    await page.waitForTimeout(800);
+    await root.locator('.mnr-reader-main').focus();
+    await page.keyboard.press('ArrowLeft');
+    await expect(page).toHaveURL(wfxsChapterUrl(7));
+    await expect(root.locator(`article[data-chapter-url="${wfxsChapterUrl(7)}"]`)).toContainText(
+      '第7章正文'
+    );
   });
 }

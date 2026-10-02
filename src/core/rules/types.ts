@@ -163,6 +163,12 @@ export type FetchDocumentHook = (
 
 /** JavaScript hooks for built-in site adapters */
 interface HooksConfig {
+  /**
+   * Resolve a supplied next TOC link without performing IO or changing reader state.
+   * Return null only at the final page; throw on an incomplete/invalid page chain.
+   * The shared loader retains ownership of requests, cancellation and completeness.
+   */
+  nextTocPage?: (doc: Document, currentPageUrl: string) => string | null;
   /** Canonical chapter URL for reader navigation/cache identity; null for other sites. */
   normalizeChapterUrl?: (url: string) => string | null;
   /** Site-specific VIP evidence; null leaves the generic document classifier in charge. */

@@ -119,7 +119,7 @@ export async function loadTocEntriesPaged(
         if (allCandidates.length === 0) return [];
         throw new Error(`TOC page request failed: ${pageUrl} (${result.error})`);
       }
-      const effectivePageUrl = result.finalUrl || pageUrl;
+      const effectivePageUrl: string = result.finalUrl || pageUrl;
       const pageCandidates = collectTocCandidates(result.doc, effectivePageUrl, rule);
       if (pageCandidates.length === 0 && (rule?.toc?.selector || allCandidates.length > 0)) {
         report({ reason: 'empty-page' });
@@ -134,7 +134,9 @@ export async function loadTocEntriesPaged(
         report({ reason: 'no-new-chapters' });
         break;
       }
-      const nextPageUrl = findNextTocPageUrl(result.doc, effectivePageUrl, indexUrl);
+      const nextPageUrl: string | null = rule?.hooks?.nextTocPage
+        ? rule.hooks.nextTocPage(result.doc, effectivePageUrl)
+        : findNextTocPageUrl(result.doc, effectivePageUrl, indexUrl);
       report({ nextUrl: nextPageUrl });
       if (!nextPageUrl) {
         report({ reason: 'last-page' });
