@@ -1,7 +1,7 @@
 {
   "name": "yingchuang",
-  "version": "1.0.15",
-  "buildDate": "2026-09-26",
+  "version": "1.0.16",
+  "buildDate": "2026-10-02",
   "type": "module",
   "description": "萤窗 - 小说阅读脚本，统一阅读样式，智能内容检测，自动翻页",
   "scripts": {
@@ -57,11 +57,11 @@
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.63.0",
     "@types/jsdom": "^30.0.0",
-    "@types/node": "^24.19.0",
-    "@typescript-eslint/eslint-plugin": "^8.70.1",
-    "@typescript-eslint/parser": "^8.70.1",
+    "@types/node": "^24.19.1",
+    "@typescript-eslint/eslint-plugin": "^8.71.0",
+    "@typescript-eslint/parser": "^8.71.0",
     "@vitejs/plugin-vue": "^6.0.9",
-    "@vitest/coverage-v8": "^5.0.2",
+    "@vitest/coverage-v8": "^5.0.3",
     "@vue/devtools-api": "^8.2.1",
     "eslint": "^10.11.0",
     "eslint-config-prettier": "^10.1.8",
@@ -73,10 +73,10 @@
     "pinia": "^4.0.3",
     "prettier": "^3.9.9",
     "typescript": "^6.0.3",
-    "vite": "^8.3.1",
+    "vite": "^8.3.2",
     "vite-plugin-css-injected-by-js": "^5.0.2",
     "vite-plugin-monkey": "^8.1.1",
-    "vitest": "^5.0.2",
+    "vitest": "^5.0.3",
     "vue": "^3.5.43",
     "vue-eslint-parser": "^10.4.1"
   }

@@ -7,8 +7,11 @@ import type { SiteRule } from '../types';
 export const suduguRule: SiteRule = {
   id: 'sudugu',
   name: '速读谷',
-  version: 1,
-  match: { pattern: '^https?://www\\.shudugu\\.org/\\d+/\\d+(?:-\\d+)?\\.html(?:[?#].*)?$' },
+  version: 2,
+  match: {
+    pattern:
+      '^https?://www\\.(?:shudugu\\.org|suduguu\\.com)/\\d+/\\d+(?:-\\d+)?\\.html(?:[?#].*)?$',
+  },
   content: {
     selector: '.con',
     remove: 'ins',
@@ -28,6 +31,6 @@ export const suduguRule: SiteRule = {
   advanced: { checkSection: true },
   meta: {
     source: 'builtin',
-    exampleUrl: 'https://www.shudugu.org/109/1226047.html',
+    exampleUrl: 'https://www.suduguu.com/1921/3444370.html',
   },
 };

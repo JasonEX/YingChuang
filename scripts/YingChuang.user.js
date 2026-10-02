@@ -3,7 +3,7 @@
 // @name:zh-CN         萤窗
 // @name:zh-TW         螢窗
 // @namespace          https://github.com/JasonEX
-// @version            1.0.15
+// @version            1.0.16
 // @author             Yuqian
 // @description        萤窗：小说阅读脚本，智能正文识别、连续阅读、阅读位置恢复、简繁转换
 // @description:zh-CN  萤窗：小说阅读脚本，智能正文识别、连续阅读、阅读位置恢复、简繁转换
@@ -4656,8 +4656,8 @@
 	var suduguRule = {
 		id: "sudugu",
 		name: "速读谷",
-		version: 1,
-		match: { pattern: "^https?://www\\.shudugu\\.org/\\d+/\\d+(?:-\\d+)?\\.html(?:[?#].*)?$" },
+		version: 2,
+		match: { pattern: "^https?://www\\.(?:shudugu\\.org|suduguu\\.com)/\\d+/\\d+(?:-\\d+)?\\.html(?:[?#].*)?$" },
 		content: {
 			selector: ".con",
 			remove: "ins",
@@ -4680,7 +4680,7 @@
 		advanced: { checkSection: true },
 		meta: {
 			source: "builtin",
-			exampleUrl: "https://www.shudugu.org/109/1226047.html"
+			exampleUrl: "https://www.suduguu.com/1921/3444370.html"
 		}
 	};
 	var tiantang_exports = __exportAll({ tiantangRule: () => tiantangRule });
@@ -9179,8 +9179,8 @@
 		else if (options) managerInstance.updateOptions(options);
 		return managerInstance;
 	}
-	var VERSION = "1.0.15";
-	var BUILD_DATE = "2026-09-26";
+	var VERSION = "1.0.16";
+	var BUILD_DATE = "2026-10-02";
 	function buildDiagnosticInfo(options = {}) {
 		return {
 			schema: "mnr-debug-v1",
