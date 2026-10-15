@@ -19,6 +19,14 @@ import {
 } from './mnrE2e';
 
 import { makeNovelsChapter, novelsOrigin, novelsUrl } from '../testUtils/novels';
+import {
+  makeOopCatalog,
+  makeOopChapter,
+  oopBookPath,
+  oopChapterUrl,
+  oopIndexUrl,
+  oopOrigin,
+} from '../testUtils/oop';
 import { twkanCanvasHtml, twkanCanvasLines } from '../testUtils/twkan';
 
 import {
@@ -40,6 +48,100 @@ import {
 } from '../testUtils/pagedCatalogs';
 
 const targetUrl = 'http://mnr.test/chapter/100.html';
+
+for (const [width, startPage, lateInjection, manualStart] of [
+  [1280, 1, false, false],
+  [390, 2, false, false],
+  [1280, 1, true, false],
+  [1280, 1, false, true],
+] as const) {
+  test(`oop preserves text, sections, catalog and exit at ${width}px (late=${lateInjection}, manual=${manualStart})`, async ({
+    context,
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await context.route('https://challenges.cloudflare.com/**', route => route.abort());
+    const catalogRequests: string[] = [];
+    const chapterRequests: string[] = [];
+    await context.route(`${oopOrigin}/**`, route => {
+      const url = new URL(route.request().url());
+      if (url.pathname === oopBookPath) {
+        catalogRequests.push(url.href);
+        return route.fulfill({
+          contentType: 'text/html; charset=utf-8',
+          body: makeOopCatalog(Number(url.searchParams.get('p') || 1)),
+        });
+      }
+      const match = url.pathname.match(/\/a(\d+)(?:_(\d+))?a\.html$/);
+      if (!match) return route.fulfill({ status: 404, body: 'Not found' });
+      const chapter = Number(match[1]) - 835869;
+      if (chapter === 31) chapterRequests.push(url.href);
+      return route.fulfill({
+        contentType: 'text/html; charset=utf-8',
+        body: makeOopChapter(chapter, Number(match[2] || 1)),
+      });
+    });
+    const script = fs.readFileSync(getMnrE2eConfig().userScriptPath, 'utf8');
+    expect(script.split('// ==/UserScript==')[0]).toMatch(
+      /^\/\/ @match\s+\*:\/\/www\.oop\.tw\/\*\s*$/m
+    );
+    if (manualStart) {
+      await context.addInitScript({
+        content: `${createGmMockScript()}
+          GM_setValue('mnr_site_prefs', { 'www.oop.tw': { enabled: false } });
+          ${script}`,
+      });
+    } else if (!lateInjection) {
+      await addYingChuangUserscript(context);
+    }
+    await page.goto(oopChapterUrl(31, startPage));
+    if (lateInjection) {
+      await expect(page.locator('#article')).toContainText('第1頁終點😀。');
+      await page.evaluate(`${createGmMockScript()}\n${script}`);
+    }
+    const root = page.locator('#mnr-reader-root');
+    if (manualStart) {
+      await expect(page.locator('#mnr-entry-root #mnr-entry-button')).toBeVisible();
+      await expect(root).toHaveCount(0);
+      await page.evaluate(() => {
+        const target = window as typeof window & {
+          __mnrMenuCommands?: Array<{ caption: string; fn: () => void }>;
+        };
+        const command = target.__mnrMenuCommands?.find(item => item.caption === '进入阅读模式');
+        if (!command) throw new Error('Reader menu command was not registered');
+        command.fn();
+      });
+    }
+    await expect(root.locator('.mnr-reader')).toBeVisible();
+    const chapter = root.locator(`article[data-chapter-url="${oopChapterUrl()}"]`);
+    for (const section of [1, 2]) await expect(chapter).toContainText(`第${section}頁終點😀。`);
+    await expect(chapter).not.toContainText('廣告推薦');
+    await expect(chapter).not.toContainText('請前往');
+    expect(chapterRequests.sort()).toEqual([oopChapterUrl(), oopChapterUrl(31, 2)].sort());
+    expect(catalogRequests).toHaveLength(0);
+
+    await root.getByRole('button', { name: '打开目录', exact: true }).click();
+    await expect(root.locator('.mnr-drawer-position')).toHaveText('第 31 / 65 章');
+    expect(catalogRequests).toEqual([oopIndexUrl, `${oopIndexUrl}?p=2`, `${oopIndexUrl}?p=3`]);
+    if (lateInjection || manualStart) {
+      await root.getByRole('button', { name: '关闭目录', exact: true }).click();
+    } else {
+      await root.getByRole('searchbox', { name: '搜索章节' }).fill('第32章');
+      await root.getByRole('button', { name: '第32章 山路', exact: true }).click();
+      await expect(page).toHaveURL(oopChapterUrl(32));
+      await expect(root.locator(`article[data-chapter-url="${oopChapterUrl(32)}"]`)).toContainText(
+        '第2頁終點😀。'
+      );
+    }
+    await root.getByRole('button', { name: '打开设置', exact: true }).click();
+    await root.getByRole('button', { name: '退出阅读模式', exact: true }).click();
+    await expect(root).toHaveCount(0);
+    await expect(page.locator('#article')).toContainText('第1頁終點😀。');
+    await page.locator('#mnr-entry-root #mnr-entry-button').click();
+    await expect(root.locator('.mnr-reader')).toBeVisible();
+    await expect(root.locator('article').first()).toContainText('第2頁終點😀。');
+  });
+}
 
 for (const origin of ['https://www.shudugu.org', 'https://www.suduguu.com']) {
   test.describe(`chapter drawer positioning on ${origin}`, () => {

@@ -3,7 +3,7 @@
 // @name:zh-CN         萤窗
 // @name:zh-TW         螢窗
 // @namespace          https://github.com/JasonEX
-// @version            1.0.17
+// @version            1.0.18
 // @author             Yuqian
 // @description        萤窗：小说阅读脚本，智能正文识别、连续阅读、阅读位置恢复、简繁转换
 // @description:zh-CN  萤窗：小说阅读脚本，智能正文识别、连续阅读、阅读位置恢复、简繁转换
@@ -53,6 +53,7 @@
 // @match              *://m.xszj.org/*
 // @match              *://m.kudushu.org/html/*/*
 // @match              *://www.novels.com.tw/novels/*
+// @match              *://www.oop.tw/*
 // @match              *://*/*.php?*
 // @match              *://*/*_*.html
 // @match              *://*/book/*/*.html
@@ -611,9 +612,12 @@
 	var arrayLastIndexOf = unapply(Array.prototype.lastIndexOf);
 	var arrayPop = unapply(Array.prototype.pop);
 	var arrayPush = unapply(Array.prototype.push);
-	Array.prototype.slice;
+	var arraySlice = unapply(Array.prototype.slice);
 	var arraySplice = unapply(Array.prototype.splice);
 	var arrayIsArray = Array.isArray;
+	var setCreate = unconstruct(Set);
+	var setAdd = unapply(Set.prototype.add);
+	var setHas = unapply(Set.prototype.has);
 	var stringToLowerCase = unapply(String.prototype.toLowerCase);
 	var stringToString = unapply(String.prototype.toString);
 	var stringMatch = unapply(String.prototype.match);
@@ -712,6 +716,14 @@
 			return null;
 		}
 		return fallbackValue;
+	}
+	function lookupAccessor(object, prop) {
+		while (object !== null) {
+			const desc = getOwnPropertyDescriptor(object, prop);
+			if (desc) return desc.get ? unapply(desc.get) : null;
+			object = getPrototypeOf(object);
+		}
+		return null;
 	}
 	function isRegex(value) {
 		try {
@@ -1397,7 +1409,7 @@
 		documentFragment: 11,
 		notation: 12
 	};
-	var LITERAL_TEXT_ELEMENT_NAMES = [
+	var LITERAL_TEXT_ELEMENTS = freeze(addToSet({}, [
 		"style",
 		"script",
 		"xmp",
@@ -1406,15 +1418,7 @@
 		"noframes",
 		"plaintext",
 		"noscript"
-	];
-	var LITERAL_TEXT_ELEMENTS = freeze(addToSet({}, LITERAL_TEXT_ELEMENT_NAMES));
-	var LITERAL_TEXT_CLOSE = function() {
-		const map = {};
-		arrayForEach(LITERAL_TEXT_ELEMENT_NAMES, (name) => {
-			map[name] = seal(new RegExp("</" + name + "(?=[\\t\\n\\f\\r />])", "i"));
-		});
-		return freeze(map);
-	}();
+	]));
 	var getGlobal = function getGlobal() {
 		return typeof window === "undefined" ? null : window;
 	};
@@ -1461,7 +1465,7 @@
 	function createDOMPurify() {
 		let window = arguments.length > 0 && arguments[0] !== void 0 ? arguments[0] : getGlobal();
 		const DOMPurify = (root) => createDOMPurify(root);
-		DOMPurify.version = "3.4.16";
+		DOMPurify.version = "3.4.17";
 		DOMPurify.removed = [];
 		if (!window || !window.document || window.document.nodeType !== NODE_TYPE.document || !window.Element) {
 			DOMPurify.isSupported = false;
@@ -1492,6 +1496,10 @@
 		};
 		const _readNodeName = function _readNodeName(node) {
 			return getNodeName ? getNodeName(node) : node.nodeName;
+		};
+		const getNamespaceURI = lookupAccessor(ElementPrototype, "namespaceURI");
+		const _readNamespaceURI = function _readNamespaceURI(element) {
+			return getNamespaceURI ? getNamespaceURI(element) : element.namespaceURI;
 		};
 		if (typeof HTMLTemplateElement === "function") {
 			const template = document.createElement("template");
@@ -1606,6 +1614,7 @@
 		const SANITIZE_NAMED_PROPS_PREFIX = "user-content-";
 		let KEEP_CONTENT = true;
 		let IN_PLACE = false;
+		let IN_PLACE_VISITED = null;
 		let USE_PROFILES = {};
 		let FORBID_CONTENTS = null;
 		const DEFAULT_FORBID_CONTENTS = addToSet({}, [
@@ -1844,18 +1853,23 @@
 			return !ALL_MATHML_TAGS[tagName] && (COMMON_SVG_AND_HTML_ELEMENTS[tagName] || !ALL_SVG_TAGS[tagName]);
 		};
 		const _checkValidNamespace = function _checkValidNamespace(element) {
-			let parent = getParentNode(element);
-			if (!parent || !parent.tagName) parent = {
-				namespaceURI: NAMESPACE,
-				tagName: "template"
-			};
-			const tagName = stringToLowerCase(element.tagName);
-			const parentTagName = stringToLowerCase(parent.tagName);
-			if (!ALLOWED_NAMESPACES[element.namespaceURI]) return false;
-			if (element.namespaceURI === SVG_NAMESPACE) return _checkSvgNamespace(tagName, parent, parentTagName);
-			if (element.namespaceURI === MATHML_NAMESPACE) return _checkMathMlNamespace(tagName, parent, parentTagName);
-			if (element.namespaceURI === HTML_NAMESPACE) return _checkHtmlNamespace(tagName, parent, parentTagName);
-			if (PARSER_MEDIA_TYPE === "application/xhtml+xml" && ALLOWED_NAMESPACES[element.namespaceURI]) return true;
+			const elementNamespace = _readNamespaceURI(element);
+			const tagName = stringToLowerCase(_readNodeName(element));
+			const parentNode = getParentNode(element);
+			let parent;
+			let parentTagName;
+			if (parentNode && _readNodeType(parentNode) === NODE_TYPE.element) {
+				parent = { namespaceURI: _readNamespaceURI(parentNode) };
+				parentTagName = stringToLowerCase(_readNodeName(parentNode));
+			} else {
+				parent = { namespaceURI: NAMESPACE };
+				parentTagName = "template";
+			}
+			if (!ALLOWED_NAMESPACES[elementNamespace]) return false;
+			if (elementNamespace === SVG_NAMESPACE) return _checkSvgNamespace(tagName, parent, parentTagName);
+			if (elementNamespace === MATHML_NAMESPACE) return _checkMathMlNamespace(tagName, parent, parentTagName);
+			if (elementNamespace === HTML_NAMESPACE) return _checkHtmlNamespace(tagName, parent, parentTagName);
+			if (PARSER_MEDIA_TYPE === "application/xhtml+xml" && ALLOWED_NAMESPACES[elementNamespace]) return true;
 			return false;
 		};
 		const _forceRemove = function _forceRemove(node) {
@@ -1879,18 +1893,12 @@
 		const _neutralizeRoot = function _neutralizeRoot(root) {
 			_neutralizeSubtree(root);
 			const childNodes = getChildNodes(root);
-			if (childNodes) {
-				const snapshot = [];
-				arrayForEach(childNodes, (child) => {
-					arrayPush(snapshot, child);
-				});
-				arrayForEach(snapshot, (child) => {
-					try {
-						remove(child);
-					} catch (_) {}
-				});
-			}
-			const attributes = getAttributes(root);
+			if (childNodes) arrayForEach(arraySlice(childNodes), (child) => {
+				try {
+					remove(child);
+				} catch (_) {}
+			});
+			const attributes = _readNodeType(root) === NODE_TYPE.element ? getAttributes(root) : null;
 			if (attributes) for (let i = attributes.length - 1; i >= 0; --i) {
 				const attribute = attributes[i];
 				const name = attribute && attribute.name;
@@ -1934,14 +1942,93 @@
 				_stripAttributeNode(element, attribute, name);
 			}
 		};
-		const _neutralizeSubtree = function _neutralizeSubtree(root) {
+		const _walkTree = function _walkTree(root, visit) {
+			let intoShadow = arguments.length > 2 && arguments[2] !== void 0 ? arguments[2] : false;
 			const stack = [root];
 			while (stack.length > 0) {
 				const node = stack.pop();
-				if (_readNodeType(node) === NODE_TYPE.element) _stripDisallowedAttributes(node);
+				if (visit(node) === false) continue;
+				if (intoShadow && _readNodeType(node) === NODE_TYPE.element) {
+					const shadowRoot = getShadowRoot(node);
+					if (_isDocumentFragment(shadowRoot)) stack.push(shadowRoot);
+				}
 				const childNodes = getChildNodes(node);
 				if (childNodes) for (let i = childNodes.length - 1; i >= 0; --i) stack.push(childNodes[i]);
 			}
+		};
+		const _neutralizeSubtree = function _neutralizeSubtree(root) {
+			_walkTree(root, (node) => {
+				if (_readNodeType(node) === NODE_TYPE.element) _stripDisallowedAttributes(node);
+			});
+		};
+		const _collectLiveNodes = function _collectLiveNodes(root) {
+			const nodes = [];
+			_walkTree(root, (node) => {
+				nodes.push(node);
+			}, true);
+			return nodes;
+		};
+		const _neutralizeEscapedElements = function _neutralizeEscapedElements(root, before) {
+			const reachable = setCreate();
+			arrayForEach(_collectLiveNodes(root), (node) => {
+				if (_readNodeType(node) === NODE_TYPE.element) setAdd(reachable, node);
+			});
+			arrayForEach(before, (node) => {
+				if (_readNodeType(node) === NODE_TYPE.element && !setHas(reachable, node)) _stripDisallowedAttributes(node);
+			});
+		};
+		const _neutralizeDiscarded = function _neutralizeDiscarded(root, before) {
+			let rootRemoved = false;
+			arrayForEach(DOMPurify.removed, (entry) => {
+				if (entry.element) {
+					rootRemoved = rootRemoved || entry.element === root;
+					_neutralizeSubtree(entry.element);
+				}
+			});
+			_neutralizeEscapedElements(root, before);
+			return rootRemoved;
+		};
+		const MAX_UNVISITED_ROUNDS = 8;
+		const _sanitizeUnvisitedNodes = function _sanitizeUnvisitedNodes(root, before) {
+			const visited = IN_PLACE_VISITED;
+			let original = null;
+			const getOriginal = () => {
+				if (!original) {
+					original = setCreate();
+					arrayForEach(before, (beforeNode) => {
+						setAdd(original, beforeNode);
+					});
+				}
+				return original;
+			};
+			for (let round = 0;; round++) {
+				const live = _collectLiveNodes(root);
+				const containers = [root];
+				let pending = false;
+				arrayForEach(live, (node) => {
+					if (_readNodeType(node) === NODE_TYPE.documentFragment) arrayPush(containers, node);
+					else if (!pending && !setHas(visited, node)) pending = setHas(getOriginal(), node);
+				});
+				if (!pending) return;
+				if (round >= MAX_UNVISITED_ROUNDS) throw typeErrorCreate("the tree kept changing during in-place sanitization; refusing to return it");
+				arrayForEach(containers, (container, index) => {
+					_sanitizeUnvisitedIn(container, index > 0, root, getOriginal());
+				});
+			}
+		};
+		const _sanitizeUnvisitedIn = function _sanitizeUnvisitedIn(container, inShadow, root, original) {
+			const iterator = _createNodeIterator(container);
+			let node;
+			while (node = iterator.nextNode()) {
+				if (!setHas(original, node) || setHas(IN_PLACE_VISITED, node)) continue;
+				if (inShadow) _executeHooks(hooks.uponSanitizeShadowNode, node, null);
+				_sanitizeElements(node, root);
+				_sanitizeAttributes(node, root);
+				if (_isDocumentFragment(node.content)) _sanitizeShadowDOM2(node.content);
+			}
+		};
+		const _markVisited = function _markVisited(node) {
+			if (IN_PLACE_VISITED) setAdd(IN_PLACE_VISITED, node);
 		};
 		const _isPatchLinkageAttribute = function _isPatchLinkageAttribute(lcName, lcTag) {
 			if (!SAFE_FOR_XML) return false;
@@ -1950,15 +2037,13 @@
 		};
 		const _neutralizePatchLinkage = function _neutralizePatchLinkage(root) {
 			if (!SAFE_FOR_XML) return;
-			const stack = [root];
-			while (stack.length > 0) {
-				const node = stack.pop();
+			_walkTree(root, (node) => {
 				const nodeType = _readNodeType(node);
 				if (nodeType === NODE_TYPE.processingInstruction || nodeType === NODE_TYPE.comment && regExpTest(COMMENT_MARKUP_PROBE, node.data)) {
 					try {
 						remove(node);
 					} catch (_) {}
-					continue;
+					return false;
 				}
 				if (nodeType === NODE_TYPE.element) {
 					const element = node;
@@ -1968,9 +2053,8 @@
 						if (element.hasAttribute && element.hasAttribute("for") && _isPatchLinkageAttribute("for", lcTag)) element.removeAttribute("for");
 					} catch (_) {}
 				}
-				const childNodes = getChildNodes(node);
-				if (childNodes) for (let i = childNodes.length - 1; i >= 0; --i) stack.push(childNodes[i]);
-			}
+				return true;
+			});
 		};
 		const _initDocument = function _initDocument(dirty) {
 			let doc = null;
@@ -2008,6 +2092,13 @@
 		};
 		const _scrubTemplateExpressions2 = function _scrubTemplateExpressions(node) {
 			var _node$querySelectorAl;
+			_scrubOwnCharacterData(node);
+			const templates = (_node$querySelectorAl = node.querySelectorAll) === null || _node$querySelectorAl === void 0 ? void 0 : _node$querySelectorAl.call(node, "template");
+			if (templates) arrayForEach(templates, (tmpl) => {
+				if (_isDocumentFragment(tmpl.content)) _scrubTemplateExpressions2(tmpl.content);
+			});
+		};
+		const _scrubOwnCharacterData = function _scrubOwnCharacterData(node) {
 			node.normalize();
 			const doc = getOwnerDocument ? getOwnerDocument(node) : node.ownerDocument;
 			const walker = createNodeIterator.call(doc || node, node, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_COMMENT | NodeFilter.SHOW_CDATA_SECTION | NodeFilter.SHOW_PROCESSING_INSTRUCTION, null);
@@ -2016,10 +2107,6 @@
 				currentNode.data = _stripTemplateExpressions(currentNode.data);
 				currentNode = walker.nextNode();
 			}
-			const templates = (_node$querySelectorAl = node.querySelectorAll) === null || _node$querySelectorAl === void 0 ? void 0 : _node$querySelectorAl.call(node, "template");
-			if (templates) arrayForEach(templates, (tmpl) => {
-				if (_isDocumentFragment(tmpl.content)) _scrubTemplateExpressions2(tmpl.content);
-			});
 		};
 		const _isClobbered = function _isClobbered(element) {
 			const realTagName = getNodeName ? getNodeName(element) : null;
@@ -2051,7 +2138,7 @@
 		}
 		const _isUnsafeNode = function _isUnsafeNode(currentNode, tagName) {
 			if (SAFE_FOR_XML && currentNode.hasChildNodes() && !_isNode(currentNode.firstElementChild) && regExpTest(ELEMENT_MARKUP_PROBE, currentNode.textContent) && regExpTest(ELEMENT_MARKUP_PROBE, currentNode.innerHTML)) return true;
-			if (SAFE_FOR_XML && currentNode.namespaceURI === HTML_NAMESPACE && LITERAL_TEXT_ELEMENTS[tagName] && (_isNode(currentNode.firstElementChild) || typeof currentNode.textContent === "string" && regExpTest(LITERAL_TEXT_CLOSE[tagName], currentNode.textContent))) return true;
+			if (SAFE_FOR_XML && LITERAL_TEXT_ELEMENTS[tagName] && _readNodeType(currentNode) === NODE_TYPE.element && _readNamespaceURI(currentNode) === HTML_NAMESPACE && (_isNode(currentNode.firstElementChild) || typeof currentNode.textContent === "string" && regExpTest(ELEMENT_MARKUP_PROBE, currentNode.textContent))) return true;
 			if (currentNode.nodeType === NODE_TYPE.processingInstruction) return true;
 			if (SAFE_FOR_XML && currentNode.nodeType === NODE_TYPE.comment && regExpTest(COMMENT_MARKUP_PROBE, currentNode.data)) return true;
 			return false;
@@ -2066,7 +2153,7 @@
 		};
 		const _sanitizeDisallowedNode = function _sanitizeDisallowedNode(currentNode, tagName, root) {
 			if (!FORBID_TAGS[tagName] && _isBasicCustomElement(tagName) && _matchesNameCheck(CUSTOM_ELEMENT_HANDLING.tagNameCheck, tagName)) return false;
-			if (KEEP_CONTENT && !FORBID_CONTENTS[tagName]) {
+			if (KEEP_CONTENT && !FORBID_CONTENTS[tagName] && !FORBID_CONTENTS[stringToLowerCase(tagName)]) {
 				const parentNode = getParentNode(currentNode);
 				const childNodes = getChildNodes(currentNode);
 				if (childNodes && parentNode) {
@@ -2090,6 +2177,7 @@
 			return true;
 		};
 		const _sanitizeElements = function _sanitizeElements(currentNode, root) {
+			_markVisited(currentNode);
 			_executeHooks(hooks.beforeSanitizeElements, currentNode, null);
 			if (_handleHookDetachedNode(currentNode, root)) return true;
 			if (_isClobbered(currentNode)) {
@@ -2181,6 +2269,10 @@
 				return false;
 			}
 		};
+		const _isUnsafeAttributeValue = function _isUnsafeAttributeValue(name, value) {
+			if (SAFE_FOR_XML && regExpTest(/((--!?|])>)|<\/(style|script|title|xmp|textarea|noscript|iframe|noembed|noframes)/i, value)) return true;
+			return stringToLowerCase(name) === "attributename" && stringMatch(value, "href") !== null;
+		};
 		const _sanitizeAttributes = function _sanitizeAttributes(currentNode, root) {
 			_executeHooks(hooks.beforeSanitizeAttributes, currentNode, null);
 			if (_handleHookDetachedNode(currentNode, root)) return;
@@ -2214,11 +2306,7 @@
 					value = SANITIZE_NAMED_PROPS_PREFIX + value;
 					recreatedNamedProp = true;
 				}
-				if (SAFE_FOR_XML && regExpTest(/((--!?|])>)|<\/(style|script|title|xmp|textarea|noscript|iframe|noembed|noframes)/i, value)) {
-					_removeAttribute(name, currentNode, attr);
-					continue;
-				}
-				if (lcName === "attributename" && stringMatch(value, "href")) {
+				if (_isUnsafeAttributeValue(name, value)) {
 					_removeAttribute(name, currentNode, attr);
 					continue;
 				}
@@ -2261,6 +2349,7 @@
 					}
 				}
 			}
+			if (SAFE_FOR_TEMPLATES) _scrubOwnCharacterData(fragment);
 			_executeHooks(hooks.afterSanitizeShadowDOM, fragment, null);
 		};
 		const _sanitizeAttachedShadowRoots = function _sanitizeAttachedShadowRoots(root) {
@@ -2324,6 +2413,8 @@
 			if (hooks.uponSanitizeAttribute.length > 0) ALLOWED_ATTR = clone(ALLOWED_ATTR);
 			DOMPurify.removed = [];
 			const inPlace = IN_PLACE && typeof dirty !== "string" && _isNode(dirty);
+			let inPlaceNodes = [];
+			const outerVisited = IN_PLACE_VISITED;
 			if (inPlace) {
 				_neutralizePatchLinkage(dirty);
 				const nn = _readNodeName(dirty);
@@ -2338,12 +2429,8 @@
 					_neutralizeRoot(dirty);
 					throw typeErrorCreate("root node is clobbered and cannot be sanitized in-place");
 				}
-				try {
-					_sanitizeAttachedShadowRoots(dirty);
-				} catch (error) {
-					_neutralizeRoot(dirty);
-					throw error;
-				}
+				inPlaceNodes = _collectLiveNodes(dirty);
+				IN_PLACE_VISITED = setCreate();
 			} else if (_isNode(dirty)) {
 				body = _initDocument("<!---->");
 				importedNode = body.ownerDocument.importNode(dirty, true);
@@ -2359,30 +2446,25 @@
 			if (body && FORCE_BODY) _forceRemove(body.firstChild);
 			const walkRoot = inPlace ? dirty : body;
 			try {
+				if (inPlace) _sanitizeAttachedShadowRoots(dirty);
 				const nodeIterator = _createNodeIterator(walkRoot);
 				while (currentNode = nodeIterator.nextNode()) {
 					_sanitizeElements(currentNode, walkRoot);
 					_sanitizeAttributes(currentNode, walkRoot);
 					if (_isDocumentFragment(currentNode.content)) _sanitizeShadowDOM2(currentNode.content);
 				}
+				if (inPlace) _sanitizeUnvisitedNodes(dirty, inPlaceNodes);
 			} catch (error) {
 				if (inPlace) {
 					_neutralizeRoot(dirty);
-					arrayForEach(DOMPurify.removed, (entry) => {
-						if (entry.element) _neutralizeSubtree(entry.element);
-					});
+					_neutralizeDiscarded(dirty, inPlaceNodes);
 				}
 				throw error;
+			} finally {
+				IN_PLACE_VISITED = outerVisited;
 			}
 			if (inPlace) {
-				let rootWasRemoved = false;
-				arrayForEach(DOMPurify.removed, (entry) => {
-					if (entry.element) {
-						if (entry.element === dirty) rootWasRemoved = true;
-						_neutralizeSubtree(entry.element);
-					}
-				});
-				if (rootWasRemoved) throw typeErrorCreate("a node selected for removal could not be safely returned; refusing to sanitize in place");
+				if (_neutralizeDiscarded(dirty, inPlaceNodes)) throw typeErrorCreate("a node selected for removal could not be safely returned; refusing to sanitize in place");
 				if (SAFE_FOR_TEMPLATES) _scrubTemplateExpressions2(dirty);
 				return dirty;
 			}
@@ -2419,6 +2501,7 @@
 			if (!CONFIG) _parseConfig({});
 			const lcTag = transformCaseFunc(tag);
 			const lcName = transformCaseFunc(attr);
+			if (typeof value === "string" && (_isUnsafeAttributeValue(attr, value) || !ALLOW_SELF_CLOSE_IN_ATTR && regExpTest(SELF_CLOSING_TAG, value))) return false;
 			return _isValidAttribute(lcTag, lcName, value);
 		};
 		DOMPurify.addHook = function(entryPoint, hookFunction) {
@@ -4283,9 +4366,9 @@
 		}
 	};
 	var novel543_exports = __exportAll({ novel543Rule: () => novel543Rule });
-	var CHAPTER_URL$1 = /^https?:\/\/(?:www\.)?novel543\.com(\/\d+\/\d+_\d+)(?:_(\d+))?\.html(?:[?#].*)?$/;
+	var CHAPTER_URL$2 = /^https?:\/\/(?:www\.)?novel543\.com(\/\d+\/\d+_\d+)(?:_(\d+))?\.html(?:[?#].*)?$/;
 	function parseNovel543Url(url) {
-		const match = url.match(CHAPTER_URL$1);
+		const match = url.match(CHAPTER_URL$2);
 		if (!match) return null;
 		const parsed = new URL(url);
 		parsed.pathname = `${match[1]}.html`;
@@ -4299,7 +4382,7 @@
 		id: "novel543",
 		name: "稷下書院",
 		version: 1,
-		match: { pattern: CHAPTER_URL$1.source },
+		match: { pattern: CHAPTER_URL$2.source },
 		content: {
 			selector: ".chapter-content > .content",
 			remove: ".adBlock, .gadBlock, [id^=div-onead-], div:has(> img[src=\"/images/vip.png\"]):has(> a[href$=\"/auth/govip.html\"]), div:has(> p img[src=\"/images/vip.png\"]):has(> a[href$=\"/auth/govip.html\"])"
@@ -4333,9 +4416,9 @@
 		}
 	};
 	var novels_exports = __exportAll({ novelsRule: () => novelsRule });
-	var CHAPTER_URL = /^https?:\/\/www\.novels\.com\.tw(\/novels\/[^/?#]+\/\d+)(?:_(\d+))?\.html(?:[?#].*)?$/;
+	var CHAPTER_URL$1 = /^https?:\/\/www\.novels\.com\.tw(\/novels\/[^/?#]+\/\d+)(?:_(\d+))?\.html(?:[?#].*)?$/;
 	function normalizeNovelsUrl(url) {
-		if (!CHAPTER_URL.test(url)) return null;
+		if (!CHAPTER_URL$1.test(url)) return null;
 		const parsed = new URL(url);
 		parsed.searchParams.delete("aid");
 		return parsed.href;
@@ -4344,7 +4427,7 @@
 		id: "novels",
 		name: "繁體小說",
 		version: 1,
-		match: { pattern: CHAPTER_URL.source },
+		match: { pattern: CHAPTER_URL$1.source },
 		content: {
 			selector: "#article",
 			remove: ":scope > div, ins"
@@ -4363,7 +4446,7 @@
 		hooks: {
 			normalizeChapterUrl: normalizeNovelsUrl,
 			parseSectionUrl: (url) => {
-				const match = url.match(CHAPTER_URL);
+				const match = url.match(CHAPTER_URL$1);
 				if (!match) return null;
 				const parsed = new URL(normalizeNovelsUrl(url));
 				parsed.pathname = `${match[1]}.html`;
@@ -4399,6 +4482,60 @@
 		meta: {
 			source: "builtin",
 			exampleUrl: "https://www.novels.com.tw/novels/no689ecf9c709950ae5cadd90cff89ffd6257bf537a60d904c9e6084f4aa2c12ca/199107755.html?aid=1092650"
+		}
+	};
+	var oop_exports = __exportAll({ oopRule: () => oopRule });
+	var CHAPTER_URL = /^https?:\/\/www\.oop\.tw(\/areada\/a\d+a\/a\d+)(?:_([1-9]\d*))?a\.html(?:[?#].*)?$/;
+	var oopRule = {
+		id: "oop",
+		name: "短篇小說",
+		version: 1,
+		match: { pattern: CHAPTER_URL.source },
+		content: {
+			selector: "#article",
+			remove: ":scope > div, ins",
+			replace: [{
+				pattern: "請前往(?:ｏｏｐ．ｔｗ|oop\\.tw)閱讀本書最新內容",
+				replacement: ""
+			}]
+		},
+		navigation: {
+			prev: "#prev_url[href*=\"/areada/\"]",
+			next: "#next_url[href*=\"/areada/\"]",
+			index: "#info_url"
+		},
+		title: {
+			selector: "h1.chapter-title",
+			bookSelector: ".book-title a"
+		},
+		toc: { selector: "#ul_all_chapters > li:has(> a[href^=\"/areada/\"])" },
+		advanced: { checkSection: true },
+		hooks: {
+			parseSectionUrl: (url) => {
+				const match = url.match(CHAPTER_URL);
+				if (!match) return null;
+				const parsed = new URL(url);
+				parsed.pathname = `${match[1]}a.html`;
+				parsed.hash = "";
+				return {
+					chapterUrl: parsed.href,
+					page: Number(match[2] || 1)
+				};
+			},
+			beforeParse: (doc) => {
+				const article = doc.querySelector("#article[data-ct]");
+				if (!article) return;
+				const count = parseInt(article.getAttribute("data-ct") || "0", 10);
+				if (!article.style.fontSize && count > 0) {
+					const paragraphs = Array.from(article.querySelectorAll("p"));
+					if (paragraphs.length >= count) for (const paragraph of paragraphs.slice(-count)) paragraph.textContent = Array.from(paragraph.textContent || "").reverse().join("");
+				}
+				article.removeAttribute("data-ct");
+			}
+		},
+		meta: {
+			source: "builtin",
+			exampleUrl: "https://www.oop.tw/areada/a33080432a/a835960a.html"
 		}
 	};
 	var qidian_exports$1 = __exportAll({
@@ -4949,6 +5086,7 @@
 		"./kudushu.ts": kudushu_exports,
 		"./novel543.ts": novel543_exports,
 		"./novels.ts": novels_exports,
+		"./oop.ts": oop_exports,
 		"./qidian.ts": qidian_exports$1,
 		"./shu69.ts": shu69_exports,
 		"./sto9.ts": sto9_exports$1,
@@ -7138,7 +7276,10 @@
 		})) return true;
 		const title = (doc.title || "").trim().toLowerCase();
 		if (title === "just a moment..." || title === "attention required! | cloudflare") return true;
-		const scriptText = Array.from(doc.querySelectorAll("script")).map((script) => `${script.getAttribute("src") || ""}\n${script.textContent || ""}`).join("\n");
+		const scriptText = Array.from(doc.querySelectorAll("script")).map((script) => {
+			const src = script.getAttribute("src") || "";
+			return `${/^(?:https?:)?\/\/challenges\.cloudflare\.com\/turnstile\/v0\/api\.js(?:[?#].*)?$/i.test(src) ? "" : src}\n${script.textContent || ""}`;
+		}).join("\n");
 		if (/_cf_chl_opt|cf_chl_|challenges\.cloudflare\.com/i.test(scriptText)) return true;
 		const bodyText = (doc.body?.textContent || "").replace(/\s+/g, " ").trim();
 		return /enable javascript and cookies to continue/i.test(bodyText);
@@ -9232,8 +9373,8 @@
 		else if (options) managerInstance.updateOptions(options);
 		return managerInstance;
 	}
-	var VERSION = "1.0.17";
-	var BUILD_DATE = "2026-10-02";
+	var VERSION = "1.0.18";
+	var BUILD_DATE = "2026-10-15";
 	function buildDiagnosticInfo(options = {}) {
 		return {
 			schema: "mnr-debug-v1",
@@ -9528,9 +9669,7 @@
 		}
 		return res.trim();
 	}
-	var specialBooleanAttrs = `itemscope,allowfullscreen,formnovalidate,ismap,nomodule,novalidate,readonly`;
-	var isSpecialBooleanAttr = makeMap(specialBooleanAttrs);
-	specialBooleanAttrs + "";
+	var isSpecialBooleanAttr = makeMap(`itemscope,allowfullscreen,formnovalidate,ismap,nomodule,novalidate,playsinline,readonly`);
 	function includeBooleanAttr(value) {
 		return !!value || value === "";
 	}
@@ -10210,16 +10349,32 @@
 	};
 	function iterator(self, method, wrapValue) {
 		const arr = shallowReadArray(self);
-		const iter = arr[method]();
+		const methodFn = arr[method];
+		const iter = methodFn.call(arr);
 		if (arr !== self && !isShallow(self)) {
+			if (iter[Symbol.toStringTag] === "Array Iterator") {
+				const wrapped = Object.create(Object.getPrototypeOf(iter));
+				wrapped.next = () => wrapResult(iter.next(), wrapValue);
+				if (methodFn !== arrayProto[method]) Object.defineProperties(wrapped, {
+					return: { get() {
+						const fn = iter.return;
+						return typeof fn === "function" ? fn.bind(iter) : fn;
+					} },
+					throw: { get() {
+						const fn = iter.throw;
+						return typeof fn === "function" ? fn.bind(iter) : fn;
+					} }
+				});
+				return wrapped;
+			}
 			iter._next = iter.next;
-			iter.next = () => {
-				const result = iter._next();
-				if (!result.done) result.value = wrapValue(result.value);
-				return result;
-			};
+			iter.next = () => wrapResult(iter._next(), wrapValue);
 		}
 		return iter;
+	}
+	function wrapResult(result, wrapValue) {
+		if (!result.done) result.value = wrapValue(result.value);
+		return result;
 	}
 	var arrayProto = Array.prototype;
 	function apply(self, method, fn, thisArg, wrappedRetFn, args) {
@@ -10523,6 +10678,7 @@
 		return (target, key, receiver) => {
 			if (key === "__v_isReactive") return !isReadonly2;
 			else if (key === "__v_isReadonly") return isReadonly2;
+			else if (key === "__v_isShallow") return shallow;
 			else if (key === "__v_raw") return target;
 			return Reflect.get(hasOwn(instrumentations, key) && key in target ? instrumentations : target, key, receiver);
 		};
@@ -10627,6 +10783,9 @@
 			}
 		}
 	};
+	function triggerRef(ref2) {
+		if (ref2.dep) ref2.dep.trigger();
+	}
 	function unref(ref2) {
 		return isRef(ref2) ? ref2.value : ref2;
 	}
@@ -10798,9 +10957,11 @@
 		if (once && cb) {
 			const _cb = cb;
 			cb = (...args) => {
-				const res = _cb(...args);
-				watchHandle();
-				return res;
+				try {
+					return _cb(...args);
+				} finally {
+					watchHandle();
+				}
 			};
 		}
 		let oldValue = isMultiSource ? new Array(source.length).fill(INITIAL_WATCHER_VALUE) : INITIAL_WATCHER_VALUE;
@@ -10809,10 +10970,11 @@
 			if (cb) {
 				const newValue = effect.run();
 				if (immediateFirstRun || deep || forceTrigger || (isMultiSource ? newValue.some((v, i) => hasChanged(v, oldValue[i])) : hasChanged(newValue, oldValue))) {
-					if (cleanup) cleanup();
 					const currentWatcher = activeWatcher;
-					activeWatcher = effect;
+					pauseTracking();
 					try {
+						if (cleanup) cleanup();
+						activeWatcher = effect;
 						const args = [
 							newValue,
 							oldValue === INITIAL_WATCHER_VALUE ? void 0 : isMultiSource && oldValue[0] === INITIAL_WATCHER_VALUE ? [] : oldValue,
@@ -10822,6 +10984,7 @@
 						call ? call(cb, 3, args) : cb(...args);
 					} finally {
 						activeWatcher = currentWatcher;
+						resetTracking();
 					}
 				}
 			} else effect.run();
@@ -10963,23 +11126,33 @@
 		} else for (let i = 0; i < cb.length; i++) pendingPostFlushCbs.push(cb[i]);
 		queueFlush();
 	}
-	function flushPreFlushCbs(instance, seen, i = flushIndex + 1) {
+	function flushPreFlushCbs(instance, minUid, seen, i = flushIndex + 1) {
 		for (; i < queue.length; i++) {
 			const cb = queue[i];
 			if (cb && cb.flags & 2) {
-				if (instance && cb.id !== instance.uid) continue;
+				if (instance && cb.id !== instance.uid || minUid !== void 0 && !(cb.id >= minUid)) continue;
 				queue.splice(i, 1);
-				i--;
+				i = instance ? i - 1 : flushIndex;
 				if (cb.flags & 4) cb.flags &= -2;
 				cb();
 				if (!(cb.flags & 4)) cb.flags &= -2;
 			}
 		}
 	}
-	function flushPostFlushCbs(seen) {
+	function flushPostFlushCbs(seen, skip, minUid = 0) {
 		if (pendingPostFlushCbs.length) {
-			const deduped = [...new Set(pendingPostFlushCbs)].sort((a, b) => getId(a) - getId(b));
-			pendingPostFlushCbs.length = 0;
+			let cbs = pendingPostFlushCbs;
+			let kept = 0;
+			if (skip) {
+				cbs = [];
+				for (let i = 0; i < pendingPostFlushCbs.length; i++) {
+					const cb = pendingPostFlushCbs[i];
+					if (cb.i !== void 0 ? !cb.i || cb.i.uid < minUid : skip.has(cb)) pendingPostFlushCbs[kept++] = cb;
+					else cbs.push(cb);
+				}
+			}
+			const deduped = [...new Set(cbs)].sort((a, b) => getId(a) - getId(b));
+			pendingPostFlushCbs.length = kept;
 			if (activePostFlushCbs) {
 				for (let i = 0; i < deduped.length; i++) activePostFlushCbs.push(deduped[i]);
 				return;
@@ -10993,6 +11166,22 @@
 			}
 			activePostFlushCbs = null;
 			postFlushIndex = 0;
+		}
+	}
+	var isFlushing = false;
+	function flushOnAppMount(fn, minUid) {
+		if (isFlushing) {
+			fn();
+			return;
+		}
+		const queued = minUid === void 0 ? void 0 : new Set(pendingPostFlushCbs);
+		fn();
+		isFlushing = true;
+		try {
+			flushPreFlushCbs(void 0, minUid);
+			flushPostFlushCbs(void 0, queued, minUid);
+		} finally {
+			isFlushing = false;
 		}
 	}
 	var getId = (job) => job.id == null ? job.flags & 2 ? -1 : Infinity : job.id;
@@ -11134,6 +11323,7 @@
 		baseWatchOptions.call = (fn, type, args) => callWithAsyncErrorHandling(fn, instance, type, args);
 		let isPre = false;
 		if (flush === "post") baseWatchOptions.scheduler = (job) => {
+			job.i = instance;
 			queuePostRenderEffect(job, instance && instance.suspense);
 		};
 		else if (flush !== "sync") {
@@ -11197,10 +11387,6 @@
 		onAfterAppear: TransitionHookValidator,
 		onAppearCancelled: TransitionHookValidator
 	};
-	var recursiveGetSubtree = (instance) => {
-		const subTree = instance.subTree;
-		return subTree.component ? recursiveGetSubtree(subTree.component) : subTree;
-	};
 	var BaseTransitionImpl = {
 		name: `BaseTransition`,
 		props: BaseTransitionPropsValidators,
@@ -11219,7 +11405,7 @@
 				let enterHooks = resolveTransitionHooks(innerChild, rawProps, state, instance, (hooks) => enterHooks = hooks);
 				if (innerChild.type !== Comment) setTransitionHooks(innerChild, enterHooks);
 				let oldInnerChild = instance.subTree && getInnerChild$1(instance.subTree);
-				if (oldInnerChild && oldInnerChild.type !== Comment && !isSameVNodeType(oldInnerChild, innerChild) && recursiveGetSubtree(instance).type !== Comment) {
+				if (oldInnerChild && oldInnerChild.type !== Comment && !isSameVNodeType(oldInnerChild, innerChild) && getTransitionRoot(instance.subTree)) {
 					let leavingHooks = resolveTransitionHooks(oldInnerChild, rawProps, state, instance);
 					setTransitionHooks(oldInnerChild, leavingHooks);
 					if (mode === "out-in" && innerChild.type !== Comment) {
@@ -11297,7 +11483,14 @@
 				}
 				if (el[leaveCbKey]) el[leaveCbKey](true);
 				const leavingVNode = leavingVNodesCache[key];
-				if (leavingVNode && isSameVNodeType(vnode, leavingVNode) && leavingVNode.el[leaveCbKey]) leavingVNode.el[leaveCbKey]();
+				if (leavingVNode && isSameVNodeType(vnode, leavingVNode)) {
+					let leavingCb = leavingVNode.el[leaveCbKey];
+					if (!leavingCb) {
+						const leavingRoot = getTransitionRoot(leavingVNode);
+						leavingCb = leavingRoot && leavingRoot.el[leaveCbKey];
+					}
+					if (leavingCb) leavingCb();
+				}
 				callHook(hook, [el]);
 			},
 			enter(el) {
@@ -11380,7 +11573,13 @@
 		} else if (vnode.shapeFlag & 128) {
 			vnode.ssContent.transition = hooks.clone(vnode.ssContent);
 			vnode.ssFallback.transition = hooks.clone(vnode.ssFallback);
-		} else vnode.transition = hooks;
+		} else {
+			vnode.transition = hooks;
+			if (vnode.type === Fragment && isArray(vnode.children)) {
+				const child = filterSingleRoot(vnode.children, false);
+				if (child) setTransitionHooks(child, hooks);
+			}
+		}
 	}
 	function getTransitionRawChildren(children, keepComment = false, parentKey) {
 		let ret = [];
@@ -11395,6 +11594,14 @@
 		}
 		if (keyedFragmentCount > 1) for (let i = 0; i < ret.length; i++) ret[i].patchFlag = -2;
 		return ret;
+	}
+	function getTransitionRoot(vnode) {
+		if (vnode.component) return getTransitionRoot(vnode.component.subTree);
+		if (vnode.type === Fragment) {
+			const child = isArray(vnode.children) && filterSingleRoot(vnode.children, false);
+			return child ? getTransitionRoot(child) : void 0;
+		}
+		if (vnode.type !== Comment) return vnode;
 	}
 	function defineComponent(options, extraOptions) {
 		return isFunction(options) ? (() => extend({ name: options.name }, extraOptions, { setup: options }))() : options;
@@ -11538,8 +11745,11 @@
 			ret = new Array(source.length);
 			for (let i = 0, l = source.length; i < l; i++) ret[i] = renderItem(needsWrap ? isReadonlySource ? toReadonly(toReactive(source[i])) : toReactive(source[i]) : source[i], i, void 0, cached && cached[i]);
 		} else if (typeof source === "number") {
-			ret = new Array(source);
-			for (let i = 0; i < source; i++) ret[i] = renderItem(i + 1, i, void 0, cached && cached[i]);
+			if (!Number.isInteger(source) || source < 0) ret = [];
+			else {
+				ret = new Array(source);
+				for (let i = 0; i < source; i++) ret[i] = renderItem(i + 1, i, void 0, cached && cached[i]);
+			}
 		} else if (isObject(source)) {
 			if (source[Symbol.iterator]) ret = Array.from(source, (item, i) => renderItem(item, i, void 0, cached && cached[i]));
 			else {
@@ -11831,6 +12041,19 @@
 		setCurrentRenderingInstance(prev);
 		return result;
 	}
+	function filterSingleRoot(children, recurse = true) {
+		let singleRoot;
+		for (let i = 0; i < children.length; i++) {
+			const child = children[i];
+			if (isVNode(child)) {
+				if (child.type !== Comment || child.children === "v-if") {
+					if (singleRoot) return;
+					else singleRoot = child;
+				}
+			} else return;
+		}
+		return singleRoot;
+	}
 	var getFunctionalFallthrough = (attrs) => {
 		let res;
 		for (const key in attrs) if (key === "class" || key === "style" || isOn(key)) (res || (res = {}))[key] = attrs[key];
@@ -11874,7 +12097,7 @@
 		if (nextKeys.length !== Object.keys(prevProps).length) return true;
 		for (let i = 0; i < nextKeys.length; i++) {
 			const key = nextKeys[i];
-			if (hasPropValueChanged(nextProps, prevProps, key) && !isEmitListener(emitsOptions, key)) return true;
+			if (!hasOwn(prevProps, key) || hasPropValueChanged(nextProps, prevProps, key) && !isEmitListener(emitsOptions, key)) return true;
 		}
 		return false;
 	}
@@ -12298,7 +12521,8 @@
 			for (let i = 0; i < newChildren.length; i++) {
 				const oldVNode = oldChildren[i];
 				const newVNode = newChildren[i];
-				const container = oldVNode.el && (oldVNode.type === Fragment || !isSameVNodeType(oldVNode, newVNode) || oldVNode.shapeFlag & 198) ? hostParentNode(oldVNode.el) : fallbackContainer;
+				const oldEl = oldVNode.el || resolveAsyncComponentPlaceholder(oldVNode);
+				const container = oldEl && (oldVNode.type === Fragment || !isSameVNodeType(oldVNode, newVNode) || oldVNode.shapeFlag & 198) ? hostParentNode(oldEl) : fallbackContainer;
 				patch(oldVNode, newVNode, container, null, parentComponent, parentSuspense, namespace, slotScopeIds, true);
 			}
 		};
@@ -12342,7 +12566,7 @@
 			if (isKeepAlive(initialVNode)) instance.ctx.renderer = internals;
 			setupComponent(instance, false, optimized);
 			if (instance.asyncDep) {
-				parentSuspense && parentSuspense.registerDep(instance, setupRenderEffect, optimized);
+				parentSuspense && parentSuspense.registerDep(instance, setupRenderEffect, optimized, namespace);
 				if (!initialVNode.el) {
 					const placeholder = instance.subTree = createVNode(Comment);
 					processCommentNode(null, placeholder, container, anchor);
@@ -12355,6 +12579,7 @@
 			if (shouldUpdateComponent(n1, n2, optimized)) {
 				if (instance.asyncDep && !instance.asyncResolved) {
 					n2.el = n1.el;
+					n2.placeholder = n1.placeholder;
 					updateComponentPreRender(instance, n2, optimized);
 					return;
 				} else {
@@ -12363,6 +12588,7 @@
 				}
 			} else {
 				n2.el = n1.el;
+				n2.placeholder = n1.placeholder;
 				instance.vnode = n2;
 			}
 		};
@@ -12670,7 +12896,8 @@
 		};
 		const remove = (vnode) => {
 			const { type, el, anchor, transition } = vnode;
-			if (type === Fragment) {
+			const isFragment = type === Fragment;
+			if (isFragment && !transition) {
 				removeFragment(el, anchor);
 				return;
 			}
@@ -12679,14 +12906,18 @@
 				if (transition && !transition.persisted && transition.afterLeave) transition.afterLeave();
 				return;
 			}
+			const leavingNode = isFragment ? getTransitionRoot(vnode) : vnode;
 			const performRemove = () => {
-				hostRemove(el);
+				if (isFragment) {
+					if (hostParentNode(el)) removeFragment(el, anchor);
+				} else hostRemove(el);
 				if (transition && !transition.persisted && transition.afterLeave) transition.afterLeave();
 			};
-			if (vnode.shapeFlag & 1 && transition && !transition.persisted) {
+			if (leavingNode && leavingNode.shapeFlag & 1 && transition && !transition.persisted) {
 				const { leave, delayLeave } = transition;
-				const performLeave = () => leave(el, performRemove);
-				if (delayLeave) delayLeave(vnode.el, performRemove, performLeave);
+				const leavingEl = leavingNode.el;
+				const performLeave = () => leave(leavingEl, performRemove);
+				if (delayLeave) delayLeave(leavingEl, performRemove, performLeave);
 				else performLeave();
 			} else performRemove();
 		};
@@ -12727,22 +12958,13 @@
 			const teleportEnd = el && el[TeleportEndKey];
 			return teleportEnd ? hostNextSibling(teleportEnd) : el;
 		};
-		let isFlushing = false;
 		const render = (vnode, container, namespace) => {
-			let instance;
-			if (vnode == null) {
-				if (container._vnode) {
-					unmount(container._vnode, null, null, true);
-					instance = container._vnode.component;
-				}
-			} else patch(container._vnode || null, vnode, container, null, null, null, namespace);
-			container._vnode = vnode;
-			if (!isFlushing) {
-				isFlushing = true;
-				flushPreFlushCbs(instance);
-				flushPostFlushCbs();
-				isFlushing = false;
-			}
+			flushOnAppMount(() => {
+				if (vnode == null) {
+					if (container._vnode) unmount(container._vnode, null, null, true);
+				} else patch(container._vnode || null, vnode, container, null, null, null, namespace);
+				container._vnode = vnode;
+			}, vnode && container._vnode ? void 0 : vnode && vnode.component ? vnode.component.uid : getNextUid());
 		};
 		const internals = {
 			p: patch,
@@ -13096,6 +13318,9 @@
 	}
 	var emptyAppContext = createAppContext();
 	var uid = 0;
+	function getNextUid() {
+		return uid;
+	}
 	function createComponentInstance(vnode, parent, suspense) {
 		const type = vnode.type;
 		const appContext = (parent ? parent.appContext : vnode.appContext) || emptyAppContext;
@@ -13306,7 +13531,7 @@
 			setBlockTracking(1);
 		}
 	}
-	var version = "3.5.43";
+	var version = "3.5.44";
 	var policy = void 0;
 	var tt = typeof window !== "undefined" && window.trustedTypes;
 	if (tt) try {
@@ -13651,7 +13876,7 @@
 			}
 		} else if (prev) el.removeAttribute("style");
 		if (vShowOriginalDisplay in el) {
-			el[vShowOriginalDisplay] = hasControlledDisplay ? style.display : "";
+			if (!isCssString || prev !== next) el[vShowOriginalDisplay] = hasControlledDisplay ? style.display : "";
 			if (el[vShowHidden]) style.display = "none";
 		}
 	}
@@ -14172,12 +14397,13 @@ ul, ol {
 		a.rel = "noopener";
 		if (typeof blob === "string") {
 			a.href = blob;
-			if (a.origin !== location.origin) if (corsEnabled(a.href)) download(blob, name, opts);
-			else {
-				a.target = "_blank";
-				click(a);
-			}
-			else click(a);
+			if (a.origin !== location.origin) {
+				if (corsEnabled(a.href)) download(blob, name, opts);
+				else {
+					a.target = "_blank";
+					click(a);
+				}
+			} else click(a);
 		} else {
 			a.href = URL.createObjectURL(blob);
 			setTimeout(function() {
@@ -14189,16 +14415,17 @@ ul, ol {
 		}
 	}
 	function msSaveAs(blob, name = "download", opts) {
-		if (typeof blob === "string") if (corsEnabled(blob)) download(blob, name, opts);
-		else {
-			const a = document.createElement("a");
-			a.href = blob;
-			a.target = "_blank";
-			setTimeout(function() {
-				click(a);
-			});
-		}
-		else navigator.msSaveOrOpenBlob(bom(blob, opts), name);
+		if (typeof blob === "string") {
+			if (corsEnabled(blob)) download(blob, name, opts);
+			else {
+				const a = document.createElement("a");
+				a.href = blob;
+				a.target = "_blank";
+				setTimeout(function() {
+					click(a);
+				});
+			}
+		} else navigator.msSaveOrOpenBlob(bom(blob, opts), name);
 	}
 	function fileSaverSaveAs(blob, name, opts, popup) {
 		popup = popup || open("", "_blank");
@@ -14283,8 +14510,11 @@ ul, ol {
 			if (!Object.hasOwn(patchToApply, key)) continue;
 			const subPatch = patchToApply[key];
 			const targetValue = target[key];
-			if (isPlainObject(targetValue) && isPlainObject(subPatch) && Object.hasOwn(target, key) && !isRef(subPatch) && !isReactive(subPatch)) target[key] = mergeReactiveObjects(targetValue, subPatch);
-			else target[key] = subPatch;
+			if (isPlainObject(targetValue) && isPlainObject(subPatch) && Object.hasOwn(target, key) && !isRef(subPatch) && !isReactive(subPatch)) {
+				target[key] = mergeReactiveObjects(targetValue, subPatch);
+				const targetRef = toRaw(target)[key];
+				if (isRef(targetRef) && isShallow(targetRef)) triggerRef(targetRef);
+			} else target[key] = subPatch;
 		}
 		return target;
 	}
@@ -14435,10 +14665,12 @@ ul, ol {
 			const prop = setupStore[key];
 			if (isRef(prop) && !isComputed(prop) || isReactive(prop)) {
 				if (!isOptionsStore) {
-					if (initialState && shouldHydrate(prop)) if (isRef(prop)) prop.value = initialState[key];
-					else {
-						if (prop instanceof Set || prop instanceof Map) prop.clear();
-						mergeReactiveObjects(prop, initialState[key]);
+					if (initialState && shouldHydrate(prop)) {
+						if (isRef(prop)) prop.value = initialState[key];
+						else {
+							if (prop instanceof Set || prop instanceof Map) prop.clear();
+							mergeReactiveObjects(prop, initialState[key]);
+						}
 					}
 					pinia.state.value[$id][key] = prop;
 				}
@@ -22105,7 +22337,10 @@ ul, ol {
 		emits: ["toggleDrawer", "openSettings"],
 		setup(__props) {
 			return (_ctx, _cache) => {
-				return openBlock(), createBlock(Transition, { name: "mnr-fade-slide" }, {
+				return openBlock(), createBlock(Transition, {
+					name: "mnr-fade-slide",
+					persisted: ""
+				}, {
 					default: withCtx(() => [withDirectives(createBaseVNode("div", _hoisted_1$5, [createBaseVNode("button", {
 						class: "mnr-fab",
 						title: "目录 (C)",

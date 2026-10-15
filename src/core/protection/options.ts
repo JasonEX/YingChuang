@@ -67,7 +67,15 @@ export const isCloudflareChallenge = (doc: Document = document): boolean => {
   }
 
   const scriptText = Array.from(doc.querySelectorAll('script'))
-    .map(script => `${script.getAttribute('src') || ''}\n${script.textContent || ''}`)
+    .map(script => {
+      const src = script.getAttribute('src') || '';
+      // A comment/login form may load this public widget API on a readable page.
+      const widgetLoader =
+        /^(?:https?:)?\/\/challenges\.cloudflare\.com\/turnstile\/v0\/api\.js(?:[?#].*)?$/i.test(
+          src
+        );
+      return `${widgetLoader ? '' : src}\n${script.textContent || ''}`;
+    })
     .join('\n');
   if (/_cf_chl_opt|cf_chl_|challenges\.cloudflare\.com/i.test(scriptText)) {
     return true;

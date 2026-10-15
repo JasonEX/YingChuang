@@ -87,6 +87,32 @@ describe('SiteProtection', () => {
       }
     );
 
+    it.each(['https:', ''])('accepts the public Turnstile widget loader (%s)', protocol => {
+      const localDom = new JSDOM(
+        `<!doctype html><html><head><title>第一章 - 示例小说</title>
+          <script src="${protocol}//challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"></script>
+        </head><body><article><p>正常正文。</p></article><form id="comments"></form></body></html>`,
+        { url: 'https://example.com/chapter/1.html' }
+      );
+      expect(isCloudflareChallenge(localDom.window.document)).toBe(false);
+    });
+
+    it.each([
+      '<script>window._cf_chl_opt = { cType: "managed" };</script>',
+      '<script src="https://challenges.cloudflare.com/other-challenge.js"></script>',
+      '<iframe src="https://challenges.cloudflare.com/turnstile/v0/"></iframe>',
+      '<form action="/cdn-cgi/challenge-platform/"></form>',
+      '<title>Just a moment...</title>',
+    ])('retains challenge evidence alongside the public widget loader: %s', marker => {
+      const localDom = new JSDOM(
+        `<!doctype html><html><head>
+          <script src="https://challenges.cloudflare.com/turnstile/v0/api.js"></script>
+        </head><body>${marker}</body></html>`,
+        { url: 'https://example.com/chapter/1.html' }
+      );
+      expect(isCloudflareChallenge(localDom.window.document)).toBe(true);
+    });
+
     it.each([
       '<script src="/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1"></script>',
       '<script>window._cf_chl_opt = { cType: "managed" };</script>',
