@@ -366,11 +366,16 @@ export function printRunSummary<TState>(
 export function createGmMockScript(): string {
   return `
 (() => {
-  const store = new Map();
-  // Same-origin fixture persistence; cross-origin tests supply a tab-scoped mock.
-  window.GM_getTab = callback => queueMicrotask(() =>
-    callback(JSON.parse(sessionStorage.getItem('__mnr_test_tab') || '{}')));
-  window.GM_saveTab = tab => sessionStorage.setItem('__mnr_test_tab', JSON.stringify(tab));
+  // Script storage outlives page loads like Tampermonkey's; tab-scoped so tests stay isolated.
+  const prefix = '__mnr_e2e_gm_';
+  const read = name => {
+    try {
+      const value = sessionStorage.getItem(prefix + name);
+      return value === null ? undefined : JSON.parse(value);
+    } catch {
+      return undefined;
+    }
+  };
   window.unsafeWindow = window;
   window.GM_info = {
     script: {
@@ -398,10 +403,16 @@ export function createGmMockScript(): string {
     }, { once: true });
     return style;
   };
-  window.GM_getValue = (name, defaultValue) => (store.has(name) ? store.get(name) : defaultValue);
-  window.GM_setValue = (name, value) => { store.set(name, value); };
-  window.GM_deleteValue = name => { store.delete(name); };
-  window.GM_listValues = () => Array.from(store.keys());
+  window.GM_getValue = (name, defaultValue) => {
+    const value = read(name);
+    return value === undefined ? defaultValue : value;
+  };
+  window.GM_setValue = (name, value) => sessionStorage.setItem(prefix + name, JSON.stringify(value));
+  window.GM_deleteValue = name => sessionStorage.removeItem(prefix + name);
+  window.GM_listValues = () =>
+    Object.keys(sessionStorage)
+      .filter(key => key.startsWith(prefix))
+      .map(key => key.slice(prefix.length));
   window.GM_getResourceURL = () => '';
   window.GM_openInTab = url => window.open(url, '_blank');
   window.GM_setClipboard = text => navigator.clipboard?.writeText?.(String(text));

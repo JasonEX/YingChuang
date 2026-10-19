@@ -4,8 +4,10 @@
  * Flow:
  * 1. Check if built-in rule matches → auto-launch
  * 2. Run auto-detection → auto-launch at high confidence
- * 3. Medium confidence → leave the page alone; the caller offers a manual entry, and entering
- *    through it remembers the site
+ * 3. Otherwise, on a chapter page → leave the page alone and offer the manual entry
+ *
+ * The site preference follows the latest explicit action: entering enables auto-entry and
+ * exiting the reader disables it.
  */
 
 import {
@@ -40,7 +42,7 @@ export interface AutoEnableDecision {
   detection?: DetectionEngineResult;
   /** Reasons for the decision */
   reasons: string[];
-  /** Whether to keep a manual reader entry visible */
+  /** Whether this page offers the manual reader entry while the reader is not open */
   showManualEntry?: boolean;
 }
 
@@ -221,6 +223,7 @@ export class AutoEnableManager {
           method: 'site-preference',
           confidence: 1,
           reasons: ['用户已为该站点开启自动启用'],
+          showManualEntry: true,
         });
       }
     }
@@ -248,6 +251,7 @@ export class AutoEnableManager {
           confidence: 1.0,
           rule: ruleMatch.rule,
           reasons: [`Matched builtin rule: ${ruleMatch.rule.name || ruleMatch.rule.id}`],
+          showManualEntry: true,
         };
         return decide(decision);
       }
@@ -278,6 +282,7 @@ export class AutoEnableManager {
         method: 'site-preference',
         confidence: 1,
         reasons: ['用户已为该站点开启自动启用'],
+        showManualEntry: true,
       });
     }
 
@@ -297,6 +302,7 @@ export class AutoEnableManager {
         method: 'manual',
         confidence: 0,
         reasons: ['Page does not appear to be novel content'],
+        showManualEntry: true,
       });
     }
 
@@ -309,6 +315,7 @@ export class AutoEnableManager {
       confidence: detection.confidence.overall,
       detection,
       reasons: detection.confidence.reasons,
+      showManualEntry: true,
     };
 
     return decide(decision);
@@ -407,13 +414,14 @@ export class AutoEnableManager {
 
   private rememberSiteEnabled(doc: Document): void {
     const url = doc.location?.href || window.location.href;
-    if (getPageKind(url, doc) !== 'chapter') return;
+    // Same chapter scope as the exit that disables it, so either action can undo the other.
+    if (getPageKind(url, doc) !== 'chapter' && !getRuleManager().matchRule(url)) return;
 
     try {
       const hostname = new URL(url).hostname;
       const storage = getRuleStorage();
-      // Only an unset preference may become enabled; an explicit opt-out survives manual entry.
-      if (storage.getSitePreference(hostname)) return;
+      // The latest explicit action owns the site preference: entering re-enables auto-entry.
+      if (storage.getSitePreference(hostname)?.enabled === true) return;
       storage.setSitePreference(hostname, { enabled: true, timestamp: Date.now() });
     } catch (e) {
       console.error('[AutoEnableManager] Failed to save site preference:', e);

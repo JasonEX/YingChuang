@@ -133,9 +133,6 @@ describe('UI component smoke', () => {
       window.getComputedStyle(document.querySelector('.mnr-settings-overlay')!).backgroundColor
     ).toBe('rgba(0, 0, 0, 0.12)');
     expect(document.querySelector('#mnr-protection-help')?.textContent).toContain('无法恢复');
-    expect(
-      Array.from(document.querySelectorAll('.mnr-switch-row span'), span => span.textContent)
-    ).toContain('本站自动进入阅读模式');
 
     configStore.updateReading({ fontSize: 24 });
     const resetButton = Array.from(

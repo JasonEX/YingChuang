@@ -44,8 +44,6 @@ const META_BASE = {
     'GM_setValue',
     'GM_deleteValue',
     'GM_listValues',
-    'GM_getTab',
-    'GM_saveTab',
     'GM_setClipboard',
     'GM_registerMenuCommand',
     'GM_info',

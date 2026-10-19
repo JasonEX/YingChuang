@@ -128,12 +128,10 @@
     <!-- Settings panel -->
     <SettingsPanel
       :visible="settingsVisible"
-      :site-auto-enable="siteAutoEnableValue"
       :custom-cleanup-hostname="customCleanupHostname"
       @close="closeSettings"
       @textConversionChange="readerStore.applyTextConversion"
       @copyDiagnostics="emit('copyDiagnostics')"
-      @siteAutoEnableChange="handleSiteAutoEnableChange"
       @protectionModeChange="emit('protectionModeChange', $event)"
       @exit="emit('exit')"
     />
@@ -177,11 +175,9 @@ import {
   getCustomParagraphFiltersForUrl,
 } from '@/ui/contentFilters';
 
-const props = withDefaults(defineProps<{ siteAutoEnable?: boolean }>(), { siteAutoEnable: true });
 const emit = defineEmits<{
   copyDiagnostics: [];
   exit: [];
-  siteAutoEnableChange: [enabled: boolean];
   protectionModeChange: [mode: 'standard' | 'aggressive'];
 }>();
 
@@ -195,7 +191,6 @@ const bottomSentinel = ref<HTMLElement | null>(null);
 const isNavigating = ref(false);
 const showControls = ref(true);
 const chapterRefs = new Map<string, HTMLElement>();
-const siteAutoEnableValue = ref(props.siteAutoEnable);
 
 // UI controls composable
 const {
@@ -370,12 +365,6 @@ function handleCacheAll() {
 function handleClearCache() {
   readerStore.clearPersistedCache();
   readerStore.showToast('离线缓存已清除', 'info');
-}
-
-function handleSiteAutoEnableChange(enabled: boolean) {
-  siteAutoEnableValue.value = enabled;
-  emit('siteAutoEnableChange', enabled);
-  readerStore.showToast(enabled ? '已开启本站自动进入' : '已关闭本站自动进入', 'info');
 }
 
 /** Label the background section merge, falling back to a bare count when no total is known. */
