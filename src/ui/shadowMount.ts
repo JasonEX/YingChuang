@@ -52,8 +52,8 @@ const BASE_RESET_CSS = `
   font-size: 16px;
   line-height: 1.5;
   color: var(--mnr-text);
-  /* Theme colors are applied while config loads, before any shadow root exists, so the
-     derived tokens below need no fallbacks. */
+  /* Config load always applies the theme variables (defaults if storage fails) before any
+     shadow root exists, so the derived tokens below need no fallbacks. */
   --mnr-muted: color-mix(in srgb, var(--mnr-text) 75%, var(--mnr-bg));
   --mnr-surface: color-mix(in srgb, var(--mnr-text) 4%, var(--mnr-bg));
   --mnr-focus: color-mix(in srgb, var(--mnr-link) 55%, transparent);

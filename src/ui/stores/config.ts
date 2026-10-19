@@ -342,8 +342,6 @@ export const useConfigStore = defineStore('config', () => {
         }
       }
 
-      applyAll();
-
       // Repair corrupted data so users aren't stuck with repeated parse failures.
       if (hasInvalidData) {
         console.warn('[ConfigStore] Corrupted config detected; resetting to defaults');
@@ -352,6 +350,8 @@ export const useConfigStore = defineStore('config', () => {
     } catch (e) {
       console.error('[ConfigStore] Load error:', e);
     } finally {
+      // Shadow roots rely on these variables, so apply them (defaults if storage failed).
+      applyAll();
       isHydrating = false;
     }
   }
