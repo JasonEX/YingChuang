@@ -210,6 +210,25 @@ describe('AutoEnableManager', () => {
     expect(decision).toMatchObject({
       shouldEnable: false,
       method: 'manual',
+      showManualEntry: true,
+    });
+  });
+
+  it('offers the manual entry for chapter detection below the threshold', async () => {
+    const { AutoEnableManager } = await import('@/core/AutoEnableManager');
+    const manager = new AutoEnableManager();
+    const m = manager as unknown as { detectionEngine: MockDetectionEngine };
+    m.detectionEngine.detect.mockReturnValue({
+      results: {},
+      confidence: { overall: 0.3, reasons: ['weak'] },
+    });
+
+    const decision = manager.check(createDoc('https://example.com/chapter/1'));
+
+    expect(decision).toMatchObject({
+      shouldEnable: false,
+      method: 'detection',
+      showManualEntry: true,
     });
   });
 
@@ -536,7 +555,7 @@ describe('AutoEnableManager', () => {
     });
   });
 
-  it('manualEnable keeps an explicit site opt-out', async () => {
+  it('manualEnable re-enables a site the user exited on', async () => {
     mockedRuleStorage.getSitePreference.mockReturnValue({ enabled: false, timestamp: 1 });
     const { AutoEnableManager } = await import('@/core/AutoEnableManager');
     const manager = new AutoEnableManager({ enableProtection: false });
@@ -546,7 +565,35 @@ describe('AutoEnableManager', () => {
     await manager.manualEnable(createDoc('https://example.com/chapter/1'));
 
     expect(launchCallback).toHaveBeenCalledTimes(1);
+    expect(mockedRuleStorage.setSitePreference).toHaveBeenCalledWith('example.com', {
+      enabled: true,
+      timestamp: expect.any(Number),
+    });
+  });
+
+  it('manualEnable leaves an enabled site preference untouched', async () => {
+    mockedRuleStorage.getSitePreference.mockReturnValue({ enabled: true, timestamp: 1 });
+    const { AutoEnableManager } = await import('@/core/AutoEnableManager');
+    const manager = new AutoEnableManager({ enableProtection: false });
+    manager.setLaunchCallback(vi.fn());
+
+    await manager.manualEnable(createDoc('https://example.com/chapter/1'));
+
     expect(mockedRuleStorage.setSitePreference).not.toHaveBeenCalled();
+  });
+
+  it('manualEnable remembers rule-matched pages whose URL is ambiguous', async () => {
+    mockedRuleManager.matchRule.mockReturnValue({ rule: { id: 'r' } });
+    const { AutoEnableManager } = await import('@/core/AutoEnableManager');
+    const manager = new AutoEnableManager({ enableProtection: false });
+    manager.setLaunchCallback(vi.fn());
+
+    await manager.manualEnable(createDoc('https://example.com/24/18442_6.html'));
+
+    expect(mockedRuleStorage.setSitePreference).toHaveBeenCalledWith('example.com', {
+      enabled: true,
+      timestamp: expect.any(Number),
+    });
   });
 
   it('manualEnable does not parse or launch a locked chapter document', async () => {

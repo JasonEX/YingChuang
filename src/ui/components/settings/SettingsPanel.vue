@@ -214,11 +214,6 @@
           <details class="mnr-settings-group">
             <summary>本站与高级</summary>
             <div class="mnr-settings-group-content">
-              <label class="mnr-switch-row">
-                <span>本站自动进入阅读模式</span>
-                <input type="checkbox" :checked="siteAutoEnable" @change="updateSiteAutoEnable" />
-              </label>
-
               <fieldset class="mnr-settings-fieldset" aria-describedby="mnr-protection-help">
                 <legend>网站防护</legend>
                 <div class="mnr-segmented-control">
@@ -382,17 +377,15 @@ type BooleanBehaviorKey = keyof BehaviorSettings;
 const props = withDefaults(
   defineProps<{
     visible: boolean;
-    siteAutoEnable?: boolean;
     customCleanupHostname?: string;
   }>(),
-  { siteAutoEnable: true, customCleanupHostname: '' }
+  { customCleanupHostname: '' }
 );
 
 const emit = defineEmits<{
   close: [];
   copyDiagnostics: [];
   exit: [];
-  siteAutoEnableChange: [enabled: boolean];
   textConversionChange: [mode: 'none' | 'sc' | 'tc'];
   protectionModeChange: [mode: 'standard' | 'aggressive'];
 }>();
@@ -499,10 +492,6 @@ function updateBehavior(key: BooleanBehaviorKey, event: Event) {
   configStore.updateBehavior({
     [key]: (event.currentTarget as globalThis.HTMLInputElement).checked,
   });
-}
-
-function updateSiteAutoEnable(event: Event) {
-  emit('siteAutoEnableChange', (event.currentTarget as globalThis.HTMLInputElement).checked);
 }
 
 function updateCustomCSS(event: Event) {

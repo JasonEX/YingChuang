@@ -68,12 +68,10 @@
 // @exclude            *://www.tadu.com/book/*/toc/
 // @connect            *
 // @grant              GM_deleteValue
-// @grant              GM_getTab
 // @grant              GM_getValue
 // @grant              GM_info
 // @grant              GM_listValues
 // @grant              GM_registerMenuCommand
-// @grant              GM_saveTab
 // @grant              GM_setClipboard
 // @grant              GM_setValue
 // @grant              GM_xmlhttpRequest
@@ -490,9 +488,6 @@
 			return url;
 		}
 	}
-	function _OverloadYield(e, d) {
-		this.v = e, this.k = d;
-	}
 	function _arrayLikeToArray(r, a) {
 		(null == a || a > r.length) && (a = r.length);
 		for (var e = 0, n = Array(a); e < a; e++) n[e] = r[e];
@@ -504,14 +499,12 @@
 	function _iterableToArrayLimit(r, l) {
 		var t = null == r ? null : "undefined" != typeof Symbol && r[Symbol.iterator] || r["@@iterator"];
 		if (null != t) {
-			var e, n, i, u, a = [], f = !0, o = !1;
+			var e, n, i, u, a = [], f = true, o = false;
 			try {
-				if (i = (t = t.call(r)).next, 0 === l) {
-					if (Object(t) !== t) return;
-					f = !1;
-				} else for (; !(f = (e = i.call(t)).done) && (a.push(e.value), a.length !== l); f = !0);
+				if (i = (t = t.call(r)).next, 0 === l);
+				else for (; !(f = (e = i.call(t)).done) && (a.push(e.value), a.length !== l); f = !0);
 			} catch (r) {
-				o = !0, n = r;
+				o = true, n = r;
 			} finally {
 				try {
 					if (!f && null != t.return && (u = t.return(), Object(u) !== u)) return;
@@ -535,53 +528,6 @@
 			return "Object" === t && r.constructor && (t = r.constructor.name), "Map" === t || "Set" === t ? Array.from(r) : "Arguments" === t || /^(?:Ui|I)nt(?:8|16|32)(?:Clamped)?Array$/.test(t) ? _arrayLikeToArray(r, a) : void 0;
 		}
 	}
-	function AsyncGenerator(e) {
-		var t, n;
-		function resume(t, n) {
-			try {
-				var r = e[t](n), o = r.value, u = o instanceof _OverloadYield;
-				Promise.resolve(u ? o.v : o).then(function(n) {
-					if (u) {
-						var i = "return" === t && o.k ? t : "next";
-						if (!o.k || n.done) return resume(i, n);
-						n = e[i](n).value;
-					}
-					settle(!!r.done, n);
-				}, function(e) {
-					resume("throw", e);
-				});
-			} catch (e) {
-				settle(2, e);
-			}
-		}
-		function settle(e, r) {
-			2 === e ? t.reject(r) : t.resolve({
-				value: r,
-				done: e
-			}), (t = t.next) ? resume(t.key, t.arg) : n = null;
-		}
-		this._invoke = function(e, r) {
-			return new Promise(function(o, u) {
-				var i = {
-					key: e,
-					arg: r,
-					resolve: o,
-					reject: u,
-					next: null
-				};
-				n ? n = n.next = i : (t = n = i, resume(e, r));
-			});
-		}, "function" != typeof e.return && (this.return = void 0);
-	}
-	AsyncGenerator.prototype["function" == typeof Symbol && Symbol.asyncIterator || "@@asyncIterator"] = function() {
-		return this;
-	}, AsyncGenerator.prototype.next = function(e) {
-		return this._invoke("next", e);
-	}, AsyncGenerator.prototype.throw = function(e) {
-		return this._invoke("throw", e);
-	}, AsyncGenerator.prototype.return = function(e) {
-		return this._invoke("return", e);
-	};
 	var entries = Object.entries;
 	var setPrototypeOf = Object.setPrototypeOf;
 	var isFrozen = Object.isFrozen;
@@ -608,16 +554,11 @@
 		return new Func(...args);
 	};
 	var arrayForEach = unapply(Array.prototype.forEach);
-	Array.prototype.indexOf;
 	var arrayLastIndexOf = unapply(Array.prototype.lastIndexOf);
 	var arrayPop = unapply(Array.prototype.pop);
 	var arrayPush = unapply(Array.prototype.push);
-	var arraySlice = unapply(Array.prototype.slice);
 	var arraySplice = unapply(Array.prototype.splice);
 	var arrayIsArray = Array.isArray;
-	var setCreate = unconstruct(Set);
-	var setAdd = unapply(Set.prototype.add);
-	var setHas = unapply(Set.prototype.has);
 	var stringToLowerCase = unapply(String.prototype.toLowerCase);
 	var stringToString = unapply(String.prototype.toString);
 	var stringMatch = unapply(String.prototype.match);
@@ -716,14 +657,6 @@
 			return null;
 		}
 		return fallbackValue;
-	}
-	function lookupAccessor(object, prop) {
-		while (object !== null) {
-			const desc = getOwnPropertyDescriptor(object, prop);
-			if (desc) return desc.get ? unapply(desc.get) : null;
-			object = getPrototypeOf(object);
-		}
-		return null;
 	}
 	function isRegex(value) {
 		try {
@@ -1409,7 +1342,7 @@
 		documentFragment: 11,
 		notation: 12
 	};
-	var LITERAL_TEXT_ELEMENTS = freeze(addToSet({}, [
+	var LITERAL_TEXT_ELEMENT_NAMES = [
 		"style",
 		"script",
 		"xmp",
@@ -1418,7 +1351,15 @@
 		"noframes",
 		"plaintext",
 		"noscript"
-	]));
+	];
+	var LITERAL_TEXT_ELEMENTS = freeze(addToSet({}, LITERAL_TEXT_ELEMENT_NAMES));
+	var LITERAL_TEXT_CLOSE = function() {
+		const map = {};
+		arrayForEach(LITERAL_TEXT_ELEMENT_NAMES, (name) => {
+			map[name] = seal(new RegExp("</" + name + "(?=[\\t\\n\\f\\r />])", "i"));
+		});
+		return freeze(map);
+	}();
 	var getGlobal = function getGlobal() {
 		return typeof window === "undefined" ? null : window;
 	};
@@ -1465,7 +1406,7 @@
 	function createDOMPurify() {
 		let window = arguments.length > 0 && arguments[0] !== void 0 ? arguments[0] : getGlobal();
 		const DOMPurify = (root) => createDOMPurify(root);
-		DOMPurify.version = "3.4.17";
+		DOMPurify.version = "3.4.15";
 		DOMPurify.removed = [];
 		if (!window || !window.document || window.document.nodeType !== NODE_TYPE.document || !window.Element) {
 			DOMPurify.isSupported = false;
@@ -1496,10 +1437,6 @@
 		};
 		const _readNodeName = function _readNodeName(node) {
 			return getNodeName ? getNodeName(node) : node.nodeName;
-		};
-		const getNamespaceURI = lookupAccessor(ElementPrototype, "namespaceURI");
-		const _readNamespaceURI = function _readNamespaceURI(element) {
-			return getNamespaceURI ? getNamespaceURI(element) : element.namespaceURI;
 		};
 		if (typeof HTMLTemplateElement === "function") {
 			const template = document.createElement("template");
@@ -1614,7 +1551,6 @@
 		const SANITIZE_NAMED_PROPS_PREFIX = "user-content-";
 		let KEEP_CONTENT = true;
 		let IN_PLACE = false;
-		let IN_PLACE_VISITED = null;
 		let USE_PROFILES = {};
 		let FORBID_CONTENTS = null;
 		const DEFAULT_FORBID_CONTENTS = addToSet({}, [
@@ -1853,23 +1789,18 @@
 			return !ALL_MATHML_TAGS[tagName] && (COMMON_SVG_AND_HTML_ELEMENTS[tagName] || !ALL_SVG_TAGS[tagName]);
 		};
 		const _checkValidNamespace = function _checkValidNamespace(element) {
-			const elementNamespace = _readNamespaceURI(element);
-			const tagName = stringToLowerCase(_readNodeName(element));
-			const parentNode = getParentNode(element);
-			let parent;
-			let parentTagName;
-			if (parentNode && _readNodeType(parentNode) === NODE_TYPE.element) {
-				parent = { namespaceURI: _readNamespaceURI(parentNode) };
-				parentTagName = stringToLowerCase(_readNodeName(parentNode));
-			} else {
-				parent = { namespaceURI: NAMESPACE };
-				parentTagName = "template";
-			}
-			if (!ALLOWED_NAMESPACES[elementNamespace]) return false;
-			if (elementNamespace === SVG_NAMESPACE) return _checkSvgNamespace(tagName, parent, parentTagName);
-			if (elementNamespace === MATHML_NAMESPACE) return _checkMathMlNamespace(tagName, parent, parentTagName);
-			if (elementNamespace === HTML_NAMESPACE) return _checkHtmlNamespace(tagName, parent, parentTagName);
-			if (PARSER_MEDIA_TYPE === "application/xhtml+xml" && ALLOWED_NAMESPACES[elementNamespace]) return true;
+			let parent = getParentNode(element);
+			if (!parent || !parent.tagName) parent = {
+				namespaceURI: NAMESPACE,
+				tagName: "template"
+			};
+			const tagName = stringToLowerCase(element.tagName);
+			const parentTagName = stringToLowerCase(parent.tagName);
+			if (!ALLOWED_NAMESPACES[element.namespaceURI]) return false;
+			if (element.namespaceURI === SVG_NAMESPACE) return _checkSvgNamespace(tagName, parent, parentTagName);
+			if (element.namespaceURI === MATHML_NAMESPACE) return _checkMathMlNamespace(tagName, parent, parentTagName);
+			if (element.namespaceURI === HTML_NAMESPACE) return _checkHtmlNamespace(tagName, parent, parentTagName);
+			if (PARSER_MEDIA_TYPE === "application/xhtml+xml" && ALLOWED_NAMESPACES[element.namespaceURI]) return true;
 			return false;
 		};
 		const _forceRemove = function _forceRemove(node) {
@@ -1893,12 +1824,18 @@
 		const _neutralizeRoot = function _neutralizeRoot(root) {
 			_neutralizeSubtree(root);
 			const childNodes = getChildNodes(root);
-			if (childNodes) arrayForEach(arraySlice(childNodes), (child) => {
-				try {
-					remove(child);
-				} catch (_) {}
-			});
-			const attributes = _readNodeType(root) === NODE_TYPE.element ? getAttributes(root) : null;
+			if (childNodes) {
+				const snapshot = [];
+				arrayForEach(childNodes, (child) => {
+					arrayPush(snapshot, child);
+				});
+				arrayForEach(snapshot, (child) => {
+					try {
+						remove(child);
+					} catch (_) {}
+				});
+			}
+			const attributes = getAttributes(root);
 			if (attributes) for (let i = attributes.length - 1; i >= 0; --i) {
 				const attribute = attributes[i];
 				const name = attribute && attribute.name;
@@ -1942,93 +1879,14 @@
 				_stripAttributeNode(element, attribute, name);
 			}
 		};
-		const _walkTree = function _walkTree(root, visit) {
-			let intoShadow = arguments.length > 2 && arguments[2] !== void 0 ? arguments[2] : false;
+		const _neutralizeSubtree = function _neutralizeSubtree(root) {
 			const stack = [root];
 			while (stack.length > 0) {
 				const node = stack.pop();
-				if (visit(node) === false) continue;
-				if (intoShadow && _readNodeType(node) === NODE_TYPE.element) {
-					const shadowRoot = getShadowRoot(node);
-					if (_isDocumentFragment(shadowRoot)) stack.push(shadowRoot);
-				}
+				if (_readNodeType(node) === NODE_TYPE.element) _stripDisallowedAttributes(node);
 				const childNodes = getChildNodes(node);
 				if (childNodes) for (let i = childNodes.length - 1; i >= 0; --i) stack.push(childNodes[i]);
 			}
-		};
-		const _neutralizeSubtree = function _neutralizeSubtree(root) {
-			_walkTree(root, (node) => {
-				if (_readNodeType(node) === NODE_TYPE.element) _stripDisallowedAttributes(node);
-			});
-		};
-		const _collectLiveNodes = function _collectLiveNodes(root) {
-			const nodes = [];
-			_walkTree(root, (node) => {
-				nodes.push(node);
-			}, true);
-			return nodes;
-		};
-		const _neutralizeEscapedElements = function _neutralizeEscapedElements(root, before) {
-			const reachable = setCreate();
-			arrayForEach(_collectLiveNodes(root), (node) => {
-				if (_readNodeType(node) === NODE_TYPE.element) setAdd(reachable, node);
-			});
-			arrayForEach(before, (node) => {
-				if (_readNodeType(node) === NODE_TYPE.element && !setHas(reachable, node)) _stripDisallowedAttributes(node);
-			});
-		};
-		const _neutralizeDiscarded = function _neutralizeDiscarded(root, before) {
-			let rootRemoved = false;
-			arrayForEach(DOMPurify.removed, (entry) => {
-				if (entry.element) {
-					rootRemoved = rootRemoved || entry.element === root;
-					_neutralizeSubtree(entry.element);
-				}
-			});
-			_neutralizeEscapedElements(root, before);
-			return rootRemoved;
-		};
-		const MAX_UNVISITED_ROUNDS = 8;
-		const _sanitizeUnvisitedNodes = function _sanitizeUnvisitedNodes(root, before) {
-			const visited = IN_PLACE_VISITED;
-			let original = null;
-			const getOriginal = () => {
-				if (!original) {
-					original = setCreate();
-					arrayForEach(before, (beforeNode) => {
-						setAdd(original, beforeNode);
-					});
-				}
-				return original;
-			};
-			for (let round = 0;; round++) {
-				const live = _collectLiveNodes(root);
-				const containers = [root];
-				let pending = false;
-				arrayForEach(live, (node) => {
-					if (_readNodeType(node) === NODE_TYPE.documentFragment) arrayPush(containers, node);
-					else if (!pending && !setHas(visited, node)) pending = setHas(getOriginal(), node);
-				});
-				if (!pending) return;
-				if (round >= MAX_UNVISITED_ROUNDS) throw typeErrorCreate("the tree kept changing during in-place sanitization; refusing to return it");
-				arrayForEach(containers, (container, index) => {
-					_sanitizeUnvisitedIn(container, index > 0, root, getOriginal());
-				});
-			}
-		};
-		const _sanitizeUnvisitedIn = function _sanitizeUnvisitedIn(container, inShadow, root, original) {
-			const iterator = _createNodeIterator(container);
-			let node;
-			while (node = iterator.nextNode()) {
-				if (!setHas(original, node) || setHas(IN_PLACE_VISITED, node)) continue;
-				if (inShadow) _executeHooks(hooks.uponSanitizeShadowNode, node, null);
-				_sanitizeElements(node, root);
-				_sanitizeAttributes(node, root);
-				if (_isDocumentFragment(node.content)) _sanitizeShadowDOM2(node.content);
-			}
-		};
-		const _markVisited = function _markVisited(node) {
-			if (IN_PLACE_VISITED) setAdd(IN_PLACE_VISITED, node);
 		};
 		const _isPatchLinkageAttribute = function _isPatchLinkageAttribute(lcName, lcTag) {
 			if (!SAFE_FOR_XML) return false;
@@ -2037,13 +1895,15 @@
 		};
 		const _neutralizePatchLinkage = function _neutralizePatchLinkage(root) {
 			if (!SAFE_FOR_XML) return;
-			_walkTree(root, (node) => {
+			const stack = [root];
+			while (stack.length > 0) {
+				const node = stack.pop();
 				const nodeType = _readNodeType(node);
 				if (nodeType === NODE_TYPE.processingInstruction || nodeType === NODE_TYPE.comment && regExpTest(COMMENT_MARKUP_PROBE, node.data)) {
 					try {
 						remove(node);
 					} catch (_) {}
-					return false;
+					continue;
 				}
 				if (nodeType === NODE_TYPE.element) {
 					const element = node;
@@ -2053,8 +1913,9 @@
 						if (element.hasAttribute && element.hasAttribute("for") && _isPatchLinkageAttribute("for", lcTag)) element.removeAttribute("for");
 					} catch (_) {}
 				}
-				return true;
-			});
+				const childNodes = getChildNodes(node);
+				if (childNodes) for (let i = childNodes.length - 1; i >= 0; --i) stack.push(childNodes[i]);
+			}
 		};
 		const _initDocument = function _initDocument(dirty) {
 			let doc = null;
@@ -2092,13 +1953,6 @@
 		};
 		const _scrubTemplateExpressions2 = function _scrubTemplateExpressions(node) {
 			var _node$querySelectorAl;
-			_scrubOwnCharacterData(node);
-			const templates = (_node$querySelectorAl = node.querySelectorAll) === null || _node$querySelectorAl === void 0 ? void 0 : _node$querySelectorAl.call(node, "template");
-			if (templates) arrayForEach(templates, (tmpl) => {
-				if (_isDocumentFragment(tmpl.content)) _scrubTemplateExpressions2(tmpl.content);
-			});
-		};
-		const _scrubOwnCharacterData = function _scrubOwnCharacterData(node) {
 			node.normalize();
 			const doc = getOwnerDocument ? getOwnerDocument(node) : node.ownerDocument;
 			const walker = createNodeIterator.call(doc || node, node, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_COMMENT | NodeFilter.SHOW_CDATA_SECTION | NodeFilter.SHOW_PROCESSING_INSTRUCTION, null);
@@ -2107,6 +1961,10 @@
 				currentNode.data = _stripTemplateExpressions(currentNode.data);
 				currentNode = walker.nextNode();
 			}
+			const templates = (_node$querySelectorAl = node.querySelectorAll) === null || _node$querySelectorAl === void 0 ? void 0 : _node$querySelectorAl.call(node, "template");
+			if (templates) arrayForEach(templates, (tmpl) => {
+				if (_isDocumentFragment(tmpl.content)) _scrubTemplateExpressions2(tmpl.content);
+			});
 		};
 		const _isClobbered = function _isClobbered(element) {
 			const realTagName = getNodeName ? getNodeName(element) : null;
@@ -2138,7 +1996,7 @@
 		}
 		const _isUnsafeNode = function _isUnsafeNode(currentNode, tagName) {
 			if (SAFE_FOR_XML && currentNode.hasChildNodes() && !_isNode(currentNode.firstElementChild) && regExpTest(ELEMENT_MARKUP_PROBE, currentNode.textContent) && regExpTest(ELEMENT_MARKUP_PROBE, currentNode.innerHTML)) return true;
-			if (SAFE_FOR_XML && LITERAL_TEXT_ELEMENTS[tagName] && _readNodeType(currentNode) === NODE_TYPE.element && _readNamespaceURI(currentNode) === HTML_NAMESPACE && (_isNode(currentNode.firstElementChild) || typeof currentNode.textContent === "string" && regExpTest(ELEMENT_MARKUP_PROBE, currentNode.textContent))) return true;
+			if (SAFE_FOR_XML && currentNode.namespaceURI === HTML_NAMESPACE && LITERAL_TEXT_ELEMENTS[tagName] && (_isNode(currentNode.firstElementChild) || typeof currentNode.textContent === "string" && regExpTest(LITERAL_TEXT_CLOSE[tagName], currentNode.textContent))) return true;
 			if (currentNode.nodeType === NODE_TYPE.processingInstruction) return true;
 			if (SAFE_FOR_XML && currentNode.nodeType === NODE_TYPE.comment && regExpTest(COMMENT_MARKUP_PROBE, currentNode.data)) return true;
 			return false;
@@ -2153,7 +2011,7 @@
 		};
 		const _sanitizeDisallowedNode = function _sanitizeDisallowedNode(currentNode, tagName, root) {
 			if (!FORBID_TAGS[tagName] && _isBasicCustomElement(tagName) && _matchesNameCheck(CUSTOM_ELEMENT_HANDLING.tagNameCheck, tagName)) return false;
-			if (KEEP_CONTENT && !FORBID_CONTENTS[tagName] && !FORBID_CONTENTS[stringToLowerCase(tagName)]) {
+			if (KEEP_CONTENT && !FORBID_CONTENTS[tagName]) {
 				const parentNode = getParentNode(currentNode);
 				const childNodes = getChildNodes(currentNode);
 				if (childNodes && parentNode) {
@@ -2177,7 +2035,6 @@
 			return true;
 		};
 		const _sanitizeElements = function _sanitizeElements(currentNode, root) {
-			_markVisited(currentNode);
 			_executeHooks(hooks.beforeSanitizeElements, currentNode, null);
 			if (_handleHookDetachedNode(currentNode, root)) return true;
 			if (_isClobbered(currentNode)) {
@@ -2197,10 +2054,7 @@
 			}
 			if (FORBID_TAGS[tagName] || !(EXTRA_ELEMENT_HANDLING.tagCheck instanceof Function && EXTRA_ELEMENT_HANDLING.tagCheck(tagName)) && !ALLOWED_TAGS[tagName]) {
 				const removed = _sanitizeDisallowedNode(currentNode, tagName, root);
-				if (removed === false) {
-					_executeHooks(hooks.afterSanitizeElements, currentNode, null);
-					if (_handleHookDetachedNode(currentNode, root)) return true;
-				}
+				if (removed === false) _executeHooks(hooks.afterSanitizeElements, currentNode, null);
 				return removed;
 			}
 			if (_readNodeType(currentNode) === NODE_TYPE.element && !_checkValidNamespace(currentNode)) {
@@ -2219,7 +2073,7 @@
 				}
 			}
 			_executeHooks(hooks.afterSanitizeElements, currentNode, null);
-			return _handleHookDetachedNode(currentNode, root);
+			return false;
 		};
 		const _isValidAttribute = function _isValidAttribute(lcTag, lcName, value) {
 			if (FORBID_ATTR[lcName]) return false;
@@ -2269,13 +2123,8 @@
 				return false;
 			}
 		};
-		const _isUnsafeAttributeValue = function _isUnsafeAttributeValue(name, value) {
-			if (SAFE_FOR_XML && regExpTest(/((--!?|])>)|<\/(style|script|title|xmp|textarea|noscript|iframe|noembed|noframes)/i, value)) return true;
-			return stringToLowerCase(name) === "attributename" && stringMatch(value, "href") !== null;
-		};
-		const _sanitizeAttributes = function _sanitizeAttributes(currentNode, root) {
+		const _sanitizeAttributes = function _sanitizeAttributes(currentNode) {
 			_executeHooks(hooks.beforeSanitizeAttributes, currentNode, null);
-			if (_handleHookDetachedNode(currentNode, root)) return;
 			const attributes = currentNode.attributes;
 			if (!attributes || _isClobbered(currentNode)) return;
 			ALLOWED_ATTR = _forkSharedAllowlist(hooks.uponSanitizeAttribute, ALLOWED_ATTR, DEFAULT_ALLOWED_ATTR, SET_CONFIG_ALLOWED_ATTR);
@@ -2306,7 +2155,11 @@
 					value = SANITIZE_NAMED_PROPS_PREFIX + value;
 					recreatedNamedProp = true;
 				}
-				if (_isUnsafeAttributeValue(name, value)) {
+				if (SAFE_FOR_XML && regExpTest(/((--!?|])>)|<\/(style|script|title|xmp|textarea|noscript|iframe|noembed|noframes)/i, value)) {
+					_removeAttribute(name, currentNode, attr);
+					continue;
+				}
+				if (lcName === "attributename" && stringMatch(value, "href")) {
 					_removeAttribute(name, currentNode, attr);
 					continue;
 				}
@@ -2330,7 +2183,6 @@
 				}
 			}
 			_executeHooks(hooks.afterSanitizeAttributes, currentNode, null);
-			_handleHookDetachedNode(currentNode, root);
 		};
 		const _sanitizeShadowDOM2 = function _sanitizeShadowDOM(fragment) {
 			let shadowNode = null;
@@ -2339,7 +2191,7 @@
 			while (shadowNode = shadowIterator.nextNode()) {
 				_executeHooks(hooks.uponSanitizeShadowNode, shadowNode, null);
 				_sanitizeElements(shadowNode, fragment);
-				_sanitizeAttributes(shadowNode, fragment);
+				_sanitizeAttributes(shadowNode);
 				if (_isDocumentFragment(shadowNode.content)) _sanitizeShadowDOM2(shadowNode.content);
 				if (_readNodeType(shadowNode) === NODE_TYPE.element) {
 					const innerSr = getShadowRoot(shadowNode);
@@ -2349,7 +2201,6 @@
 					}
 				}
 			}
-			if (SAFE_FOR_TEMPLATES) _scrubOwnCharacterData(fragment);
 			_executeHooks(hooks.afterSanitizeShadowDOM, fragment, null);
 		};
 		const _sanitizeAttachedShadowRoots = function _sanitizeAttachedShadowRoots(root) {
@@ -2413,8 +2264,6 @@
 			if (hooks.uponSanitizeAttribute.length > 0) ALLOWED_ATTR = clone(ALLOWED_ATTR);
 			DOMPurify.removed = [];
 			const inPlace = IN_PLACE && typeof dirty !== "string" && _isNode(dirty);
-			let inPlaceNodes = [];
-			const outerVisited = IN_PLACE_VISITED;
 			if (inPlace) {
 				_neutralizePatchLinkage(dirty);
 				const nn = _readNodeName(dirty);
@@ -2429,8 +2278,12 @@
 					_neutralizeRoot(dirty);
 					throw typeErrorCreate("root node is clobbered and cannot be sanitized in-place");
 				}
-				inPlaceNodes = _collectLiveNodes(dirty);
-				IN_PLACE_VISITED = setCreate();
+				try {
+					_sanitizeAttachedShadowRoots(dirty);
+				} catch (error) {
+					_neutralizeRoot(dirty);
+					throw error;
+				}
 			} else if (_isNode(dirty)) {
 				body = _initDocument("<!---->");
 				importedNode = body.ownerDocument.importNode(dirty, true);
@@ -2446,25 +2299,25 @@
 			if (body && FORCE_BODY) _forceRemove(body.firstChild);
 			const walkRoot = inPlace ? dirty : body;
 			try {
-				if (inPlace) _sanitizeAttachedShadowRoots(dirty);
 				const nodeIterator = _createNodeIterator(walkRoot);
 				while (currentNode = nodeIterator.nextNode()) {
 					_sanitizeElements(currentNode, walkRoot);
-					_sanitizeAttributes(currentNode, walkRoot);
+					_sanitizeAttributes(currentNode);
 					if (_isDocumentFragment(currentNode.content)) _sanitizeShadowDOM2(currentNode.content);
 				}
-				if (inPlace) _sanitizeUnvisitedNodes(dirty, inPlaceNodes);
 			} catch (error) {
 				if (inPlace) {
 					_neutralizeRoot(dirty);
-					_neutralizeDiscarded(dirty, inPlaceNodes);
+					arrayForEach(DOMPurify.removed, (entry) => {
+						if (entry.element) _neutralizeSubtree(entry.element);
+					});
 				}
 				throw error;
-			} finally {
-				IN_PLACE_VISITED = outerVisited;
 			}
 			if (inPlace) {
-				if (_neutralizeDiscarded(dirty, inPlaceNodes)) throw typeErrorCreate("a node selected for removal could not be safely returned; refusing to sanitize in place");
+				arrayForEach(DOMPurify.removed, (entry) => {
+					if (entry.element) _neutralizeSubtree(entry.element);
+				});
 				if (SAFE_FOR_TEMPLATES) _scrubTemplateExpressions2(dirty);
 				return dirty;
 			}
@@ -2501,7 +2354,6 @@
 			if (!CONFIG) _parseConfig({});
 			const lcTag = transformCaseFunc(tag);
 			const lcName = transformCaseFunc(attr);
-			if (typeof value === "string" && (_isUnsafeAttributeValue(attr, value) || !ALLOW_SELF_CLOSE_IN_ATTR && regExpTest(SELF_CLOSING_TAG, value))) return false;
 			return _isValidAttribute(lcTag, lcName, value);
 		};
 		DOMPurify.addHook = function(entryPoint, hookFunction) {
@@ -2526,7 +2378,7 @@
 		};
 		return DOMPurify;
 	}
-	var purify_default = createDOMPurify();
+	var purify = createDOMPurify();
 	var DEFAULT_CONFIG = {
 		USE_PROFILES: {
 			html: true,
@@ -2667,12 +2519,12 @@
 		if (!html) return html;
 		try {
 			html = sanitizeSvgContent(html);
-			if (typeof window === "undefined" || typeof purify_default?.sanitize !== "function") return basicSanitize(html);
-			if (!domPurifyHooksInstalled && typeof purify_default?.addHook === "function") {
-				purify_default.addHook("uponSanitizeAttribute", (_node, data) => {
+			if (typeof window === "undefined" || typeof purify?.sanitize !== "function") return basicSanitize(html);
+			if (!domPurifyHooksInstalled && typeof purify?.addHook === "function") {
+				purify.addHook("uponSanitizeAttribute", (_node, data) => {
 					if (data.attrName.toLowerCase() === "style" && isUnsafeInlineStyle(data.attrValue)) data.keepAttr = false;
 				});
-				purify_default.addHook("afterSanitizeAttributes", (node) => {
+				purify.addHook("afterSanitizeAttributes", (node) => {
 					const el = node;
 					if (!el || el.nodeType !== 1) return;
 					if (el.tagName.toLowerCase() !== "img") return;
@@ -2682,7 +2534,7 @@
 				});
 				domPurifyHooksInstalled = true;
 			}
-			return purify_default.sanitize(html, config);
+			return purify.sanitize(html, config);
 		} catch {
 			return basicSanitize(html);
 		}
@@ -9212,7 +9064,8 @@
 					shouldEnable: true,
 					method: "site-preference",
 					confidence: 1,
-					reasons: ["用户已为该站点开启自动启用"]
+					reasons: ["用户已为该站点开启自动启用"],
+					showManualEntry: true
 				});
 			}
 			if (!this.options.forceDetection) {
@@ -9230,7 +9083,8 @@
 						method: "builtin-rule",
 						confidence: 1,
 						rule: ruleMatch.rule,
-						reasons: [`Matched builtin rule: ${ruleMatch.rule.name || ruleMatch.rule.id}`]
+						reasons: [`Matched builtin rule: ${ruleMatch.rule.name || ruleMatch.rule.id}`],
+						showManualEntry: true
 					});
 				}
 			}
@@ -9252,7 +9106,8 @@
 				shouldEnable: true,
 				method: "site-preference",
 				confidence: 1,
-				reasons: ["用户已为该站点开启自动启用"]
+				reasons: ["用户已为该站点开启自动启用"],
+				showManualEntry: true
 			});
 			if (pageKind !== "chapter") return decide({
 				shouldEnable: false,
@@ -9264,7 +9119,8 @@
 				shouldEnable: false,
 				method: "manual",
 				confidence: 0,
-				reasons: ["Page does not appear to be novel content"]
+				reasons: ["Page does not appear to be novel content"],
+				showManualEntry: true
 			});
 			const detection = this.detectionEngine.detect(doc, doc.location?.href || window.location.href);
 			return decide({
@@ -9272,7 +9128,8 @@
 				method: "detection",
 				confidence: detection.confidence.overall,
 				detection,
-				reasons: detection.confidence.reasons
+				reasons: detection.confidence.reasons,
+				showManualEntry: true
 			});
 		}
 		async execute(doc = document) {
@@ -9333,11 +9190,11 @@
 		}
 		rememberSiteEnabled(doc) {
 			const url = doc.location?.href || window.location.href;
-			if (getPageKind(url, doc) !== "chapter") return;
+			if (getPageKind(url, doc) !== "chapter" && !getRuleManager().matchRule(url)) return;
 			try {
 				const hostname = new URL(url).hostname;
 				const storage = getRuleStorage();
-				if (storage.getSitePreference(hostname)) return;
+				if (storage.getSitePreference(hostname)?.enabled === true) return;
 				storage.setSitePreference(hostname, {
 					enabled: true,
 					timestamp: Date.now()
@@ -9669,7 +9526,9 @@
 		}
 		return res.trim();
 	}
-	var isSpecialBooleanAttr = makeMap(`itemscope,allowfullscreen,formnovalidate,ismap,nomodule,novalidate,playsinline,readonly`);
+	var specialBooleanAttrs = `itemscope,allowfullscreen,formnovalidate,ismap,nomodule,novalidate,readonly`;
+	var isSpecialBooleanAttr = makeMap(specialBooleanAttrs);
+	specialBooleanAttrs + "";
 	function includeBooleanAttr(value) {
 		return !!value || value === "";
 	}
@@ -10349,32 +10208,16 @@
 	};
 	function iterator(self, method, wrapValue) {
 		const arr = shallowReadArray(self);
-		const methodFn = arr[method];
-		const iter = methodFn.call(arr);
+		const iter = arr[method]();
 		if (arr !== self && !isShallow(self)) {
-			if (iter[Symbol.toStringTag] === "Array Iterator") {
-				const wrapped = Object.create(Object.getPrototypeOf(iter));
-				wrapped.next = () => wrapResult(iter.next(), wrapValue);
-				if (methodFn !== arrayProto[method]) Object.defineProperties(wrapped, {
-					return: { get() {
-						const fn = iter.return;
-						return typeof fn === "function" ? fn.bind(iter) : fn;
-					} },
-					throw: { get() {
-						const fn = iter.throw;
-						return typeof fn === "function" ? fn.bind(iter) : fn;
-					} }
-				});
-				return wrapped;
-			}
 			iter._next = iter.next;
-			iter.next = () => wrapResult(iter._next(), wrapValue);
+			iter.next = () => {
+				const result = iter._next();
+				if (!result.done) result.value = wrapValue(result.value);
+				return result;
+			};
 		}
 		return iter;
-	}
-	function wrapResult(result, wrapValue) {
-		if (!result.done) result.value = wrapValue(result.value);
-		return result;
 	}
 	var arrayProto = Array.prototype;
 	function apply(self, method, fn, thisArg, wrappedRetFn, args) {
@@ -10678,7 +10521,6 @@
 		return (target, key, receiver) => {
 			if (key === "__v_isReactive") return !isReadonly2;
 			else if (key === "__v_isReadonly") return isReadonly2;
-			else if (key === "__v_isShallow") return shallow;
 			else if (key === "__v_raw") return target;
 			return Reflect.get(hasOwn(instrumentations, key) && key in target ? instrumentations : target, key, receiver);
 		};
@@ -10783,9 +10625,6 @@
 			}
 		}
 	};
-	function triggerRef(ref2) {
-		if (ref2.dep) ref2.dep.trigger();
-	}
 	function unref(ref2) {
 		return isRef(ref2) ? ref2.value : ref2;
 	}
@@ -10957,11 +10796,9 @@
 		if (once && cb) {
 			const _cb = cb;
 			cb = (...args) => {
-				try {
-					return _cb(...args);
-				} finally {
-					watchHandle();
-				}
+				const res = _cb(...args);
+				watchHandle();
+				return res;
 			};
 		}
 		let oldValue = isMultiSource ? new Array(source.length).fill(INITIAL_WATCHER_VALUE) : INITIAL_WATCHER_VALUE;
@@ -10970,11 +10807,10 @@
 			if (cb) {
 				const newValue = effect.run();
 				if (immediateFirstRun || deep || forceTrigger || (isMultiSource ? newValue.some((v, i) => hasChanged(v, oldValue[i])) : hasChanged(newValue, oldValue))) {
+					if (cleanup) cleanup();
 					const currentWatcher = activeWatcher;
-					pauseTracking();
+					activeWatcher = effect;
 					try {
-						if (cleanup) cleanup();
-						activeWatcher = effect;
 						const args = [
 							newValue,
 							oldValue === INITIAL_WATCHER_VALUE ? void 0 : isMultiSource && oldValue[0] === INITIAL_WATCHER_VALUE ? [] : oldValue,
@@ -10984,7 +10820,6 @@
 						call ? call(cb, 3, args) : cb(...args);
 					} finally {
 						activeWatcher = currentWatcher;
-						resetTracking();
 					}
 				}
 			} else effect.run();
@@ -11126,33 +10961,23 @@
 		} else for (let i = 0; i < cb.length; i++) pendingPostFlushCbs.push(cb[i]);
 		queueFlush();
 	}
-	function flushPreFlushCbs(instance, minUid, seen, i = flushIndex + 1) {
+	function flushPreFlushCbs(instance, seen, i = flushIndex + 1) {
 		for (; i < queue.length; i++) {
 			const cb = queue[i];
 			if (cb && cb.flags & 2) {
-				if (instance && cb.id !== instance.uid || minUid !== void 0 && !(cb.id >= minUid)) continue;
+				if (instance && cb.id !== instance.uid) continue;
 				queue.splice(i, 1);
-				i = instance ? i - 1 : flushIndex;
+				i--;
 				if (cb.flags & 4) cb.flags &= -2;
 				cb();
 				if (!(cb.flags & 4)) cb.flags &= -2;
 			}
 		}
 	}
-	function flushPostFlushCbs(seen, skip, minUid = 0) {
+	function flushPostFlushCbs(seen) {
 		if (pendingPostFlushCbs.length) {
-			let cbs = pendingPostFlushCbs;
-			let kept = 0;
-			if (skip) {
-				cbs = [];
-				for (let i = 0; i < pendingPostFlushCbs.length; i++) {
-					const cb = pendingPostFlushCbs[i];
-					if (cb.i !== void 0 ? !cb.i || cb.i.uid < minUid : skip.has(cb)) pendingPostFlushCbs[kept++] = cb;
-					else cbs.push(cb);
-				}
-			}
-			const deduped = [...new Set(cbs)].sort((a, b) => getId(a) - getId(b));
-			pendingPostFlushCbs.length = kept;
+			const deduped = [...new Set(pendingPostFlushCbs)].sort((a, b) => getId(a) - getId(b));
+			pendingPostFlushCbs.length = 0;
 			if (activePostFlushCbs) {
 				for (let i = 0; i < deduped.length; i++) activePostFlushCbs.push(deduped[i]);
 				return;
@@ -11166,22 +10991,6 @@
 			}
 			activePostFlushCbs = null;
 			postFlushIndex = 0;
-		}
-	}
-	var isFlushing = false;
-	function flushOnAppMount(fn, minUid) {
-		if (isFlushing) {
-			fn();
-			return;
-		}
-		const queued = minUid === void 0 ? void 0 : new Set(pendingPostFlushCbs);
-		fn();
-		isFlushing = true;
-		try {
-			flushPreFlushCbs(void 0, minUid);
-			flushPostFlushCbs(void 0, queued, minUid);
-		} finally {
-			isFlushing = false;
 		}
 	}
 	var getId = (job) => job.id == null ? job.flags & 2 ? -1 : Infinity : job.id;
@@ -11323,7 +11132,6 @@
 		baseWatchOptions.call = (fn, type, args) => callWithAsyncErrorHandling(fn, instance, type, args);
 		let isPre = false;
 		if (flush === "post") baseWatchOptions.scheduler = (job) => {
-			job.i = instance;
 			queuePostRenderEffect(job, instance && instance.suspense);
 		};
 		else if (flush !== "sync") {
@@ -11387,6 +11195,10 @@
 		onAfterAppear: TransitionHookValidator,
 		onAppearCancelled: TransitionHookValidator
 	};
+	var recursiveGetSubtree = (instance) => {
+		const subTree = instance.subTree;
+		return subTree.component ? recursiveGetSubtree(subTree.component) : subTree;
+	};
 	var BaseTransitionImpl = {
 		name: `BaseTransition`,
 		props: BaseTransitionPropsValidators,
@@ -11405,7 +11217,7 @@
 				let enterHooks = resolveTransitionHooks(innerChild, rawProps, state, instance, (hooks) => enterHooks = hooks);
 				if (innerChild.type !== Comment) setTransitionHooks(innerChild, enterHooks);
 				let oldInnerChild = instance.subTree && getInnerChild$1(instance.subTree);
-				if (oldInnerChild && oldInnerChild.type !== Comment && !isSameVNodeType(oldInnerChild, innerChild) && getTransitionRoot(instance.subTree)) {
+				if (oldInnerChild && oldInnerChild.type !== Comment && !isSameVNodeType(oldInnerChild, innerChild) && recursiveGetSubtree(instance).type !== Comment) {
 					let leavingHooks = resolveTransitionHooks(oldInnerChild, rawProps, state, instance);
 					setTransitionHooks(oldInnerChild, leavingHooks);
 					if (mode === "out-in" && innerChild.type !== Comment) {
@@ -11483,14 +11295,7 @@
 				}
 				if (el[leaveCbKey]) el[leaveCbKey](true);
 				const leavingVNode = leavingVNodesCache[key];
-				if (leavingVNode && isSameVNodeType(vnode, leavingVNode)) {
-					let leavingCb = leavingVNode.el[leaveCbKey];
-					if (!leavingCb) {
-						const leavingRoot = getTransitionRoot(leavingVNode);
-						leavingCb = leavingRoot && leavingRoot.el[leaveCbKey];
-					}
-					if (leavingCb) leavingCb();
-				}
+				if (leavingVNode && isSameVNodeType(vnode, leavingVNode) && leavingVNode.el[leaveCbKey]) leavingVNode.el[leaveCbKey]();
 				callHook(hook, [el]);
 			},
 			enter(el) {
@@ -11573,13 +11378,7 @@
 		} else if (vnode.shapeFlag & 128) {
 			vnode.ssContent.transition = hooks.clone(vnode.ssContent);
 			vnode.ssFallback.transition = hooks.clone(vnode.ssFallback);
-		} else {
-			vnode.transition = hooks;
-			if (vnode.type === Fragment && isArray(vnode.children)) {
-				const child = filterSingleRoot(vnode.children, false);
-				if (child) setTransitionHooks(child, hooks);
-			}
-		}
+		} else vnode.transition = hooks;
 	}
 	function getTransitionRawChildren(children, keepComment = false, parentKey) {
 		let ret = [];
@@ -11594,14 +11393,6 @@
 		}
 		if (keyedFragmentCount > 1) for (let i = 0; i < ret.length; i++) ret[i].patchFlag = -2;
 		return ret;
-	}
-	function getTransitionRoot(vnode) {
-		if (vnode.component) return getTransitionRoot(vnode.component.subTree);
-		if (vnode.type === Fragment) {
-			const child = isArray(vnode.children) && filterSingleRoot(vnode.children, false);
-			return child ? getTransitionRoot(child) : void 0;
-		}
-		if (vnode.type !== Comment) return vnode;
 	}
 	function defineComponent(options, extraOptions) {
 		return isFunction(options) ? (() => extend({ name: options.name }, extraOptions, { setup: options }))() : options;
@@ -11745,11 +11536,8 @@
 			ret = new Array(source.length);
 			for (let i = 0, l = source.length; i < l; i++) ret[i] = renderItem(needsWrap ? isReadonlySource ? toReadonly(toReactive(source[i])) : toReactive(source[i]) : source[i], i, void 0, cached && cached[i]);
 		} else if (typeof source === "number") {
-			if (!Number.isInteger(source) || source < 0) ret = [];
-			else {
-				ret = new Array(source);
-				for (let i = 0; i < source; i++) ret[i] = renderItem(i + 1, i, void 0, cached && cached[i]);
-			}
+			ret = new Array(source);
+			for (let i = 0; i < source; i++) ret[i] = renderItem(i + 1, i, void 0, cached && cached[i]);
 		} else if (isObject(source)) {
 			if (source[Symbol.iterator]) ret = Array.from(source, (item, i) => renderItem(item, i, void 0, cached && cached[i]));
 			else {
@@ -12041,19 +11829,6 @@
 		setCurrentRenderingInstance(prev);
 		return result;
 	}
-	function filterSingleRoot(children, recurse = true) {
-		let singleRoot;
-		for (let i = 0; i < children.length; i++) {
-			const child = children[i];
-			if (isVNode(child)) {
-				if (child.type !== Comment || child.children === "v-if") {
-					if (singleRoot) return;
-					else singleRoot = child;
-				}
-			} else return;
-		}
-		return singleRoot;
-	}
 	var getFunctionalFallthrough = (attrs) => {
 		let res;
 		for (const key in attrs) if (key === "class" || key === "style" || isOn(key)) (res || (res = {}))[key] = attrs[key];
@@ -12097,7 +11872,7 @@
 		if (nextKeys.length !== Object.keys(prevProps).length) return true;
 		for (let i = 0; i < nextKeys.length; i++) {
 			const key = nextKeys[i];
-			if (!hasOwn(prevProps, key) || hasPropValueChanged(nextProps, prevProps, key) && !isEmitListener(emitsOptions, key)) return true;
+			if (hasPropValueChanged(nextProps, prevProps, key) && !isEmitListener(emitsOptions, key)) return true;
 		}
 		return false;
 	}
@@ -12521,8 +12296,7 @@
 			for (let i = 0; i < newChildren.length; i++) {
 				const oldVNode = oldChildren[i];
 				const newVNode = newChildren[i];
-				const oldEl = oldVNode.el || resolveAsyncComponentPlaceholder(oldVNode);
-				const container = oldEl && (oldVNode.type === Fragment || !isSameVNodeType(oldVNode, newVNode) || oldVNode.shapeFlag & 198) ? hostParentNode(oldEl) : fallbackContainer;
+				const container = oldVNode.el && (oldVNode.type === Fragment || !isSameVNodeType(oldVNode, newVNode) || oldVNode.shapeFlag & 198) ? hostParentNode(oldVNode.el) : fallbackContainer;
 				patch(oldVNode, newVNode, container, null, parentComponent, parentSuspense, namespace, slotScopeIds, true);
 			}
 		};
@@ -12566,7 +12340,7 @@
 			if (isKeepAlive(initialVNode)) instance.ctx.renderer = internals;
 			setupComponent(instance, false, optimized);
 			if (instance.asyncDep) {
-				parentSuspense && parentSuspense.registerDep(instance, setupRenderEffect, optimized, namespace);
+				parentSuspense && parentSuspense.registerDep(instance, setupRenderEffect, optimized);
 				if (!initialVNode.el) {
 					const placeholder = instance.subTree = createVNode(Comment);
 					processCommentNode(null, placeholder, container, anchor);
@@ -12579,7 +12353,6 @@
 			if (shouldUpdateComponent(n1, n2, optimized)) {
 				if (instance.asyncDep && !instance.asyncResolved) {
 					n2.el = n1.el;
-					n2.placeholder = n1.placeholder;
 					updateComponentPreRender(instance, n2, optimized);
 					return;
 				} else {
@@ -12588,7 +12361,6 @@
 				}
 			} else {
 				n2.el = n1.el;
-				n2.placeholder = n1.placeholder;
 				instance.vnode = n2;
 			}
 		};
@@ -12896,8 +12668,7 @@
 		};
 		const remove = (vnode) => {
 			const { type, el, anchor, transition } = vnode;
-			const isFragment = type === Fragment;
-			if (isFragment && !transition) {
+			if (type === Fragment) {
 				removeFragment(el, anchor);
 				return;
 			}
@@ -12906,18 +12677,14 @@
 				if (transition && !transition.persisted && transition.afterLeave) transition.afterLeave();
 				return;
 			}
-			const leavingNode = isFragment ? getTransitionRoot(vnode) : vnode;
 			const performRemove = () => {
-				if (isFragment) {
-					if (hostParentNode(el)) removeFragment(el, anchor);
-				} else hostRemove(el);
+				hostRemove(el);
 				if (transition && !transition.persisted && transition.afterLeave) transition.afterLeave();
 			};
-			if (leavingNode && leavingNode.shapeFlag & 1 && transition && !transition.persisted) {
+			if (vnode.shapeFlag & 1 && transition && !transition.persisted) {
 				const { leave, delayLeave } = transition;
-				const leavingEl = leavingNode.el;
-				const performLeave = () => leave(leavingEl, performRemove);
-				if (delayLeave) delayLeave(leavingEl, performRemove, performLeave);
+				const performLeave = () => leave(el, performRemove);
+				if (delayLeave) delayLeave(vnode.el, performRemove, performLeave);
 				else performLeave();
 			} else performRemove();
 		};
@@ -12958,13 +12725,22 @@
 			const teleportEnd = el && el[TeleportEndKey];
 			return teleportEnd ? hostNextSibling(teleportEnd) : el;
 		};
+		let isFlushing = false;
 		const render = (vnode, container, namespace) => {
-			flushOnAppMount(() => {
-				if (vnode == null) {
-					if (container._vnode) unmount(container._vnode, null, null, true);
-				} else patch(container._vnode || null, vnode, container, null, null, null, namespace);
-				container._vnode = vnode;
-			}, vnode && container._vnode ? void 0 : vnode && vnode.component ? vnode.component.uid : getNextUid());
+			let instance;
+			if (vnode == null) {
+				if (container._vnode) {
+					unmount(container._vnode, null, null, true);
+					instance = container._vnode.component;
+				}
+			} else patch(container._vnode || null, vnode, container, null, null, null, namespace);
+			container._vnode = vnode;
+			if (!isFlushing) {
+				isFlushing = true;
+				flushPreFlushCbs(instance);
+				flushPostFlushCbs();
+				isFlushing = false;
+			}
 		};
 		const internals = {
 			p: patch,
@@ -13318,9 +13094,6 @@
 	}
 	var emptyAppContext = createAppContext();
 	var uid = 0;
-	function getNextUid() {
-		return uid;
-	}
 	function createComponentInstance(vnode, parent, suspense) {
 		const type = vnode.type;
 		const appContext = (parent ? parent.appContext : vnode.appContext) || emptyAppContext;
@@ -13531,7 +13304,7 @@
 			setBlockTracking(1);
 		}
 	}
-	var version = "3.5.44";
+	var version = "3.5.43";
 	var policy = void 0;
 	var tt = typeof window !== "undefined" && window.trustedTypes;
 	if (tt) try {
@@ -13876,7 +13649,7 @@
 			}
 		} else if (prev) el.removeAttribute("style");
 		if (vShowOriginalDisplay in el) {
-			if (!isCssString || prev !== next) el[vShowOriginalDisplay] = hasControlledDisplay ? style.display : "";
+			el[vShowOriginalDisplay] = hasControlledDisplay ? style.display : "";
 			if (el[vShowHidden]) style.display = "none";
 		}
 	}
@@ -14397,13 +14170,12 @@ ul, ol {
 		a.rel = "noopener";
 		if (typeof blob === "string") {
 			a.href = blob;
-			if (a.origin !== location.origin) {
-				if (corsEnabled(a.href)) download(blob, name, opts);
-				else {
-					a.target = "_blank";
-					click(a);
-				}
-			} else click(a);
+			if (a.origin !== location.origin) if (corsEnabled(a.href)) download(blob, name, opts);
+			else {
+				a.target = "_blank";
+				click(a);
+			}
+			else click(a);
 		} else {
 			a.href = URL.createObjectURL(blob);
 			setTimeout(function() {
@@ -14415,17 +14187,16 @@ ul, ol {
 		}
 	}
 	function msSaveAs(blob, name = "download", opts) {
-		if (typeof blob === "string") {
-			if (corsEnabled(blob)) download(blob, name, opts);
-			else {
-				const a = document.createElement("a");
-				a.href = blob;
-				a.target = "_blank";
-				setTimeout(function() {
-					click(a);
-				});
-			}
-		} else navigator.msSaveOrOpenBlob(bom(blob, opts), name);
+		if (typeof blob === "string") if (corsEnabled(blob)) download(blob, name, opts);
+		else {
+			const a = document.createElement("a");
+			a.href = blob;
+			a.target = "_blank";
+			setTimeout(function() {
+				click(a);
+			});
+		}
+		else navigator.msSaveOrOpenBlob(bom(blob, opts), name);
 	}
 	function fileSaverSaveAs(blob, name, opts, popup) {
 		popup = popup || open("", "_blank");
@@ -14510,11 +14281,8 @@ ul, ol {
 			if (!Object.hasOwn(patchToApply, key)) continue;
 			const subPatch = patchToApply[key];
 			const targetValue = target[key];
-			if (isPlainObject(targetValue) && isPlainObject(subPatch) && Object.hasOwn(target, key) && !isRef(subPatch) && !isReactive(subPatch)) {
-				target[key] = mergeReactiveObjects(targetValue, subPatch);
-				const targetRef = toRaw(target)[key];
-				if (isRef(targetRef) && isShallow(targetRef)) triggerRef(targetRef);
-			} else target[key] = subPatch;
+			if (isPlainObject(targetValue) && isPlainObject(subPatch) && Object.hasOwn(target, key) && !isRef(subPatch) && !isReactive(subPatch)) target[key] = mergeReactiveObjects(targetValue, subPatch);
+			else target[key] = subPatch;
 		}
 		return target;
 	}
@@ -14665,12 +14433,10 @@ ul, ol {
 			const prop = setupStore[key];
 			if (isRef(prop) && !isComputed(prop) || isReactive(prop)) {
 				if (!isOptionsStore) {
-					if (initialState && shouldHydrate(prop)) {
-						if (isRef(prop)) prop.value = initialState[key];
-						else {
-							if (prop instanceof Set || prop instanceof Map) prop.clear();
-							mergeReactiveObjects(prop, initialState[key]);
-						}
+					if (initialState && shouldHydrate(prop)) if (isRef(prop)) prop.value = initialState[key];
+					else {
+						if (prop instanceof Set || prop instanceof Map) prop.clear();
+						mergeReactiveObjects(prop, initialState[key]);
 					}
 					pinia.state.value[$id][key] = prop;
 				}
@@ -22337,10 +22103,7 @@ ul, ol {
 		emits: ["toggleDrawer", "openSettings"],
 		setup(__props) {
 			return (_ctx, _cache) => {
-				return openBlock(), createBlock(Transition, {
-					name: "mnr-fade-slide",
-					persisted: ""
-				}, {
+				return openBlock(), createBlock(Transition, { name: "mnr-fade-slide" }, {
 					default: withCtx(() => [withDirectives(createBaseVNode("div", _hoisted_1$5, [createBaseVNode("button", {
 						class: "mnr-fab",
 						title: "目录 (C)",
@@ -22988,62 +22751,55 @@ ul, ol {
 	var _hoisted_24 = ["checked"];
 	var _hoisted_25 = { class: "mnr-settings-group" };
 	var _hoisted_26 = { class: "mnr-settings-group-content" };
-	var _hoisted_27 = { class: "mnr-switch-row" };
-	var _hoisted_28 = ["checked"];
-	var _hoisted_29 = {
+	var _hoisted_27 = {
 		class: "mnr-settings-fieldset",
 		"aria-describedby": "mnr-protection-help"
 	};
-	var _hoisted_30 = { class: "mnr-segmented-control" };
-	var _hoisted_31 = ["aria-pressed"];
-	var _hoisted_32 = ["aria-pressed"];
-	var _hoisted_33 = ["value"];
-	var _hoisted_34 = { class: "mnr-cleanup-fields" };
-	var _hoisted_35 = {
+	var _hoisted_28 = { class: "mnr-segmented-control" };
+	var _hoisted_29 = ["aria-pressed"];
+	var _hoisted_30 = ["aria-pressed"];
+	var _hoisted_31 = ["value"];
+	var _hoisted_32 = { class: "mnr-cleanup-fields" };
+	var _hoisted_33 = {
 		id: "mnr-custom-cleanup-site",
 		class: "mnr-field-help mnr-cleanup-site"
 	};
-	var _hoisted_36 = { class: "mnr-cleanup-add" };
-	var _hoisted_37 = [
+	var _hoisted_34 = { class: "mnr-cleanup-add" };
+	var _hoisted_35 = [
 		"aria-describedby",
 		"aria-invalid",
 		"value"
 	];
-	var _hoisted_38 = ["disabled"];
-	var _hoisted_39 = {
+	var _hoisted_36 = ["disabled"];
+	var _hoisted_37 = {
 		key: 0,
 		id: "mnr-custom-cleanup-draft-error",
 		class: "mnr-field-error",
 		role: "status"
 	};
-	var _hoisted_40 = [
+	var _hoisted_38 = [
 		"aria-describedby",
 		"aria-invalid",
 		"value"
 	];
-	var _hoisted_41 = {
+	var _hoisted_39 = {
 		key: 1,
 		id: "mnr-custom-cleanup-error",
 		class: "mnr-field-error",
 		role: "status"
 	};
-	var _hoisted_42 = { class: "mnr-cleanup-guide" };
-	var _hoisted_43 = { class: "mnr-settings-footer" };
+	var _hoisted_40 = { class: "mnr-cleanup-guide" };
+	var _hoisted_41 = { class: "mnr-settings-footer" };
 	var SettingsPanel_default = _plugin_vue_export_helper_default(defineComponent({
 		__name: "SettingsPanel",
 		props: {
 			visible: { type: Boolean },
-			siteAutoEnable: {
-				type: Boolean,
-				default: true
-			},
 			customCleanupHostname: { default: "" }
 		},
 		emits: [
 			"close",
 			"copyDiagnostics",
 			"exit",
-			"siteAutoEnableChange",
 			"textConversionChange",
 			"protectionModeChange"
 		],
@@ -23140,9 +22896,6 @@ ul, ol {
 			}
 			function updateBehavior(key, event) {
 				configStore.updateBehavior({ [key]: event.currentTarget.checked });
-			}
-			function updateSiteAutoEnable(event) {
-				emit("siteAutoEnableChange", event.currentTarget.checked);
 			}
 			function updateCustomCSS(event) {
 				configStore.setCustomCSS(event.currentTarget.value);
@@ -23356,29 +23109,24 @@ ul, ol {
 									onChange: _cache[11] || (_cache[11] = ($event) => updateBehavior("swipeGestures", $event))
 								}, null, 40, _hoisted_24)])
 							])]),
-							createBaseVNode("details", _hoisted_25, [_cache[37] || (_cache[37] = createBaseVNode("summary", null, "本站与高级", -1)), createBaseVNode("div", _hoisted_26, [
-								createBaseVNode("label", _hoisted_27, [_cache[28] || (_cache[28] = createBaseVNode("span", null, "本站自动进入阅读模式", -1)), createBaseVNode("input", {
-									type: "checkbox",
-									checked: __props.siteAutoEnable,
-									onChange: updateSiteAutoEnable
-								}, null, 40, _hoisted_28)]),
-								createBaseVNode("fieldset", _hoisted_29, [
-									_cache[29] || (_cache[29] = createBaseVNode("legend", null, "网站防护", -1)),
-									createBaseVNode("div", _hoisted_30, [createBaseVNode("button", {
+							createBaseVNode("details", _hoisted_25, [_cache[36] || (_cache[36] = createBaseVNode("summary", null, "本站与高级", -1)), createBaseVNode("div", _hoisted_26, [
+								createBaseVNode("fieldset", _hoisted_27, [
+									_cache[28] || (_cache[28] = createBaseVNode("legend", null, "网站防护", -1)),
+									createBaseVNode("div", _hoisted_28, [createBaseVNode("button", {
 										class: normalizeClass(["mnr-segment", { active: unref(configStore).protection.mode === "standard" }]),
 										"aria-pressed": unref(configStore).protection.mode === "standard",
 										onClick: _cache[12] || (_cache[12] = ($event) => emit("protectionModeChange", "standard"))
-									}, " 标准 ", 10, _hoisted_31), createBaseVNode("button", {
+									}, " 标准 ", 10, _hoisted_29), createBaseVNode("button", {
 										class: normalizeClass(["mnr-segment", { active: unref(configStore).protection.mode === "aggressive" }]),
 										"aria-pressed": unref(configStore).protection.mode === "aggressive",
 										onClick: _cache[13] || (_cache[13] = ($event) => emit("protectionModeChange", "aggressive"))
-									}, " 强力 ", 10, _hoisted_32)]),
-									_cache[30] || (_cache[30] = createBaseVNode("p", {
+									}, " 强力 ", 10, _hoisted_30)]),
+									_cache[29] || (_cache[29] = createBaseVNode("p", {
 										id: "mnr-protection-help",
 										class: "mnr-field-help mnr-protection-help"
 									}, " 强力模式会额外停止页面定时器，清理可疑脚本和遮罩层，退出阅读后也无法恢复。 ", -1))
 								]),
-								_cache[36] || (_cache[36] = createBaseVNode("label", {
+								_cache[35] || (_cache[35] = createBaseVNode("label", {
 									class: "mnr-field-label",
 									for: "mnr-custom-css"
 								}, "自定义 CSS", -1)),
@@ -23390,15 +23138,15 @@ ul, ol {
 									placeholder: ".mnr-reader-content { ... }",
 									value: unref(configStore).customCSS,
 									onInput: updateCustomCSS
-								}, null, 40, _hoisted_33),
-								createBaseVNode("div", _hoisted_34, [
-									_cache[33] || (_cache[33] = createBaseVNode("h4", { class: "mnr-field-label" }, "自定义正则清理", -1)),
-									_cache[34] || (_cache[34] = createBaseVNode("p", {
+								}, null, 40, _hoisted_31),
+								createBaseVNode("div", _hoisted_32, [
+									_cache[32] || (_cache[32] = createBaseVNode("h4", { class: "mnr-field-label" }, "自定义正则清理", -1)),
+									_cache[33] || (_cache[33] = createBaseVNode("p", {
 										id: "mnr-custom-cleanup-help",
 										class: "mnr-field-help"
 									}, " 每行一条正则，匹配后隐藏整段正文。 ", -1)),
-									createBaseVNode("p", _hoisted_35, " 本站 · " + toDisplayString(__props.customCleanupHostname || "无法识别"), 1),
-									createBaseVNode("div", _hoisted_36, [createBaseVNode("input", {
+									createBaseVNode("p", _hoisted_33, " 本站 · " + toDisplayString(__props.customCleanupHostname || "无法识别"), 1),
+									createBaseVNode("div", _hoisted_34, [createBaseVNode("input", {
 										id: "mnr-custom-cleanup-draft",
 										class: "mnr-cleanup-input",
 										type: "text",
@@ -23409,14 +23157,14 @@ ul, ol {
 										placeholder: "输入本站正则",
 										value: customCleanupDraft.value,
 										onInput: updateCustomCleanupDraft
-									}, null, 40, _hoisted_37), createBaseVNode("button", {
+									}, null, 40, _hoisted_35), createBaseVNode("button", {
 										type: "button",
 										class: "mnr-secondary-action mnr-cleanup-add-button",
 										disabled: !__props.customCleanupHostname || !customCleanupDraft.value.trim(),
 										onClick: addCurrentSiteCleanupRule
-									}, " 添加规则 ", 8, _hoisted_38)]),
-									customCleanupDraftError.value ? (openBlock(), createElementBlock("p", _hoisted_39, toDisplayString(customCleanupDraftError.value), 1)) : createCommentVNode("", true),
-									_cache[35] || (_cache[35] = createBaseVNode("label", {
+									}, " 添加规则 ", 8, _hoisted_36)]),
+									customCleanupDraftError.value ? (openBlock(), createElementBlock("p", _hoisted_37, toDisplayString(customCleanupDraftError.value), 1)) : createCommentVNode("", true),
+									_cache[34] || (_cache[34] = createBaseVNode("label", {
 										class: "mnr-cleanup-editor-label",
 										for: "mnr-custom-cleanup-regex"
 									}, "全部规则", -1)),
@@ -23430,11 +23178,11 @@ ul, ol {
 										placeholder: "例如：小说免费阅读，请收藏.*",
 										value: unref(configStore).customCleanupRegex,
 										onInput: updateCustomCleanupRegex
-									}, null, 40, _hoisted_40),
-									customCleanupErrors.value.length > 0 ? (openBlock(), createElementBlock("p", _hoisted_41, toDisplayString(customCleanupErrorMessage.value), 1)) : createCommentVNode("", true),
-									createBaseVNode("details", _hoisted_42, [
-										_cache[31] || (_cache[31] = createBaseVNode("summary", null, "规则语法与数量限制", -1)),
-										_cache[32] || (_cache[32] = createBaseVNode("p", null, [
+									}, null, 40, _hoisted_38),
+									customCleanupErrors.value.length > 0 ? (openBlock(), createElementBlock("p", _hoisted_39, toDisplayString(customCleanupErrorMessage.value), 1)) : createCommentVNode("", true),
+									createBaseVNode("details", _hoisted_40, [
+										_cache[30] || (_cache[30] = createBaseVNode("summary", null, "规则语法与数量限制", -1)),
+										_cache[31] || (_cache[31] = createBaseVNode("p", null, [
 											createTextVNode(" 无前缀时对所有网站生效；以 "),
 											createBaseVNode("code", null, "@host=域名"),
 											createTextVNode(" 开头时仅对该网站生效。 上方“添加规则”会自动填写本站前缀。 ")
@@ -23448,7 +23196,7 @@ ul, ol {
 								}, " 复制诊断信息 ")
 							])])
 						]),
-						createBaseVNode("footer", _hoisted_43, [createBaseVNode("button", {
+						createBaseVNode("footer", _hoisted_41, [createBaseVNode("button", {
 							class: "mnr-exit-btn",
 							onClick: _cache[15] || (_cache[15] = ($event) => emit("exit"))
 						}, "退出阅读模式")])
@@ -23457,7 +23205,7 @@ ul, ol {
 				});
 			};
 		}
-	}), [["__scopeId", "data-v-7e7dbfc6"]]);
+	}), [["__scopeId", "data-v-caf5eea6"]]);
 	var _hoisted_1 = ["inert"];
 	var _hoisted_2 = {
 		key: 0,
@@ -23490,18 +23238,12 @@ ul, ol {
 	var SCROLL_BOUNDARY_EPSILON_PX = 4;
 	var ReaderView_default = _plugin_vue_export_helper_default(defineComponent({
 		__name: "ReaderView",
-		props: { siteAutoEnable: {
-			type: Boolean,
-			default: true
-		} },
 		emits: [
 			"copyDiagnostics",
 			"exit",
-			"siteAutoEnableChange",
 			"protectionModeChange"
 		],
 		setup(__props, { emit: __emit }) {
-			const props = __props;
 			const emit = __emit;
 			const readerStore = useReaderStore();
 			const configStore = useConfigStore();
@@ -23510,7 +23252,6 @@ ul, ol {
 			const isNavigating = ref(false);
 			const showControls = ref(true);
 			const chapterRefs = new Map();
-			const siteAutoEnableValue = ref(props.siteAutoEnable);
 			const { settingsVisible, drawerOpen, hasOpenPanel, toggleDrawer, closeDrawer, openSettings, closeSettings, toggleSettings } = useReaderUIControls({
 				readerStore,
 				showControls
@@ -23611,11 +23352,6 @@ ul, ol {
 			function handleClearCache() {
 				readerStore.clearPersistedCache();
 				readerStore.showToast("离线缓存已清除", "info");
-			}
-			function handleSiteAutoEnableChange(enabled) {
-				siteAutoEnableValue.value = enabled;
-				emit("siteAutoEnableChange", enabled);
-				readerStore.showToast(enabled ? "已开启本站自动进入" : "已关闭本站自动进入", "info");
 			}
 			function sectionProgressLabel(progress) {
 				return progress.total ? `正在加载本章后续内容 ${progress.loaded}/${progress.total}` : `正在加载本章后续内容 ${progress.loaded}`;
@@ -23839,17 +23575,14 @@ ul, ol {
 					], 8, _hoisted_1),
 					createVNode(SettingsPanel_default, {
 						visible: unref(settingsVisible),
-						"site-auto-enable": siteAutoEnableValue.value,
 						"custom-cleanup-hostname": customCleanupHostname.value,
 						onClose: unref(closeSettings),
 						onTextConversionChange: unref(readerStore).applyTextConversion,
 						onCopyDiagnostics: _cache[0] || (_cache[0] = ($event) => emit("copyDiagnostics")),
-						onSiteAutoEnableChange: handleSiteAutoEnableChange,
 						onProtectionModeChange: _cache[1] || (_cache[1] = ($event) => emit("protectionModeChange", $event)),
 						onExit: _cache[2] || (_cache[2] = ($event) => emit("exit"))
 					}, null, 8, [
 						"visible",
-						"site-auto-enable",
 						"custom-cleanup-hostname",
 						"onClose",
 						"onTextConversionChange"
@@ -23868,9 +23601,7 @@ ul, ol {
 				], 32);
 			};
 		}
-	}), [["__scopeId", "data-v-0f05a50a"]]);
-	var EXIT_NAVIGATION_KEY = "mnr_exit_navigation";
-	var hasTabStorage = typeof GM_getTab === "function" && typeof GM_saveTab === "function";
+	}), [["__scopeId", "data-v-767bb61f"]]);
 	var appState = {
 		isInitialized: false,
 		autoEnableDone: false,
@@ -23948,21 +23679,13 @@ ul, ol {
 		});
 		const decision = manager.check(document);
 		appState.currentDecision = decision;
-		if (decision.method === "user-disabled" || decision.showManualEntry) {
-			getSiteProtection().deactivate();
-			showReaderEntry();
-			return;
+		if (decision.shouldEnable) {
+			manager.setLaunchCallback(launchReader);
+			await manager.execute(document);
+			if (appState.isActive) return;
 		}
-		if (!decision.shouldEnable) {
-			getSiteProtection().deactivate();
-			return;
-		}
-		manager.setLaunchCallback(launchReader);
-		await manager.execute(document);
-		if (!appState.isActive && decision.shouldEnable) {
-			getSiteProtection().deactivate();
-			showReaderEntry();
-		}
+		getSiteProtection().deactivate();
+		if (decision.showManualEntry) showReaderEntry();
 	}
 	function launchReader(event) {
 		if (!pinia) {
@@ -23993,13 +23716,11 @@ ul, ol {
 		const { mountPoint, cleanup } = createShadowMount("mnr-reader-root");
 		readerCleanup = cleanup;
 		app = createApp(ReaderView_default, {
-			siteAutoEnable: getCurrentSiteAutoEnable(),
 			onCopyDiagnostics: () => {
 				copyDiagnosticsFromMenu();
 			},
 			onExit: closeReader,
-			onProtectionModeChange: setProtectionMode,
-			onSiteAutoEnableChange: setCurrentSiteAutoEnable
+			onProtectionModeChange: setProtectionMode
 		});
 		app.use(pinia);
 		app.mount(mountPoint);
@@ -24021,58 +23742,6 @@ ul, ol {
 		} catch (e) {
 			console.error("[MNR] Failed to clean host page overlays:", e);
 		}
-	}
-	function normalizeExitDestination(url) {
-		const normalized = normalizeUrlForFetch$1(url);
-		try {
-			const parsed = new URL(normalized);
-			if (parsed.protocol === "http:" || parsed.protocol === "https:") {
-				parsed.protocol = "https:";
-				parsed.hostname = parsed.hostname.replace(/^www\./i, "");
-			}
-			if (parsed.pathname.length > 1) parsed.pathname = parsed.pathname.replace(/\/+$/, "");
-			return parsed.toString();
-		} catch {
-			return normalized.replace(/\/+$/, "");
-		}
-	}
-	function getUserscriptTabState() {
-		return new Promise((resolve) => GM_getTab(resolve));
-	}
-	async function persistExitNavigation(transition) {
-		if (!hasTabStorage) {
-			sessionStorage.setItem(EXIT_NAVIGATION_KEY, JSON.stringify(transition));
-			return;
-		}
-		const tab = await getUserscriptTabState();
-		tab[EXIT_NAVIGATION_KEY] = transition;
-		GM_saveTab(tab);
-	}
-	async function consumeExitNavigation() {
-		let transition;
-		if (hasTabStorage) {
-			const tab = await getUserscriptTabState();
-			transition = tab[EXIT_NAVIGATION_KEY];
-			if (transition) {
-				delete tab[EXIT_NAVIGATION_KEY];
-				GM_saveTab(tab);
-			}
-		} else try {
-			const serialized = sessionStorage.getItem(EXIT_NAVIGATION_KEY);
-			if (serialized) {
-				sessionStorage.removeItem(EXIT_NAVIGATION_KEY);
-				transition = JSON.parse(serialized);
-			}
-		} catch (e) {
-			console.error("[MNR] Failed to read exit navigation:", e);
-		}
-		if (!transition || typeof transition.targetUrl !== "string") return false;
-		if (normalizeExitDestination(transition.targetUrl) !== normalizeExitDestination(window.location.href)) return false;
-		appState.autoEnableDone = true;
-		getSiteProtection().deactivate();
-		if (transition.cleanupHostOverlays === true) cleanupHostPageOverlays();
-		showReaderEntry();
-		return true;
 	}
 	function closeReader() {
 		if (!appState.isActive) return;
@@ -24106,35 +23775,31 @@ ul, ol {
 		appState.isActive = false;
 		appState.originalHostPage = null;
 		appState.entryPageKind = null;
+		if (entryPageKind === "chapter") disableSiteAutoEnable([window.location.href, navigationTarget]);
 		if (navigationTarget) {
-			persistExitNavigation({
-				targetUrl: normalizeExitDestination(navigationTarget),
-				cleanupHostOverlays
-			}).catch((e) => console.error("[MNR] Failed to save exit navigation:", e)).finally(() => {
-				window.location.href = navigationTarget;
-			});
+			window.location.href = navigationTarget;
 			return;
 		}
 		restoreHostPageSnapshot(originalHostPage);
 		if (entryPageKind === "chapter") showReaderEntry();
 	}
-	function getCurrentSiteAutoEnable() {
-		try {
-			const hostname = new URL(window.location.href).hostname;
-			return getRuleStorage().getSitePreference(hostname)?.enabled !== false;
-		} catch {
-			return true;
+	function disableSiteAutoEnable(urls) {
+		const storage = getRuleStorage();
+		const hostnames = new Set();
+		for (const url of urls) {
+			if (!url) continue;
+			try {
+				hostnames.add(new URL(url).hostname);
+			} catch (e) {
+				console.debug("[MNR] Failed to resolve site for auto-enable preference:", url, e);
+			}
 		}
-	}
-	function setCurrentSiteAutoEnable(enabled) {
-		try {
-			const hostname = new URL(window.location.href).hostname;
-			getRuleStorage().setSitePreference(hostname, {
-				enabled,
+		for (const hostname of hostnames) {
+			if (storage.getSitePreference(hostname)?.enabled === false) continue;
+			storage.setSitePreference(hostname, {
+				enabled: false,
 				timestamp: Date.now()
 			});
-		} catch (e) {
-			console.error("[MNR] Failed to update site auto-enable preference:", e);
 		}
 	}
 	async function setProtectionMode(mode) {
@@ -24256,7 +23921,6 @@ ul, ol {
 		if (!isTopFrame()) return;
 		installGlobalDebugErrorListeners();
 		if (appState.isActive) return;
-		if (await consumeExitNavigation()) return;
 		const url = window.location.href;
 		if (!isReaderEntryPage(url, document)) {
 			getSiteProtection().deactivate();
@@ -24309,6 +23973,6 @@ ul, ol {
 			} catch (e) {
 				console.error("[MNR] CSS injection error:", e);
 			}
-		})(".mnr-reader-entry[data-v-af68b126]{right:max(20px, env(safe-area-inset-right));bottom:max(20px, env(safe-area-inset-bottom));z-index:2147483646;background:var(--mnr-link,#1976d2);min-width:48px;height:48px;color:var(--mnr-on-link,#fff);cursor:pointer;opacity:.6;-webkit-tap-highlight-color:transparent;border:0;border-radius:24px;justify-content:center;align-items:center;gap:8px;margin:0;padding:0 16px;font-size:14px;font-weight:600;line-height:1;transition:opacity .18s,transform .18s,filter .18s,box-shadow .18s;animation:.2s ease-out mnr-entry-in-af68b126;display:flex;position:fixed;box-shadow:0 6px 18px #0003}.mnr-reader-entry svg[data-v-af68b126]{fill:none;stroke:currentColor;stroke-width:1.8px;stroke-linecap:round;stroke-linejoin:round;flex:0 0 24px;width:24px;height:24px}.mnr-reader-entry span[data-v-af68b126]{white-space:nowrap}.mnr-reader-entry[data-v-af68b126]:active{transform:scale(.96)}.mnr-reader-entry[data-v-af68b126]:focus-visible{opacity:1;outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 48%, #fff);outline-offset:3px}@media (hover:hover){.mnr-reader-entry[data-v-af68b126]:hover{opacity:1;filter:brightness(.94);transform:translateY(-2px);box-shadow:0 8px 22px #0000003d}}@media (width<=480px){.mnr-reader-entry[data-v-af68b126]{width:48px;padding:0}.mnr-reader-entry span[data-v-af68b126]{display:none}}@keyframes mnr-entry-in-af68b126{0%{opacity:0;transform:translateY(8px)scale(.96)}}@media (prefers-reduced-motion:reduce){.mnr-reader-entry[data-v-af68b126]{transition:none;animation:none}}.mnr-progress[data-v-fb6f172c]{z-index:1000;height:3px;transition:opacity .3s;position:fixed;top:0;left:0;right:0}.mnr-progress.hidden[data-v-fb6f172c]{opacity:0}.mnr-progress-bar[data-v-fb6f172c]{background:var(--mnr-link,#1976d2);height:100%;transition:width .1s ease-out}.mnr-progress-text[data-v-fb6f172c]{color:#fff;background:#000000b3;border-radius:4px;padding:4px 8px;font-size:12px;position:absolute;top:8px;right:8px}@media (prefers-reduced-motion:reduce){.mnr-progress[data-v-fb6f172c],.mnr-progress-bar[data-v-fb6f172c]{transition:none}}.mnr-floating-toolbar[data-v-1dc60197]{top:max(12px, env(safe-area-inset-top));left:max(12px, env(safe-area-inset-left));right:max(12px, env(safe-area-inset-right));pointer-events:none;z-index:100;justify-content:space-between;display:flex;position:fixed}.mnr-fab[data-v-1dc60197]{pointer-events:auto;background:var(--mnr-bg,#fff);width:44px;height:44px;color:var(--mnr-text,#333);border:1px solid var(--mnr-border,#e5e5e5);cursor:pointer;-webkit-tap-highlight-color:transparent;border-radius:50%;justify-content:center;align-items:center;padding:0;font-size:18px;transition:all .2s cubic-bezier(.25,.8,.25,1);display:flex;position:relative;box-shadow:0 4px 12px #00000026}.mnr-fab[data-v-1dc60197]:hover{background:var(--mnr-border,#f0f0f0);transform:translateY(-2px);box-shadow:0 6px 16px #0003}.mnr-fab[data-v-1dc60197]:active{transform:scale(.95)}.mnr-fab[data-v-1dc60197]:disabled{opacity:.6;cursor:not-allowed;box-shadow:none;transform:none}.mnr-icon[data-v-1dc60197]{fill:none;stroke:currentColor;stroke-width:1.8px;stroke-linecap:round;stroke-linejoin:round;flex:none;width:22px;height:22px;display:block}.mnr-fab[data-v-1dc60197]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}.mnr-fade-slide-enter-active[data-v-1dc60197],.mnr-fade-slide-leave-active[data-v-1dc60197]{transition:opacity .3s,transform .3s}.mnr-fade-slide-enter-from[data-v-1dc60197],.mnr-fade-slide-leave-to[data-v-1dc60197]{opacity:0;transform:translateY(-20px)}@media (prefers-reduced-motion:reduce){.mnr-fab[data-v-1dc60197],.mnr-fade-slide-enter-active[data-v-1dc60197],.mnr-fade-slide-leave-active[data-v-1dc60197]{transition:none}}.mnr-spinner[data-v-c925c262]{border-radius:50%;animation:.8s cubic-bezier(.4,0,.2,1) infinite mnr-spin-c925c262}.mnr-spinner.small[data-v-c925c262]{border:2px solid var(--mnr-border,#e0e0e0);border-top-color:var(--mnr-link,#1976d2);width:24px;height:24px;animation-duration:1s;animation-timing-function:linear}.mnr-spinner.medium[data-v-c925c262]{border:4px solid var(--mnr-border,#e0e0e0);border-top-color:var(--mnr-link,#1976d2);width:48px;height:48px}.mnr-spinner.large[data-v-c925c262]{border:4px solid var(--mnr-border,#e0e0e0);border-top-color:var(--mnr-link,#1976d2);width:64px;height:64px}@keyframes mnr-spin-c925c262{to{transform:rotate(360deg)}}.mnr-toast[data-v-baea3e69]{bottom:max(32px, env(safe-area-inset-bottom));-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);color:#fff;cursor:pointer;z-index:1001;white-space:nowrap;text-overflow:ellipsis;background:#1e1e1ee6;border-radius:50px;align-items:center;gap:8px;max-width:90vw;padding:14px 28px;font-size:15px;font-weight:500;display:flex;position:fixed;left:50%;overflow:hidden;transform:translate(-50%);box-shadow:0 8px 24px #0003}.mnr-toast--error[data-v-baea3e69]{background:#d32f2ff2}.mnr-toast-enter-active[data-v-baea3e69],.mnr-toast-leave-active[data-v-baea3e69]{transition:all .4s cubic-bezier(.175,.885,.32,1.275)}.mnr-toast-enter-from[data-v-baea3e69],.mnr-toast-leave-to[data-v-baea3e69]{opacity:0;transform:translate(-50%)translateY(40px)scale(.9)}@media (prefers-reduced-motion:reduce){.mnr-toast-enter-active[data-v-baea3e69],.mnr-toast-leave-active[data-v-baea3e69]{transition:none}}.mnr-drawer[data-v-0a840bc4]{z-index:1001;width:min(88%,340px);padding-left:env(safe-area-inset-left);background:var(--mnr-bg,#fff);color:var(--mnr-text,#333);flex-direction:column;transition:transform .24s;display:flex;position:fixed;inset:0 auto 0 0;transform:translate(-105%);box-shadow:4px 0 20px #00000026}.mnr-drawer.open[data-v-0a840bc4]{transform:translate(0)}.mnr-drawer-overlay[data-v-0a840bc4]{z-index:1000;background:#00000080;position:fixed;inset:0}.mnr-drawer-header[data-v-0a840bc4]{padding:max(16px, env(safe-area-inset-top)) 16px 14px;border-bottom:1px solid var(--mnr-border,#e5e5e5);flex-shrink:0;justify-content:space-between;align-items:center;gap:12px;display:flex}.mnr-drawer-heading[data-v-0a840bc4]{min-width:0}.mnr-drawer-title[data-v-0a840bc4]{overflow-wrap:anywhere;-webkit-line-clamp:2;-webkit-box-orient:vertical;margin:0;font-size:16px;font-weight:600;line-height:1.5;display:-webkit-box;overflow:hidden}.mnr-drawer-position[data-v-0a840bc4]{color:var(--mnr-text,#666);opacity:.72;margin-top:3px;font-size:12px;display:block}.mnr-drawer-close[data-v-0a840bc4]{width:36px;height:36px;color:inherit;cursor:pointer;background:0 0;border:0;border-radius:50%;flex:0 0 36px;place-items:center;padding:0;display:grid}.mnr-drawer-close svg[data-v-0a840bc4]{fill:none;stroke:currentColor;stroke-width:2px;stroke-linecap:round;width:20px;height:20px}.mnr-drawer-search[data-v-0a840bc4]{flex-shrink:0;padding:10px 12px 6px}.mnr-drawer-search input[data-v-0a840bc4]{border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);width:100%;color:var(--mnr-text,#333);border-radius:8px;padding:9px 12px;font-size:14px}.mnr-offline-section[data-v-0a840bc4]{border-bottom:1px solid var(--mnr-border,#e5e5e5);flex-shrink:0;padding:10px 12px 12px}.mnr-offline-main[data-v-0a840bc4]{justify-content:space-between;align-items:center;gap:12px;display:flex}.mnr-offline-copy[data-v-0a840bc4]{min-width:0}.mnr-offline-copy strong[data-v-0a840bc4],.mnr-offline-copy span[data-v-0a840bc4]{display:block}.mnr-offline-copy strong[data-v-0a840bc4]{font-size:13px;font-weight:600}.mnr-offline-copy span[data-v-0a840bc4]{color:var(--mnr-text,#666);opacity:.7;margin-top:2px;font-size:12px}.mnr-offline-action[data-v-0a840bc4]{border:1px solid var(--mnr-border,#ddd);min-height:36px;color:var(--mnr-link,#1976d2);cursor:pointer;background:0 0;border-radius:8px;padding:6px 11px;font-size:12px;font-weight:600}.mnr-offline-action[data-v-0a840bc4]:disabled{cursor:wait;opacity:.6}.mnr-offline-action.primary[data-v-0a840bc4]{border-color:var(--mnr-link,#1976d2);background:var(--mnr-link,#1976d2);color:var(--mnr-on-link,#fff);flex:none}.mnr-offline-action.danger[data-v-0a840bc4]{color:var(--mnr-text,#555)}.mnr-offline-secondary[data-v-0a840bc4]{flex-wrap:wrap;gap:6px;margin-top:8px;display:flex}.mnr-drawer-state[data-v-0a840bc4]{color:color-mix(in srgb, var(--mnr-text,#666) 78%, transparent);text-align:center;flex:1;justify-content:center;align-items:center;gap:10px;padding:40px 20px;display:flex}.mnr-drawer-content[data-v-0a840bc4]{overscroll-behavior:contain;-webkit-overflow-scrolling:touch;flex:1;position:relative;overflow-y:auto}.mnr-cache-progress-track[data-v-0a840bc4]{background:var(--mnr-border,#e0e0e0);border-radius:2px;height:4px;margin-top:10px;overflow:hidden}.mnr-cache-progress-fill[data-v-0a840bc4]{background:var(--mnr-link,#1976d2);height:100%;transition:width .2s}.mnr-chapter-list[data-v-0a840bc4]{margin:0;padding-left:0;padding-right:0;list-style:none}.mnr-chapter-list li[data-v-0a840bc4]{height:44px}.mnr-chapter-button[data-v-0a840bc4]{width:100%;height:44px;color:inherit;text-align:left;cursor:pointer;background:0 0;border:0;border-left:3px solid #0000;align-items:center;gap:6px;padding:0 14px;font-size:14px;display:flex;overflow:hidden}.mnr-chapter-title-text[data-v-0a840bc4]{text-overflow:ellipsis;white-space:nowrap;overflow:hidden}.mnr-chapter-button.active[data-v-0a840bc4]{border-left-color:var(--mnr-link,#1976d2);background:color-mix(in srgb, var(--mnr-link,#1976d2) 10%, transparent);color:var(--mnr-link,#1976d2);font-weight:600}.mnr-chapter-mark[data-v-0a840bc4]{flex:none;width:14px;height:14px}.mnr-cache-mark[data-v-0a840bc4]{color:#388e3c}.mnr-lock-mark[data-v-0a840bc4]{opacity:.6}.mnr-chapter-mark svg[data-v-0a840bc4]{fill:none;stroke:currentColor;stroke-width:2px;stroke-linecap:round;stroke-linejoin:round;width:100%;height:100%;display:block}@media (hover:hover){.mnr-drawer-close[data-v-0a840bc4]:hover,.mnr-chapter-button[data-v-0a840bc4]:not(.active):hover,.mnr-offline-action[data-v-0a840bc4]:enabled:hover{background:var(--mnr-border,#f0f0f0)}.mnr-offline-action.primary[data-v-0a840bc4]:enabled:hover{background:var(--mnr-link,#1976d2);filter:brightness(.94)}}.mnr-drawer-close[data-v-0a840bc4]:focus-visible,.mnr-drawer-search input[data-v-0a840bc4]:focus-visible,.mnr-offline-action[data-v-0a840bc4]:focus-visible,.mnr-chapter-button[data-v-0a840bc4]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:-3px}.mnr-visually-hidden[data-v-0a840bc4]{clip:rect(0 0 0 0);white-space:nowrap;clip-path:inset(50%);width:1px;height:1px;position:absolute;overflow:hidden}.mnr-fade-enter-active[data-v-0a840bc4],.mnr-fade-leave-active[data-v-0a840bc4]{transition:opacity .24s}.mnr-fade-enter-from[data-v-0a840bc4],.mnr-fade-leave-to[data-v-0a840bc4]{opacity:0}@media (prefers-reduced-motion:reduce){.mnr-drawer[data-v-0a840bc4],.mnr-fade-enter-active[data-v-0a840bc4],.mnr-fade-leave-active[data-v-0a840bc4],.mnr-cache-progress-fill[data-v-0a840bc4]{transition:none}}.mnr-reading-control[data-v-e6745e69]{margin-top:18px}.mnr-reading-control-header[data-v-e6745e69]{justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:4px;display:flex}.mnr-reading-control-header label[data-v-e6745e69]{color:var(--mnr-text,#333);font-size:14px;font-weight:600}.mnr-reading-control-header output[data-v-e6745e69]{color:var(--mnr-text,#666);opacity:.78;font-size:13px}.mnr-reading-slider-row[data-v-e6745e69]{align-items:center;gap:10px;display:flex}.mnr-reading-slider-row span[data-v-e6745e69]{color:var(--mnr-text,#666);text-align:center;flex:0 0 24px;font-size:13px}.mnr-reading-slider-row input[data-v-e6745e69]{appearance:none;cursor:pointer;touch-action:pan-y;background:0 0;flex:1;min-width:0;height:32px;margin:0}.mnr-reading-slider-row input[data-v-e6745e69]::-webkit-slider-runnable-track{background:var(--mnr-border,#e0e0e0);border-radius:2px;height:4px}.mnr-reading-slider-row input[data-v-e6745e69]::-webkit-slider-thumb{appearance:none;background:var(--mnr-link,#1976d2);border:0;border-radius:50%;width:24px;height:24px;margin-top:-10px}.mnr-reading-slider-row input[data-v-e6745e69]::-moz-range-track{background:var(--mnr-border,#e0e0e0);border-radius:2px;height:4px}.mnr-reading-slider-row input[data-v-e6745e69]::-moz-range-thumb{background:var(--mnr-link,#1976d2);border:0;border-radius:50%;width:24px;height:24px}.mnr-reading-slider-row input[data-v-e6745e69]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}.mnr-settings-overlay[data-v-7e7dbfc6]{z-index:1000;background:#0000001f;justify-content:flex-end;display:flex;position:fixed;inset:0}.mnr-settings-panel[data-v-7e7dbfc6]{width:min(100%,380px);height:100%;padding-right:env(safe-area-inset-right);background:var(--mnr-bg,#fff);color:var(--mnr-text,#333);border-left:1px solid var(--mnr-border,#e0e0e0);flex-direction:column;display:flex;box-shadow:-4px 0 20px #00000026}.mnr-settings-header[data-v-7e7dbfc6]{padding:max(16px, env(safe-area-inset-top)) 16px 16px;border-bottom:1px solid var(--mnr-border,#e0e0e0);flex-shrink:0;justify-content:space-between;align-items:center;display:flex}.mnr-settings-header h3[data-v-7e7dbfc6],.mnr-settings-section h4[data-v-7e7dbfc6],.mnr-field-label[data-v-7e7dbfc6]{color:var(--mnr-text,#333);margin:0}.mnr-settings-header h3[data-v-7e7dbfc6]{border-radius:4px;font-size:18px}.mnr-close-btn[data-v-7e7dbfc6]{width:36px;height:36px;color:inherit;cursor:pointer;background:0 0;border:0;border-radius:50%;place-items:center;padding:0;display:grid}.mnr-close-btn svg[data-v-7e7dbfc6]{fill:none;stroke:currentColor;stroke-width:2px;stroke-linecap:round;width:20px;height:20px}.mnr-settings-content[data-v-7e7dbfc6]{overscroll-behavior:contain;flex:1;padding:18px 16px 24px;overflow:auto}.mnr-settings-section h4[data-v-7e7dbfc6],.mnr-field-label[data-v-7e7dbfc6],.mnr-settings-fieldset legend[data-v-7e7dbfc6]{margin-bottom:10px;font-size:14px;font-weight:600;display:block}.mnr-theme-grid[data-v-7e7dbfc6]{grid-template-columns:repeat(3,1fr);gap:8px;display:grid}.mnr-theme-btn[data-v-7e7dbfc6]{cursor:pointer;border:2px solid #0000;border-radius:8px;min-width:0;min-height:42px;padding:8px 4px;font-size:12px}.mnr-reading-preview[data-v-7e7dbfc6]{border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);color:var(--mnr-text,#333);border-radius:8px;margin-top:16px;padding:12px 14px;display:none}.mnr-reading-preview span[data-v-7e7dbfc6]{opacity:.65;margin-bottom:4px;font-size:12px;display:block}.mnr-reading-preview p[data-v-7e7dbfc6]{font-family:var(--mnr-font-family,system-ui, sans-serif);font-size:var(--mnr-font-size,18px);line-height:var(--mnr-line-height,1.8);letter-spacing:var(--mnr-letter-spacing,0);text-indent:var(--mnr-paragraph-indent,2em);margin:0}.mnr-field-label[data-v-7e7dbfc6]{margin-top:18px}.mnr-select[data-v-7e7dbfc6]{border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);width:100%;min-height:42px;color:var(--mnr-text,#333);border-radius:8px;padding:9px 12px;font-size:14px}.mnr-settings-fieldset[data-v-7e7dbfc6]{border:0;min-width:0;margin:18px 0 0;padding:0}.mnr-segmented-control[data-v-7e7dbfc6]{border:1px solid var(--mnr-border,#ddd);border-radius:8px;display:flex;overflow:hidden}.mnr-segment[data-v-7e7dbfc6]{border:0;border-right:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);min-height:42px;color:var(--mnr-text,#666);cursor:pointer;flex:1;padding:9px 12px;font-size:14px}.mnr-segment[data-v-7e7dbfc6]:last-child{border-right:0}.mnr-segment.active[data-v-7e7dbfc6]{background:var(--mnr-link,#1976d2);color:var(--mnr-on-link,#fff)}.mnr-secondary-action[data-v-7e7dbfc6]{border:1px solid var(--mnr-border,#ddd);width:100%;min-height:42px;color:var(--mnr-text,#333);cursor:pointer;background:0 0;border-radius:8px;margin-top:16px;padding:9px 12px;font-size:14px}.mnr-settings-group[data-v-7e7dbfc6]{border-top:1px solid var(--mnr-border,#ddd);margin-top:18px}.mnr-settings-group summary[data-v-7e7dbfc6]{min-height:48px;color:var(--mnr-text,#333);cursor:pointer;padding:14px 0;font-size:14px;font-weight:600}.mnr-settings-group-content[data-v-7e7dbfc6]{padding-bottom:4px}.mnr-settings-group-content[data-v-7e7dbfc6]>:first-child{margin-top:0}.mnr-switch-row[data-v-7e7dbfc6]{min-height:44px;color:var(--mnr-text,#333);cursor:pointer;justify-content:space-between;align-items:center;gap:16px;display:flex}.mnr-switch-row input[data-v-7e7dbfc6]{width:22px;height:22px;accent-color:var(--mnr-link,#1976d2);flex:none}.mnr-custom-css[data-v-7e7dbfc6]{box-sizing:border-box;resize:vertical;border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);width:100%;min-height:110px;color:var(--mnr-text,#333);border-radius:8px;padding:10px 12px;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}.mnr-cleanup-fields[data-v-7e7dbfc6]{gap:10px;margin-top:8px;display:grid}.mnr-cleanup-fields .mnr-field-label[data-v-7e7dbfc6],.mnr-cleanup-fields .mnr-field-help[data-v-7e7dbfc6],.mnr-cleanup-fields .mnr-field-error[data-v-7e7dbfc6]{margin:0}.mnr-cleanup-editor-label[data-v-7e7dbfc6],.mnr-cleanup-guide[data-v-7e7dbfc6]{font-size:12px;line-height:1.6}.mnr-cleanup-guide[data-v-7e7dbfc6]{color:var(--mnr-text,#333)}.mnr-cleanup-guide summary[data-v-7e7dbfc6]{cursor:pointer;opacity:.72}.mnr-cleanup-guide p[data-v-7e7dbfc6]{margin:8px 0 0}.mnr-cleanup-guide code[data-v-7e7dbfc6]{overflow-wrap:anywhere}.mnr-cleanup-add[data-v-7e7dbfc6]{grid-template-columns:minmax(0,1fr) auto;gap:8px;display:grid}.mnr-cleanup-input[data-v-7e7dbfc6]{box-sizing:border-box;border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);min-width:0;min-height:42px;color:var(--mnr-text,#333);border-radius:8px;padding:9px 12px;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}.mnr-cleanup-add-button[data-v-7e7dbfc6]{white-space:nowrap;width:auto;margin-top:0}.mnr-cleanup-add-button[data-v-7e7dbfc6]:disabled{cursor:not-allowed;opacity:.55}.mnr-cleanup-site[data-v-7e7dbfc6]{overflow-wrap:anywhere}.mnr-field-help[data-v-7e7dbfc6],.mnr-field-error[data-v-7e7dbfc6]{margin:-4px 0 8px;font-size:12px;line-height:1.5}.mnr-field-help[data-v-7e7dbfc6]{opacity:.72}.mnr-protection-help[data-v-7e7dbfc6]{margin:8px 0 0}.mnr-field-error[data-v-7e7dbfc6]{color:var(--mnr-danger,#b3261e);margin-top:6px}.mnr-settings-footer[data-v-7e7dbfc6]{padding:10px 16px max(12px, env(safe-area-inset-bottom));border-top:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);flex-shrink:0}.mnr-exit-btn[data-v-7e7dbfc6]{border:1px solid var(--mnr-danger,#b3261e);width:100%;min-height:42px;color:var(--mnr-danger,#b3261e);cursor:pointer;background:0 0;border-radius:8px;padding:9px 12px;font-size:14px}@media (hover:hover){.mnr-close-btn[data-v-7e7dbfc6]:hover,.mnr-secondary-action[data-v-7e7dbfc6]:enabled:hover,.mnr-segment[data-v-7e7dbfc6]:not(.active):hover,.mnr-exit-btn[data-v-7e7dbfc6]:hover{background:var(--mnr-border,#f0f0f0)}}.mnr-settings-header h3[data-v-7e7dbfc6]:focus-visible,.mnr-close-btn[data-v-7e7dbfc6]:focus-visible,.mnr-theme-btn[data-v-7e7dbfc6]:focus-visible,.mnr-select[data-v-7e7dbfc6]:focus-visible,.mnr-segment[data-v-7e7dbfc6]:focus-visible,.mnr-secondary-action[data-v-7e7dbfc6]:focus-visible,.mnr-settings-group summary[data-v-7e7dbfc6]:focus-visible,.mnr-cleanup-guide summary[data-v-7e7dbfc6]:focus-visible,.mnr-switch-row input[data-v-7e7dbfc6]:focus-visible,.mnr-cleanup-input[data-v-7e7dbfc6]:focus-visible,.mnr-custom-css[data-v-7e7dbfc6]:focus-visible,.mnr-exit-btn[data-v-7e7dbfc6]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}.mnr-slide-enter-active[data-v-7e7dbfc6],.mnr-slide-leave-active[data-v-7e7dbfc6],.mnr-settings-panel[data-v-7e7dbfc6]{transition:opacity .22s,transform .22s}.mnr-slide-enter-from[data-v-7e7dbfc6],.mnr-slide-leave-to[data-v-7e7dbfc6]{opacity:0}.mnr-slide-enter-from .mnr-settings-panel[data-v-7e7dbfc6],.mnr-slide-leave-to .mnr-settings-panel[data-v-7e7dbfc6]{transform:translate(100%)}@media (width<=600px){.mnr-settings-panel[data-v-7e7dbfc6]{width:100%}.mnr-reading-preview[data-v-7e7dbfc6]{display:block}.mnr-desktop-width[data-v-7e7dbfc6]{display:none}}@media (prefers-reduced-motion:reduce){.mnr-slide-enter-active[data-v-7e7dbfc6],.mnr-slide-leave-active[data-v-7e7dbfc6],.mnr-settings-panel[data-v-7e7dbfc6]{transition:none}}.mnr-reader[data-v-0f05a50a]{z-index:2147483647;background:var(--mnr-bg,#fff);color:var(--mnr-text,#1a1a1a);overscroll-behavior:none;flex-direction:column;display:flex;position:fixed;inset:0;overflow:hidden}.mnr-reader-main[data-v-0f05a50a]{padding-top:68px;padding-bottom:max(40px, env(safe-area-inset-bottom));overscroll-behavior:none;-webkit-overflow-scrolling:touch;touch-action:pan-y pinch-zoom;flex:1;overflow:auto}.mnr-boundary-gesture-hint[data-v-0f05a50a]{z-index:4;background:color-mix(in srgb, var(--mnr-text,#1a1a1a) 86%, transparent);max-width:calc(100vw - 32px);color:var(--mnr-bg,#fff);white-space:nowrap;pointer-events:none;border-radius:999px;padding:8px 14px;font-size:14px;line-height:1.4;position:fixed;left:50%;transform:translate(-50%)}.mnr-boundary-gesture-hint.is-prev[data-v-0f05a50a]{top:max(16px, env(safe-area-inset-top))}.mnr-boundary-gesture-hint.is-next[data-v-0f05a50a]{bottom:max(16px, env(safe-area-inset-bottom))}.mnr-reader-content[data-v-0f05a50a]{max-width:var(--mnr-max-width,800px);padding:var(--mnr-padding,20px);font-family:var(--mnr-font-family,\"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif);font-size:var(--mnr-font-size,18px);line-height:var(--mnr-line-height,1.8);letter-spacing:var(--mnr-letter-spacing,0em);margin:0 auto}.mnr-reader-content[data-v-0f05a50a] p{text-indent:var(--mnr-paragraph-indent,2em);margin:0 0 1em}.mnr-reader-content[data-v-0f05a50a] img{max-width:100%;height:auto;margin:1em auto;display:block}.mnr-reader-content[data-v-0f05a50a] a{color:var(--mnr-link,#1976d2)}.mnr-reader-main[data-v-0f05a50a]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}.mnr-chapter-title[data-v-0f05a50a]{color:var(--mnr-text,#1a1a1a);text-align:center;margin:0 0 1em;font-size:1.5em;font-weight:700;line-height:1.4}.mnr-chapter-end[data-v-0f05a50a]{max-width:var(--mnr-max-width,800px);text-align:center;margin:0 auto;padding:40px 20px}.mnr-chapter-end-text[data-v-0f05a50a]{color:var(--mnr-text,#666);opacity:.7;margin-bottom:16px}.mnr-chapter-nav[data-v-0f05a50a]{flex-wrap:wrap;justify-content:center;gap:24px;display:flex}.mnr-chapter-link[data-v-0f05a50a]{color:var(--mnr-link,#1976d2);border:1px solid var(--mnr-border,#e0e0e0);border-radius:8px;padding:12px 24px;text-decoration:none;transition:all .2s}.mnr-chapter-link[data-v-0f05a50a]:hover{background:var(--mnr-border,#f0f0f0)}.mnr-sentinel[data-v-0f05a50a]{visibility:hidden;width:100%;height:1px}.mnr-loading-prev[data-v-0f05a50a],.mnr-loading-next[data-v-0f05a50a],.mnr-section-progress[data-v-0f05a50a]{color:var(--mnr-text,#666);justify-content:center;align-items:center;gap:12px;padding:24px;display:flex}@media (width>=768px){.mnr-reader-content[data-v-0f05a50a]{padding:var(--mnr-padding,30px)}}@media (width>=1024px){.mnr-reader-content[data-v-0f05a50a]{padding:var(--mnr-padding,40px)}}@media (prefers-reduced-motion:reduce){.mnr-chapter-link[data-v-0f05a50a]{transition:none}}\n/*$vite$:1*/", {});
+		})(".mnr-reader-entry[data-v-af68b126]{right:max(20px, env(safe-area-inset-right));bottom:max(20px, env(safe-area-inset-bottom));z-index:2147483646;background:var(--mnr-link,#1976d2);min-width:48px;height:48px;color:var(--mnr-on-link,#fff);cursor:pointer;opacity:.6;-webkit-tap-highlight-color:transparent;border:0;border-radius:24px;justify-content:center;align-items:center;gap:8px;margin:0;padding:0 16px;font-size:14px;font-weight:600;line-height:1;transition:opacity .18s,transform .18s,filter .18s,box-shadow .18s;animation:.2s ease-out mnr-entry-in-af68b126;display:flex;position:fixed;box-shadow:0 6px 18px #0003}.mnr-reader-entry svg[data-v-af68b126]{fill:none;stroke:currentColor;stroke-width:1.8px;stroke-linecap:round;stroke-linejoin:round;flex:0 0 24px;width:24px;height:24px}.mnr-reader-entry span[data-v-af68b126]{white-space:nowrap}.mnr-reader-entry[data-v-af68b126]:active{transform:scale(.96)}.mnr-reader-entry[data-v-af68b126]:focus-visible{opacity:1;outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 48%, #fff);outline-offset:3px}@media (hover:hover){.mnr-reader-entry[data-v-af68b126]:hover{opacity:1;filter:brightness(.94);transform:translateY(-2px);box-shadow:0 8px 22px #0000003d}}@media (width<=480px){.mnr-reader-entry[data-v-af68b126]{width:48px;padding:0}.mnr-reader-entry span[data-v-af68b126]{display:none}}@keyframes mnr-entry-in-af68b126{0%{opacity:0;transform:translateY(8px)scale(.96)}}@media (prefers-reduced-motion:reduce){.mnr-reader-entry[data-v-af68b126]{transition:none;animation:none}}.mnr-progress[data-v-fb6f172c]{z-index:1000;height:3px;transition:opacity .3s;position:fixed;top:0;left:0;right:0}.mnr-progress.hidden[data-v-fb6f172c]{opacity:0}.mnr-progress-bar[data-v-fb6f172c]{background:var(--mnr-link,#1976d2);height:100%;transition:width .1s ease-out}.mnr-progress-text[data-v-fb6f172c]{color:#fff;background:#000000b3;border-radius:4px;padding:4px 8px;font-size:12px;position:absolute;top:8px;right:8px}@media (prefers-reduced-motion:reduce){.mnr-progress[data-v-fb6f172c],.mnr-progress-bar[data-v-fb6f172c]{transition:none}}.mnr-floating-toolbar[data-v-1dc60197]{top:max(12px, env(safe-area-inset-top));left:max(12px, env(safe-area-inset-left));right:max(12px, env(safe-area-inset-right));pointer-events:none;z-index:100;justify-content:space-between;display:flex;position:fixed}.mnr-fab[data-v-1dc60197]{pointer-events:auto;background:var(--mnr-bg,#fff);width:44px;height:44px;color:var(--mnr-text,#333);border:1px solid var(--mnr-border,#e5e5e5);cursor:pointer;-webkit-tap-highlight-color:transparent;border-radius:50%;justify-content:center;align-items:center;padding:0;font-size:18px;transition:all .2s cubic-bezier(.25,.8,.25,1);display:flex;position:relative;box-shadow:0 4px 12px #00000026}.mnr-fab[data-v-1dc60197]:hover{background:var(--mnr-border,#f0f0f0);transform:translateY(-2px);box-shadow:0 6px 16px #0003}.mnr-fab[data-v-1dc60197]:active{transform:scale(.95)}.mnr-fab[data-v-1dc60197]:disabled{opacity:.6;cursor:not-allowed;box-shadow:none;transform:none}.mnr-icon[data-v-1dc60197]{fill:none;stroke:currentColor;stroke-width:1.8px;stroke-linecap:round;stroke-linejoin:round;flex:none;width:22px;height:22px;display:block}.mnr-fab[data-v-1dc60197]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}.mnr-fade-slide-enter-active[data-v-1dc60197],.mnr-fade-slide-leave-active[data-v-1dc60197]{transition:opacity .3s,transform .3s}.mnr-fade-slide-enter-from[data-v-1dc60197],.mnr-fade-slide-leave-to[data-v-1dc60197]{opacity:0;transform:translateY(-20px)}@media (prefers-reduced-motion:reduce){.mnr-fab[data-v-1dc60197],.mnr-fade-slide-enter-active[data-v-1dc60197],.mnr-fade-slide-leave-active[data-v-1dc60197]{transition:none}}.mnr-spinner[data-v-c925c262]{border-radius:50%;animation:.8s cubic-bezier(.4,0,.2,1) infinite mnr-spin-c925c262}.mnr-spinner.small[data-v-c925c262]{border:2px solid var(--mnr-border,#e0e0e0);border-top-color:var(--mnr-link,#1976d2);width:24px;height:24px;animation-duration:1s;animation-timing-function:linear}.mnr-spinner.medium[data-v-c925c262]{border:4px solid var(--mnr-border,#e0e0e0);border-top-color:var(--mnr-link,#1976d2);width:48px;height:48px}.mnr-spinner.large[data-v-c925c262]{border:4px solid var(--mnr-border,#e0e0e0);border-top-color:var(--mnr-link,#1976d2);width:64px;height:64px}@keyframes mnr-spin-c925c262{to{transform:rotate(360deg)}}.mnr-toast[data-v-baea3e69]{bottom:max(32px, env(safe-area-inset-bottom));-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);color:#fff;cursor:pointer;z-index:1001;white-space:nowrap;text-overflow:ellipsis;background:#1e1e1ee6;border-radius:50px;align-items:center;gap:8px;max-width:90vw;padding:14px 28px;font-size:15px;font-weight:500;display:flex;position:fixed;left:50%;overflow:hidden;transform:translate(-50%);box-shadow:0 8px 24px #0003}.mnr-toast--error[data-v-baea3e69]{background:#d32f2ff2}.mnr-toast-enter-active[data-v-baea3e69],.mnr-toast-leave-active[data-v-baea3e69]{transition:all .4s cubic-bezier(.175,.885,.32,1.275)}.mnr-toast-enter-from[data-v-baea3e69],.mnr-toast-leave-to[data-v-baea3e69]{opacity:0;transform:translate(-50%)translateY(40px)scale(.9)}@media (prefers-reduced-motion:reduce){.mnr-toast-enter-active[data-v-baea3e69],.mnr-toast-leave-active[data-v-baea3e69]{transition:none}}.mnr-drawer[data-v-0a840bc4]{z-index:1001;width:min(88%,340px);padding-left:env(safe-area-inset-left);background:var(--mnr-bg,#fff);color:var(--mnr-text,#333);flex-direction:column;transition:transform .24s;display:flex;position:fixed;inset:0 auto 0 0;transform:translate(-105%);box-shadow:4px 0 20px #00000026}.mnr-drawer.open[data-v-0a840bc4]{transform:translate(0)}.mnr-drawer-overlay[data-v-0a840bc4]{z-index:1000;background:#00000080;position:fixed;inset:0}.mnr-drawer-header[data-v-0a840bc4]{padding:max(16px, env(safe-area-inset-top)) 16px 14px;border-bottom:1px solid var(--mnr-border,#e5e5e5);flex-shrink:0;justify-content:space-between;align-items:center;gap:12px;display:flex}.mnr-drawer-heading[data-v-0a840bc4]{min-width:0}.mnr-drawer-title[data-v-0a840bc4]{overflow-wrap:anywhere;-webkit-line-clamp:2;-webkit-box-orient:vertical;margin:0;font-size:16px;font-weight:600;line-height:1.5;display:-webkit-box;overflow:hidden}.mnr-drawer-position[data-v-0a840bc4]{color:var(--mnr-text,#666);opacity:.72;margin-top:3px;font-size:12px;display:block}.mnr-drawer-close[data-v-0a840bc4]{width:36px;height:36px;color:inherit;cursor:pointer;background:0 0;border:0;border-radius:50%;flex:0 0 36px;place-items:center;padding:0;display:grid}.mnr-drawer-close svg[data-v-0a840bc4]{fill:none;stroke:currentColor;stroke-width:2px;stroke-linecap:round;width:20px;height:20px}.mnr-drawer-search[data-v-0a840bc4]{flex-shrink:0;padding:10px 12px 6px}.mnr-drawer-search input[data-v-0a840bc4]{border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);width:100%;color:var(--mnr-text,#333);border-radius:8px;padding:9px 12px;font-size:14px}.mnr-offline-section[data-v-0a840bc4]{border-bottom:1px solid var(--mnr-border,#e5e5e5);flex-shrink:0;padding:10px 12px 12px}.mnr-offline-main[data-v-0a840bc4]{justify-content:space-between;align-items:center;gap:12px;display:flex}.mnr-offline-copy[data-v-0a840bc4]{min-width:0}.mnr-offline-copy strong[data-v-0a840bc4],.mnr-offline-copy span[data-v-0a840bc4]{display:block}.mnr-offline-copy strong[data-v-0a840bc4]{font-size:13px;font-weight:600}.mnr-offline-copy span[data-v-0a840bc4]{color:var(--mnr-text,#666);opacity:.7;margin-top:2px;font-size:12px}.mnr-offline-action[data-v-0a840bc4]{border:1px solid var(--mnr-border,#ddd);min-height:36px;color:var(--mnr-link,#1976d2);cursor:pointer;background:0 0;border-radius:8px;padding:6px 11px;font-size:12px;font-weight:600}.mnr-offline-action[data-v-0a840bc4]:disabled{cursor:wait;opacity:.6}.mnr-offline-action.primary[data-v-0a840bc4]{border-color:var(--mnr-link,#1976d2);background:var(--mnr-link,#1976d2);color:var(--mnr-on-link,#fff);flex:none}.mnr-offline-action.danger[data-v-0a840bc4]{color:var(--mnr-text,#555)}.mnr-offline-secondary[data-v-0a840bc4]{flex-wrap:wrap;gap:6px;margin-top:8px;display:flex}.mnr-drawer-state[data-v-0a840bc4]{color:color-mix(in srgb, var(--mnr-text,#666) 78%, transparent);text-align:center;flex:1;justify-content:center;align-items:center;gap:10px;padding:40px 20px;display:flex}.mnr-drawer-content[data-v-0a840bc4]{overscroll-behavior:contain;-webkit-overflow-scrolling:touch;flex:1;position:relative;overflow-y:auto}.mnr-cache-progress-track[data-v-0a840bc4]{background:var(--mnr-border,#e0e0e0);border-radius:2px;height:4px;margin-top:10px;overflow:hidden}.mnr-cache-progress-fill[data-v-0a840bc4]{background:var(--mnr-link,#1976d2);height:100%;transition:width .2s}.mnr-chapter-list[data-v-0a840bc4]{margin:0;padding-left:0;padding-right:0;list-style:none}.mnr-chapter-list li[data-v-0a840bc4]{height:44px}.mnr-chapter-button[data-v-0a840bc4]{width:100%;height:44px;color:inherit;text-align:left;cursor:pointer;background:0 0;border:0;border-left:3px solid #0000;align-items:center;gap:6px;padding:0 14px;font-size:14px;display:flex;overflow:hidden}.mnr-chapter-title-text[data-v-0a840bc4]{text-overflow:ellipsis;white-space:nowrap;overflow:hidden}.mnr-chapter-button.active[data-v-0a840bc4]{border-left-color:var(--mnr-link,#1976d2);background:color-mix(in srgb, var(--mnr-link,#1976d2) 10%, transparent);color:var(--mnr-link,#1976d2);font-weight:600}.mnr-chapter-mark[data-v-0a840bc4]{flex:none;width:14px;height:14px}.mnr-cache-mark[data-v-0a840bc4]{color:#388e3c}.mnr-lock-mark[data-v-0a840bc4]{opacity:.6}.mnr-chapter-mark svg[data-v-0a840bc4]{fill:none;stroke:currentColor;stroke-width:2px;stroke-linecap:round;stroke-linejoin:round;width:100%;height:100%;display:block}@media (hover:hover){.mnr-drawer-close[data-v-0a840bc4]:hover,.mnr-chapter-button[data-v-0a840bc4]:not(.active):hover,.mnr-offline-action[data-v-0a840bc4]:enabled:hover{background:var(--mnr-border,#f0f0f0)}.mnr-offline-action.primary[data-v-0a840bc4]:enabled:hover{background:var(--mnr-link,#1976d2);filter:brightness(.94)}}.mnr-drawer-close[data-v-0a840bc4]:focus-visible,.mnr-drawer-search input[data-v-0a840bc4]:focus-visible,.mnr-offline-action[data-v-0a840bc4]:focus-visible,.mnr-chapter-button[data-v-0a840bc4]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:-3px}.mnr-visually-hidden[data-v-0a840bc4]{clip:rect(0 0 0 0);white-space:nowrap;clip-path:inset(50%);width:1px;height:1px;position:absolute;overflow:hidden}.mnr-fade-enter-active[data-v-0a840bc4],.mnr-fade-leave-active[data-v-0a840bc4]{transition:opacity .24s}.mnr-fade-enter-from[data-v-0a840bc4],.mnr-fade-leave-to[data-v-0a840bc4]{opacity:0}@media (prefers-reduced-motion:reduce){.mnr-drawer[data-v-0a840bc4],.mnr-fade-enter-active[data-v-0a840bc4],.mnr-fade-leave-active[data-v-0a840bc4],.mnr-cache-progress-fill[data-v-0a840bc4]{transition:none}}.mnr-reading-control[data-v-e6745e69]{margin-top:18px}.mnr-reading-control-header[data-v-e6745e69]{justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:4px;display:flex}.mnr-reading-control-header label[data-v-e6745e69]{color:var(--mnr-text,#333);font-size:14px;font-weight:600}.mnr-reading-control-header output[data-v-e6745e69]{color:var(--mnr-text,#666);opacity:.78;font-size:13px}.mnr-reading-slider-row[data-v-e6745e69]{align-items:center;gap:10px;display:flex}.mnr-reading-slider-row span[data-v-e6745e69]{color:var(--mnr-text,#666);text-align:center;flex:0 0 24px;font-size:13px}.mnr-reading-slider-row input[data-v-e6745e69]{appearance:none;cursor:pointer;touch-action:pan-y;background:0 0;flex:1;min-width:0;height:32px;margin:0}.mnr-reading-slider-row input[data-v-e6745e69]::-webkit-slider-runnable-track{background:var(--mnr-border,#e0e0e0);border-radius:2px;height:4px}.mnr-reading-slider-row input[data-v-e6745e69]::-webkit-slider-thumb{appearance:none;background:var(--mnr-link,#1976d2);border:0;border-radius:50%;width:24px;height:24px;margin-top:-10px}.mnr-reading-slider-row input[data-v-e6745e69]::-moz-range-track{background:var(--mnr-border,#e0e0e0);border-radius:2px;height:4px}.mnr-reading-slider-row input[data-v-e6745e69]::-moz-range-thumb{background:var(--mnr-link,#1976d2);border:0;border-radius:50%;width:24px;height:24px}.mnr-reading-slider-row input[data-v-e6745e69]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}.mnr-settings-overlay[data-v-caf5eea6]{z-index:1000;background:#0000001f;justify-content:flex-end;display:flex;position:fixed;inset:0}.mnr-settings-panel[data-v-caf5eea6]{width:min(100%,380px);height:100%;padding-right:env(safe-area-inset-right);background:var(--mnr-bg,#fff);color:var(--mnr-text,#333);border-left:1px solid var(--mnr-border,#e0e0e0);flex-direction:column;display:flex;box-shadow:-4px 0 20px #00000026}.mnr-settings-header[data-v-caf5eea6]{padding:max(16px, env(safe-area-inset-top)) 16px 16px;border-bottom:1px solid var(--mnr-border,#e0e0e0);flex-shrink:0;justify-content:space-between;align-items:center;display:flex}.mnr-settings-header h3[data-v-caf5eea6],.mnr-settings-section h4[data-v-caf5eea6],.mnr-field-label[data-v-caf5eea6]{color:var(--mnr-text,#333);margin:0}.mnr-settings-header h3[data-v-caf5eea6]{border-radius:4px;font-size:18px}.mnr-close-btn[data-v-caf5eea6]{width:36px;height:36px;color:inherit;cursor:pointer;background:0 0;border:0;border-radius:50%;place-items:center;padding:0;display:grid}.mnr-close-btn svg[data-v-caf5eea6]{fill:none;stroke:currentColor;stroke-width:2px;stroke-linecap:round;width:20px;height:20px}.mnr-settings-content[data-v-caf5eea6]{overscroll-behavior:contain;flex:1;padding:18px 16px 24px;overflow:auto}.mnr-settings-section h4[data-v-caf5eea6],.mnr-field-label[data-v-caf5eea6],.mnr-settings-fieldset legend[data-v-caf5eea6]{margin-bottom:10px;font-size:14px;font-weight:600;display:block}.mnr-theme-grid[data-v-caf5eea6]{grid-template-columns:repeat(3,1fr);gap:8px;display:grid}.mnr-theme-btn[data-v-caf5eea6]{cursor:pointer;border:2px solid #0000;border-radius:8px;min-width:0;min-height:42px;padding:8px 4px;font-size:12px}.mnr-reading-preview[data-v-caf5eea6]{border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);color:var(--mnr-text,#333);border-radius:8px;margin-top:16px;padding:12px 14px;display:none}.mnr-reading-preview span[data-v-caf5eea6]{opacity:.65;margin-bottom:4px;font-size:12px;display:block}.mnr-reading-preview p[data-v-caf5eea6]{font-family:var(--mnr-font-family,system-ui, sans-serif);font-size:var(--mnr-font-size,18px);line-height:var(--mnr-line-height,1.8);letter-spacing:var(--mnr-letter-spacing,0);text-indent:var(--mnr-paragraph-indent,2em);margin:0}.mnr-field-label[data-v-caf5eea6]{margin-top:18px}.mnr-select[data-v-caf5eea6]{border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);width:100%;min-height:42px;color:var(--mnr-text,#333);border-radius:8px;padding:9px 12px;font-size:14px}.mnr-settings-fieldset[data-v-caf5eea6]{border:0;min-width:0;margin:18px 0 0;padding:0}.mnr-segmented-control[data-v-caf5eea6]{border:1px solid var(--mnr-border,#ddd);border-radius:8px;display:flex;overflow:hidden}.mnr-segment[data-v-caf5eea6]{border:0;border-right:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);min-height:42px;color:var(--mnr-text,#666);cursor:pointer;flex:1;padding:9px 12px;font-size:14px}.mnr-segment[data-v-caf5eea6]:last-child{border-right:0}.mnr-segment.active[data-v-caf5eea6]{background:var(--mnr-link,#1976d2);color:var(--mnr-on-link,#fff)}.mnr-secondary-action[data-v-caf5eea6]{border:1px solid var(--mnr-border,#ddd);width:100%;min-height:42px;color:var(--mnr-text,#333);cursor:pointer;background:0 0;border-radius:8px;margin-top:16px;padding:9px 12px;font-size:14px}.mnr-settings-group[data-v-caf5eea6]{border-top:1px solid var(--mnr-border,#ddd);margin-top:18px}.mnr-settings-group summary[data-v-caf5eea6]{min-height:48px;color:var(--mnr-text,#333);cursor:pointer;padding:14px 0;font-size:14px;font-weight:600}.mnr-settings-group-content[data-v-caf5eea6]{padding-bottom:4px}.mnr-settings-group-content[data-v-caf5eea6]>:first-child{margin-top:0}.mnr-switch-row[data-v-caf5eea6]{min-height:44px;color:var(--mnr-text,#333);cursor:pointer;justify-content:space-between;align-items:center;gap:16px;display:flex}.mnr-switch-row input[data-v-caf5eea6]{width:22px;height:22px;accent-color:var(--mnr-link,#1976d2);flex:none}.mnr-custom-css[data-v-caf5eea6]{box-sizing:border-box;resize:vertical;border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);width:100%;min-height:110px;color:var(--mnr-text,#333);border-radius:8px;padding:10px 12px;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}.mnr-cleanup-fields[data-v-caf5eea6]{gap:10px;margin-top:8px;display:grid}.mnr-cleanup-fields .mnr-field-label[data-v-caf5eea6],.mnr-cleanup-fields .mnr-field-help[data-v-caf5eea6],.mnr-cleanup-fields .mnr-field-error[data-v-caf5eea6]{margin:0}.mnr-cleanup-editor-label[data-v-caf5eea6],.mnr-cleanup-guide[data-v-caf5eea6]{font-size:12px;line-height:1.6}.mnr-cleanup-guide[data-v-caf5eea6]{color:var(--mnr-text,#333)}.mnr-cleanup-guide summary[data-v-caf5eea6]{cursor:pointer;opacity:.72}.mnr-cleanup-guide p[data-v-caf5eea6]{margin:8px 0 0}.mnr-cleanup-guide code[data-v-caf5eea6]{overflow-wrap:anywhere}.mnr-cleanup-add[data-v-caf5eea6]{grid-template-columns:minmax(0,1fr) auto;gap:8px;display:grid}.mnr-cleanup-input[data-v-caf5eea6]{box-sizing:border-box;border:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);min-width:0;min-height:42px;color:var(--mnr-text,#333);border-radius:8px;padding:9px 12px;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}.mnr-cleanup-add-button[data-v-caf5eea6]{white-space:nowrap;width:auto;margin-top:0}.mnr-cleanup-add-button[data-v-caf5eea6]:disabled{cursor:not-allowed;opacity:.55}.mnr-cleanup-site[data-v-caf5eea6]{overflow-wrap:anywhere}.mnr-field-help[data-v-caf5eea6],.mnr-field-error[data-v-caf5eea6]{margin:-4px 0 8px;font-size:12px;line-height:1.5}.mnr-field-help[data-v-caf5eea6]{opacity:.72}.mnr-protection-help[data-v-caf5eea6]{margin:8px 0 0}.mnr-field-error[data-v-caf5eea6]{color:var(--mnr-danger,#b3261e);margin-top:6px}.mnr-settings-footer[data-v-caf5eea6]{padding:10px 16px max(12px, env(safe-area-inset-bottom));border-top:1px solid var(--mnr-border,#ddd);background:var(--mnr-bg,#fff);flex-shrink:0}.mnr-exit-btn[data-v-caf5eea6]{border:1px solid var(--mnr-danger,#b3261e);width:100%;min-height:42px;color:var(--mnr-danger,#b3261e);cursor:pointer;background:0 0;border-radius:8px;padding:9px 12px;font-size:14px}@media (hover:hover){.mnr-close-btn[data-v-caf5eea6]:hover,.mnr-secondary-action[data-v-caf5eea6]:enabled:hover,.mnr-segment[data-v-caf5eea6]:not(.active):hover,.mnr-exit-btn[data-v-caf5eea6]:hover{background:var(--mnr-border,#f0f0f0)}}.mnr-settings-header h3[data-v-caf5eea6]:focus-visible,.mnr-close-btn[data-v-caf5eea6]:focus-visible,.mnr-theme-btn[data-v-caf5eea6]:focus-visible,.mnr-select[data-v-caf5eea6]:focus-visible,.mnr-segment[data-v-caf5eea6]:focus-visible,.mnr-secondary-action[data-v-caf5eea6]:focus-visible,.mnr-settings-group summary[data-v-caf5eea6]:focus-visible,.mnr-cleanup-guide summary[data-v-caf5eea6]:focus-visible,.mnr-switch-row input[data-v-caf5eea6]:focus-visible,.mnr-cleanup-input[data-v-caf5eea6]:focus-visible,.mnr-custom-css[data-v-caf5eea6]:focus-visible,.mnr-exit-btn[data-v-caf5eea6]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}.mnr-slide-enter-active[data-v-caf5eea6],.mnr-slide-leave-active[data-v-caf5eea6],.mnr-settings-panel[data-v-caf5eea6]{transition:opacity .22s,transform .22s}.mnr-slide-enter-from[data-v-caf5eea6],.mnr-slide-leave-to[data-v-caf5eea6]{opacity:0}.mnr-slide-enter-from .mnr-settings-panel[data-v-caf5eea6],.mnr-slide-leave-to .mnr-settings-panel[data-v-caf5eea6]{transform:translate(100%)}@media (width<=600px){.mnr-settings-panel[data-v-caf5eea6]{width:100%}.mnr-reading-preview[data-v-caf5eea6]{display:block}.mnr-desktop-width[data-v-caf5eea6]{display:none}}@media (prefers-reduced-motion:reduce){.mnr-slide-enter-active[data-v-caf5eea6],.mnr-slide-leave-active[data-v-caf5eea6],.mnr-settings-panel[data-v-caf5eea6]{transition:none}}.mnr-reader[data-v-767bb61f]{z-index:2147483647;background:var(--mnr-bg,#fff);color:var(--mnr-text,#1a1a1a);overscroll-behavior:none;flex-direction:column;display:flex;position:fixed;inset:0;overflow:hidden}.mnr-reader-main[data-v-767bb61f]{padding-top:68px;padding-bottom:max(40px, env(safe-area-inset-bottom));overscroll-behavior:none;-webkit-overflow-scrolling:touch;touch-action:pan-y pinch-zoom;flex:1;overflow:auto}.mnr-boundary-gesture-hint[data-v-767bb61f]{z-index:4;background:color-mix(in srgb, var(--mnr-text,#1a1a1a) 86%, transparent);max-width:calc(100vw - 32px);color:var(--mnr-bg,#fff);white-space:nowrap;pointer-events:none;border-radius:999px;padding:8px 14px;font-size:14px;line-height:1.4;position:fixed;left:50%;transform:translate(-50%)}.mnr-boundary-gesture-hint.is-prev[data-v-767bb61f]{top:max(16px, env(safe-area-inset-top))}.mnr-boundary-gesture-hint.is-next[data-v-767bb61f]{bottom:max(16px, env(safe-area-inset-bottom))}.mnr-reader-content[data-v-767bb61f]{max-width:var(--mnr-max-width,800px);padding:var(--mnr-padding,20px);font-family:var(--mnr-font-family,\"Microsoft YaHei\", \"PingFang SC\", \"Noto Sans CJK SC\", system-ui, sans-serif);font-size:var(--mnr-font-size,18px);line-height:var(--mnr-line-height,1.8);letter-spacing:var(--mnr-letter-spacing,0em);margin:0 auto}.mnr-reader-content[data-v-767bb61f] p{text-indent:var(--mnr-paragraph-indent,2em);margin:0 0 1em}.mnr-reader-content[data-v-767bb61f] img{max-width:100%;height:auto;margin:1em auto;display:block}.mnr-reader-content[data-v-767bb61f] a{color:var(--mnr-link,#1976d2)}.mnr-reader-main[data-v-767bb61f]:focus-visible{outline:3px solid color-mix(in srgb, var(--mnr-link,#1976d2) 55%, transparent);outline-offset:2px}.mnr-chapter-title[data-v-767bb61f]{color:var(--mnr-text,#1a1a1a);text-align:center;margin:0 0 1em;font-size:1.5em;font-weight:700;line-height:1.4}.mnr-chapter-end[data-v-767bb61f]{max-width:var(--mnr-max-width,800px);text-align:center;margin:0 auto;padding:40px 20px}.mnr-chapter-end-text[data-v-767bb61f]{color:var(--mnr-text,#666);opacity:.7;margin-bottom:16px}.mnr-chapter-nav[data-v-767bb61f]{flex-wrap:wrap;justify-content:center;gap:24px;display:flex}.mnr-chapter-link[data-v-767bb61f]{color:var(--mnr-link,#1976d2);border:1px solid var(--mnr-border,#e0e0e0);border-radius:8px;padding:12px 24px;text-decoration:none;transition:all .2s}.mnr-chapter-link[data-v-767bb61f]:hover{background:var(--mnr-border,#f0f0f0)}.mnr-sentinel[data-v-767bb61f]{visibility:hidden;width:100%;height:1px}.mnr-loading-prev[data-v-767bb61f],.mnr-loading-next[data-v-767bb61f],.mnr-section-progress[data-v-767bb61f]{color:var(--mnr-text,#666);justify-content:center;align-items:center;gap:12px;padding:24px;display:flex}@media (width>=768px){.mnr-reader-content[data-v-767bb61f]{padding:var(--mnr-padding,30px)}}@media (width>=1024px){.mnr-reader-content[data-v-767bb61f]{padding:var(--mnr-padding,40px)}}@media (prefers-reduced-motion:reduce){.mnr-chapter-link[data-v-767bb61f]{transition:none}}\n/*$vite$:1*/", {});
 	})();
 })();

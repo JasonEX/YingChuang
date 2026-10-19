@@ -36,19 +36,6 @@ import { ReaderEntryButton } from '@/ui/components/entry';
 import { ReaderView } from '@/ui/components/reader';
 import { useReaderStore } from '@/ui/stores/reader';
 
-const EXIT_NAVIGATION_KEY = 'mnr_exit_navigation';
-// Violentmonkey supports the script but does not expose Tampermonkey's per-tab APIs.
-const hasTabStorage = typeof GM_getTab === 'function' && typeof GM_saveTab === 'function';
-
-interface ExitNavigation {
-  targetUrl: string;
-  cleanupHostOverlays: boolean;
-}
-
-type UserscriptTabState = Record<string, unknown> & {
-  [EXIT_NAVIGATION_KEY]?: ExitNavigation;
-};
-
 /** Application state */
 interface AppState {
   isInitialized: boolean;
@@ -178,30 +165,16 @@ async function runAutoEnable(): Promise<void> {
   const decision = manager.check(document);
   appState.currentDecision = decision;
 
-  // If user previously disabled auto-enable, keep only the manual entry.
-  if (decision.method === 'user-disabled' || decision.showManualEntry) {
-    getSiteProtection().deactivate();
-    showReaderEntry();
-    return;
+  if (decision.shouldEnable) {
+    manager.setLaunchCallback(launchReader);
+    // Execute the flow (will use cached decision); it launches only at auto-launch confidence.
+    await manager.execute(document);
+    if (appState.isActive) return;
   }
 
-  // If no auto-enable or manual entry is needed, stop here.
-  if (!decision.shouldEnable) {
-    getSiteProtection().deactivate();
-    return;
-  }
-
-  // Set up launch callback
-  manager.setLaunchCallback(launchReader);
-
-  // Execute the flow (will use cached decision)
-  await manager.execute(document);
-
-  // Medium-confidence detection and failed launches both leave a manual entry instead.
-  if (!appState.isActive && decision.shouldEnable) {
-    getSiteProtection().deactivate();
-    showReaderEntry();
-  }
+  // Every chapter page the reader did not open on keeps the same quiet manual entry.
+  getSiteProtection().deactivate();
+  if (decision.showManualEntry) showReaderEntry();
 }
 
 /**
@@ -265,13 +238,11 @@ function mountReaderUI(): void {
 
   // Create and mount app with explicit callbacks so UI components do not import bootstrap.
   app = createApp(ReaderView, {
-    siteAutoEnable: getCurrentSiteAutoEnable(),
     onCopyDiagnostics: () => {
       void copyDiagnosticsFromMenu();
     },
     onExit: closeReader,
     onProtectionModeChange: setProtectionMode,
-    onSiteAutoEnableChange: setCurrentSiteAutoEnable,
   });
   app.use(pinia!);
   app.mount(mountPoint);
@@ -300,75 +271,6 @@ function cleanupHostPageOverlays(): void {
   } catch (e) {
     console.error('[MNR] Failed to clean host page overlays:', e);
   }
-}
-
-function normalizeExitDestination(url: string): string {
-  const normalized = normalizeUrlForFetch(url);
-  try {
-    const parsed = new URL(normalized);
-    // Canonical redirects commonly change only the HTTP scheme or add/remove www.
-    // Treat those as the same destination without accepting unrelated host aliases.
-    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-      parsed.protocol = 'https:';
-      parsed.hostname = parsed.hostname.replace(/^www\./i, '');
-    }
-    if (parsed.pathname.length > 1) parsed.pathname = parsed.pathname.replace(/\/+$/, '');
-    return parsed.toString();
-  } catch {
-    return normalized.replace(/\/+$/, '');
-  }
-}
-
-function getUserscriptTabState(): Promise<UserscriptTabState> {
-  return new Promise(resolve => GM_getTab(resolve));
-}
-
-async function persistExitNavigation(transition: ExitNavigation): Promise<void> {
-  if (!hasTabStorage) {
-    sessionStorage.setItem(EXIT_NAVIGATION_KEY, JSON.stringify(transition));
-    return;
-  }
-  const tab = await getUserscriptTabState();
-  tab[EXIT_NAVIGATION_KEY] = transition;
-  GM_saveTab(tab);
-}
-
-/** Consume the one-shot transition created when the reader exits onto another chapter. */
-async function consumeExitNavigation(): Promise<boolean> {
-  let transition: ExitNavigation | undefined;
-  if (hasTabStorage) {
-    const tab = await getUserscriptTabState();
-    transition = tab[EXIT_NAVIGATION_KEY];
-    if (transition) {
-      delete tab[EXIT_NAVIGATION_KEY];
-      GM_saveTab(tab);
-    }
-  } else {
-    // This path is tab-local and same-origin; it cannot follow cross-origin redirects.
-    try {
-      const serialized = sessionStorage.getItem(EXIT_NAVIGATION_KEY);
-      if (serialized) {
-        sessionStorage.removeItem(EXIT_NAVIGATION_KEY);
-        transition = JSON.parse(serialized) as ExitNavigation;
-      }
-    } catch (e) {
-      console.error('[MNR] Failed to read exit navigation:', e);
-    }
-  }
-  if (!transition || typeof transition.targetUrl !== 'string') return false;
-  // The next document owns this one-shot intent, even if navigation landed elsewhere.
-  if (
-    normalizeExitDestination(transition.targetUrl) !==
-    normalizeExitDestination(window.location.href)
-  ) {
-    return false;
-  }
-
-  appState.autoEnableDone = true;
-  getSiteProtection().deactivate();
-  if (transition.cleanupHostOverlays === true) cleanupHostPageOverlays();
-  showReaderEntry();
-  return true;
 }
 
 /**
@@ -427,6 +329,7 @@ export function closeReader(): void {
 
   // While the reader is open, the host page is display:none and overlay geometry is unavailable.
   // Run a newly selected aggressive-mode cleanup after revealing the host, before the next paint.
+  // A navigating exit leaves this page; the destination starts clean and cleans up on next entry.
   if (cleanupHostOverlays && !navigationTarget) {
     cleanupHostPageOverlays();
   }
@@ -441,22 +344,17 @@ export function closeReader(): void {
   appState.originalHostPage = null; // Clear saved host page state
   appState.entryPageKind = null;
 
+  if (entryPageKind === 'chapter') {
+    // Exiting is the explicit opt-out; the destination chapter then loads with the manual entry.
+    disableSiteAutoEnable([window.location.href, navigationTarget]);
+  }
+
   // If current chapter URL is different from the original page URL,
   // navigate to the target URL so page content matches what user was reading
   // Chapter URLs are canonicalized (no hash, no redundant ?page=1); compare the same way so
   // closing on the entry chapter restores in place instead of reloading.
   if (navigationTarget) {
-    // Tampermonkey tab state follows this navigation across origins without leaking into other
-    // tabs or long-lived script storage. Save it before navigating so the destination can consume
-    // the one-shot transition even after a canonical redirect.
-    void persistExitNavigation({
-      targetUrl: normalizeExitDestination(navigationTarget),
-      cleanupHostOverlays,
-    })
-      .catch(e => console.error('[MNR] Failed to save exit navigation:', e))
-      .finally(() => {
-        window.location.href = navigationTarget;
-      });
+    window.location.href = navigationTarget;
     return; // The next page load will decide whether to show the manual entry.
   }
 
@@ -468,21 +366,21 @@ export function closeReader(): void {
   }
 }
 
-function getCurrentSiteAutoEnable(): boolean {
-  try {
-    const hostname = new URL(window.location.href).hostname;
-    return getRuleStorage().getSitePreference(hostname)?.enabled !== false;
-  } catch {
-    return true;
+/** Exiting covers the page left behind and, for cross-host chapter links, the destination. */
+function disableSiteAutoEnable(urls: Array<string | null>): void {
+  const storage = getRuleStorage();
+  const hostnames = new Set<string>();
+  for (const url of urls) {
+    if (!url) continue;
+    try {
+      hostnames.add(new URL(url).hostname);
+    } catch (e) {
+      console.debug('[MNR] Failed to resolve site for auto-enable preference:', url, e);
+    }
   }
-}
-
-function setCurrentSiteAutoEnable(enabled: boolean): void {
-  try {
-    const hostname = new URL(window.location.href).hostname;
-    getRuleStorage().setSitePreference(hostname, { enabled, timestamp: Date.now() });
-  } catch (e) {
-    console.error('[MNR] Failed to update site auto-enable preference:', e);
+  for (const hostname of hostnames) {
+    if (storage.getSitePreference(hostname)?.enabled === false) continue;
+    storage.setSitePreference(hostname, { enabled: false, timestamp: Date.now() });
   }
 }
 
@@ -671,7 +569,6 @@ async function bootstrap(): Promise<void> {
   if (!isTopFrame()) return;
   installGlobalDebugErrorListeners();
   if (appState.isActive) return;
-  if (await consumeExitNavigation()) return;
 
   const url = window.location.href;
   if (!isReaderEntryPage(url, document)) {

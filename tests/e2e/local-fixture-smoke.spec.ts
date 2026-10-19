@@ -1356,13 +1356,6 @@ test('runs the built userscript and restores the host page after exit', async ({
     .locator('details')
     .filter({ hasText: '本站与高级' });
   await advancedSettings.locator(':scope > summary').click();
-  const siteAutoEnable = advancedSettings.locator('.mnr-switch-row').filter({
-    hasText: '本站自动进入阅读模式',
-  });
-  await siteAutoEnable.locator('input').uncheck();
-  await expect(siteAutoEnable.locator('input')).not.toBeChecked();
-  await siteAutoEnable.locator('input').check();
-  await expect(siteAutoEnable.locator('input')).toBeChecked();
 
   const customCss = advancedSettings.locator('textarea#mnr-custom-css');
   const customCleanupDraft = advancedSettings.locator('#mnr-custom-cleanup-draft');
@@ -2279,110 +2272,46 @@ for (const switchBack of [false, true]) {
   });
 }
 
-for (const tabApis of [true, false]) {
-  test(`carries deferred overlay cleanup across a slow canonical exit (tab APIs: ${tabApis})`, async ({
-    context,
-    page,
-  }) => {
-    const nextUrl = 'http://mnr.test/chapter/101.html';
-    const canonicalNextUrl = `http://${tabApis ? 'www.' : ''}mnr.test/chapter/101.html/`;
-    const withOverlay = (html: string) =>
-      html.replace(
-        '</body>',
-        `<a id="host-overlay" href="https://ads.example/"
-        style="position: fixed; inset: 0; z-index: 2001; background: transparent"></a></body>`
-      );
-    let destinationNavigations = 0;
+test('remembers the latest explicit enter or exit for the site across loads', async ({
+  context,
+  page,
+}) => {
+  const nextUrl = 'http://mnr.test/chapter/101.html';
+  await context.route(/^http:\/\/mnr\.test\/chapter\/.*$/, route =>
+    route.fulfill({
+      body: route.request().url() === nextUrl ? nextFixtureHtml : fixtureHtml,
+      contentType: 'text/html; charset=utf-8',
+      status: 200,
+    })
+  );
+  await addYingChuangUserscript(context);
 
-    await context.route(/^http:\/\/(?:www\.)?mnr\.test\/chapter\/.*$/, async route => {
-      const request = route.request();
-      if (request.url() === canonicalNextUrl) {
-        return route.fulfill({
-          body: withOverlay(nextFixtureHtml),
-          contentType: 'text/html; charset=utf-8',
-          status: 200,
-        });
-      }
-      const isDestination = request.url() === nextUrl;
-      if (isDestination && request.isNavigationRequest() && request.frame() === page.mainFrame()) {
-        destinationNavigations++;
-        await new Promise(resolve => setTimeout(resolve, 5_250));
-        return route.fulfill({
-          body: `<!doctype html><script>location.replace(${JSON.stringify(
-            canonicalNextUrl
-          )})</script>`,
-          contentType: 'text/html; charset=utf-8',
-          status: 200,
-        });
-      }
-      return route.fulfill({
-        body: withOverlay(isDestination ? nextFixtureHtml : fixtureHtml),
-        contentType: 'text/html; charset=utf-8',
-        status: 200,
-      });
-    });
+  const reader = page.locator('#mnr-reader-root');
+  const entry = page.locator('#mnr-entry-root #mnr-entry-button');
+  await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
+  assertMnrSmokeState(await waitForMnrReader(page));
 
-    const userScript = fs.readFileSync(getMnrE2eConfig().userScriptPath, 'utf8');
-    await context.addInitScript({
-      content: `${createGmMockScript()}
-      (() => {
-        // This one-page fixture uses a domain cookie to emulate Tampermonkey's cross-origin
-        // tab object; production uses GM_getTab/GM_saveTab rather than cookie storage.
-        const cookieName = '__mnr_e2e_tab_state';
-        const readTab = () => {
-          const row = document.cookie
-            .split('; ')
-            .find(value => value.startsWith(cookieName + '='));
-          if (!row) return {};
-          try {
-            return JSON.parse(decodeURIComponent(row.slice(cookieName.length + 1)));
-          } catch {
-            return {};
-          }
-        };
-        window.GM_getTab = callback => queueMicrotask(() => callback(readTab()));
-        window.GM_saveTab = tab => {
-          document.cookie = cookieName + '=' + encodeURIComponent(JSON.stringify(tab))
-            + '; Domain=mnr.test; Path=/; SameSite=Lax';
-        };
-      })();
-      ${tabApis ? '' : 'delete window.GM_getTab; delete window.GM_saveTab;'}
-      ${userScript}`,
-    });
+  // Exiting from a later chapter lands there with only the quiet entry, and stays that way.
+  await page.waitForTimeout(800);
+  await page.keyboard.press('ArrowRight');
+  await expect(page).toHaveURL(nextUrl);
+  await reader.getByRole('button', { name: '打开设置' }).click();
+  await reader.getByRole('button', { name: '退出阅读模式' }).click();
+  await expect(page).toHaveURL(nextUrl);
+  await expect(entry).toBeVisible();
+  await expect(reader).toHaveCount(0);
+  await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
+  await expect(entry).toBeVisible();
+  await page.waitForTimeout(500);
+  await expect(reader).toHaveCount(0);
 
-    await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
-    assertMnrSmokeState(await waitForMnrReader(page));
-    const reader = page.locator('#mnr-reader-root');
-    await expect(reader.locator(`article[data-chapter-url="${nextUrl}"]`)).toContainText(
-      '第101章 手势续读'
-    );
-    await reader.getByRole('button', { name: '打开设置' }).click();
-    await reader.locator('summary').filter({ hasText: '本站与高级' }).click();
-    await reader.getByRole('button', { name: '强力', exact: true }).click();
-    await page.keyboard.press('Escape');
-
-    await page.waitForTimeout(800);
-    await page.keyboard.press('ArrowRight');
-    await expect(page).toHaveURL(nextUrl);
-    await expect(reader).toHaveCount(1);
-    await reader.getByRole('button', { name: '打开设置' }).click();
-    await reader.getByRole('button', { name: '退出阅读模式' }).click();
-
-    await expect(page).toHaveURL(canonicalNextUrl);
-    await expect(reader).toHaveCount(0);
-    await expect(page.locator('#mnr-entry-root')).toHaveCount(1);
-    await expect.poll(() => destinationNavigations).toBe(1);
-    const destinationOverlay = page.locator('#host-overlay');
-    await expect
-      .poll(() => destinationOverlay.evaluate(element => (element as HTMLElement).style.display))
-      .toBe('none');
-    await expect(destinationOverlay).toBeHidden();
-
-    // Only the exit navigation is suppressed; a subsequent load follows normal auto-enable.
-    await page.reload({ waitUntil: 'domcontentloaded' });
-    assertMnrSmokeState(await waitForMnrReader(page));
-  });
-}
+  // Entering again restores automatic entry for the next load.
+  await entry.click();
+  assertMnrSmokeState(await waitForMnrReader(page));
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  assertMnrSmokeState(await waitForMnrReader(page));
+  await expect(page.locator('#mnr-entry-root')).toHaveCount(0);
+});
 
 test.describe('mobile gesture paging', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });

@@ -135,9 +135,10 @@ vi.mock('@/ui/components/entry', async () => {
 
 describe('bootstrap', () => {
   let dom: JSDOM;
-  let tabState: Record<string, unknown>;
 
-  async function loadExitDestination(): Promise<typeof import('@/bootstrap')> {
+  /** A chapter on a site the user exited the reader on loads with only the manual entry. */
+  async function loadDisabledSiteChapter(): Promise<typeof import('@/bootstrap')> {
+    mockGetSitePreference.mockReturnValue({ enabled: false, timestamp: 1 });
     Object.defineProperty(document, 'readyState', { configurable: true, get: () => 'complete' });
     const bootstrap = await import('@/bootstrap');
     await vi.waitFor(() => expect(document.getElementById('mnr-entry-root')).not.toBeNull());
@@ -146,12 +147,6 @@ describe('bootstrap', () => {
 
   beforeEach(() => {
     vi.resetModules();
-    tabState = {};
-    vi.stubGlobal(
-      'GM_getTab',
-      vi.fn(callback => queueMicrotask(() => callback(tabState)))
-    );
-    vi.stubGlobal('GM_saveTab', vi.fn());
     mockActivateProtection.mockReset();
     mockDeactivateProtection.mockReset();
     mockGetAutoEnableManager.mockReset();
@@ -287,163 +282,67 @@ describe('bootstrap', () => {
     );
   });
 
-  it('shows an isolated manual entry for the matching exit destination', async () => {
-    dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
-      url: 'https://example.com/index.html',
-      pretendToBeVisual: true,
-    });
-
-    vi.stubGlobal('window', dom.window);
-    vi.stubGlobal('document', dom.window.document);
-    vi.stubGlobal('sessionStorage', dom.window.sessionStorage);
-
-    const manager = {
-      check: vi.fn(() => ({ shouldEnable: true })),
-      setLaunchCallback: vi.fn(),
-      execute: vi.fn(async () => {}),
-      manualEnable: vi.fn(async () => {}),
-    };
-    mockGetAutoEnableManager.mockReturnValue(manager);
-
-    tabState.mnr_exit_navigation = {
-      targetUrl: window.location.href,
-      cleanupHostOverlays: false,
-    };
-    await loadExitDestination();
-
-    const entryHost = document.getElementById('mnr-entry-root');
-    expect(entryHost).not.toBeNull();
-    expect(entryHost?.querySelector('#mnr-entry-button')).toBeNull();
-    expect(entryHost?.shadowRoot?.querySelector('#mnr-entry-button')?.textContent).toBe(
-      '进入阅读模式'
-    );
-    expect(tabState).not.toHaveProperty('mnr_exit_navigation');
-    expect(manager.check).not.toHaveBeenCalled();
-    expect(mockRemoveOverlays).not.toHaveBeenCalled();
-    expect(configStore.load).not.toHaveBeenCalled();
-  });
-
-  it('consumes matching deferred overlay cleanup on a skipped destination load', async () => {
+  it('shows an isolated manual entry on a site the user exited the reader on', async () => {
     dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
       url: 'https://example.com/chapter/2/',
       pretendToBeVisual: true,
     });
-
     vi.stubGlobal('window', dom.window);
     vi.stubGlobal('document', dom.window.document);
     vi.stubGlobal('sessionStorage', dom.window.sessionStorage);
-    Object.defineProperty(document, 'readyState', {
-      configurable: true,
-      get: () => 'complete',
-    });
-    mockGetSitePreference.mockReturnValue({ enabled: false, timestamp: Date.now() });
 
-    tabState.mnr_exit_navigation = {
-      targetUrl: 'https://example.com/chapter/2',
-      cleanupHostOverlays: true,
-    };
-    await import('@/bootstrap');
+    await loadDisabledSiteChapter();
 
-    await vi.waitFor(() => expect(document.getElementById('mnr-entry-root')).not.toBeNull());
-    expect(mockDeactivateProtection).toHaveBeenCalled();
-    expect(mockRemoveOverlays).toHaveBeenCalledTimes(1);
-    expect(tabState).not.toHaveProperty('mnr_exit_navigation');
-    expect(mockDeactivateProtection.mock.invocationCallOrder.at(-1)).toBeLessThan(
-      mockRemoveOverlays.mock.invocationCallOrder[0]
+    const entryHost = document.getElementById('mnr-entry-root');
+    expect(entryHost?.querySelector('#mnr-entry-button')).toBeNull();
+    expect(entryHost?.shadowRoot?.querySelector('#mnr-entry-button')?.textContent).toBe(
+      '进入阅读模式'
     );
+    expect(mockGetSitePreference).toHaveBeenCalledWith('example.com');
+    expect(mockDeactivateProtection).toHaveBeenCalled();
+    expect(mockRemoveOverlays).not.toHaveBeenCalled();
     expect(configStore.load).not.toHaveBeenCalled();
-    expect(mockGetSitePreference).not.toHaveBeenCalled();
     expect(mockGetAutoEnableManager).not.toHaveBeenCalled();
-    expect(GM_getTab).toHaveBeenCalledTimes(1);
   });
 
-  it('consumes exit state after a canonical cross-origin redirect in the same tab', async () => {
+  it('offers the manual entry on chapter pages below the detection threshold', async () => {
     dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
-      url: 'https://www.example.com/chapter/2/',
+      url: 'https://example.com/chapter/12345.html',
       pretendToBeVisual: true,
     });
-
     vi.stubGlobal('window', dom.window);
     vi.stubGlobal('document', dom.window.document);
     vi.stubGlobal('sessionStorage', dom.window.sessionStorage);
-    Object.defineProperty(document, 'readyState', {
-      configurable: true,
-      get: () => 'complete',
-    });
-
-    const tabState: Record<string, unknown> = {
-      mnr_exit_navigation: {
-        targetUrl: 'http://example.com/chapter/2',
-        cleanupHostOverlays: true,
-      },
+    Object.defineProperty(document, 'readyState', { configurable: true, get: () => 'complete' });
+    const manager = {
+      check: vi.fn(() => ({ shouldEnable: false, method: 'detection', showManualEntry: true })),
+      setLaunchCallback: vi.fn(),
+      execute: vi.fn(async () => {}),
     };
-    const getTab = vi.fn((callback: (tab: Record<string, unknown>) => void) => {
-      callback(tabState);
-    });
-    const saveTab = vi.fn((tab: Record<string, unknown>) => {
-      expect(tab).toBe(tabState);
-    });
-    vi.stubGlobal('GM_getTab', getTab);
-    vi.stubGlobal('GM_saveTab', saveTab);
+    mockGetAutoEnableManager.mockReturnValue(manager);
 
     await import('@/bootstrap');
 
     await vi.waitFor(() => expect(document.getElementById('mnr-entry-root')).not.toBeNull());
-    expect(tabState).not.toHaveProperty('mnr_exit_navigation');
-    expect(getTab).toHaveBeenCalledTimes(1);
-    expect(saveTab).toHaveBeenCalledTimes(1);
-    expect(mockRemoveOverlays).toHaveBeenCalledTimes(1);
-    expect(configStore.load).not.toHaveBeenCalled();
-    expect(mockGetAutoEnableManager).not.toHaveBeenCalled();
+    expect(manager.execute).not.toHaveBeenCalled();
+    expect(mockDeactivateProtection).toHaveBeenCalled();
   });
 
-  it.each(['empty', 'invalid', 'blocked'])(
-    'boots without tab APIs when session storage is %s',
-    async state => {
-      dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
-        url: 'https://example.com/chapter/12345.html',
-      });
-      vi.stubGlobal('window', dom.window);
-      vi.stubGlobal('document', dom.window.document);
-      vi.stubGlobal('sessionStorage', dom.window.sessionStorage);
-      vi.stubGlobal('GM_getTab', undefined);
-      vi.stubGlobal('GM_saveTab', undefined);
-      Object.defineProperty(document, 'readyState', { configurable: true, get: () => 'complete' });
-      if (state === 'invalid') sessionStorage.setItem('mnr_exit_navigation', '{');
-      if (state === 'blocked') {
-        vi.spyOn(dom.window.Storage.prototype, 'getItem').mockImplementation(() => {
-          throw new Error('Storage unavailable');
-        });
-      }
-      vi.spyOn(console, 'error').mockImplementation(() => {});
-      const manager = { check: vi.fn(() => ({ shouldEnable: false })) };
-      mockGetAutoEnableManager.mockReturnValue(manager);
-      await import('@/bootstrap');
-      await vi.waitFor(() => expect(manager.check).toHaveBeenCalledTimes(1));
-      expect(mockActivateProtection).toHaveBeenCalled();
-      expect(mockDeactivateProtection).toHaveBeenCalled();
-      expect(mockRemoveOverlays).not.toHaveBeenCalled();
-    }
-  );
-
-  it('discards an exit intent for another destination without cleaning or skipping detection', async () => {
+  it('keeps non-chapter decisions free of any entry', async () => {
     dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
-      url: 'https://example.com/chapter/3',
+      url: 'https://example.com/chapter/12345.html',
     });
     vi.stubGlobal('window', dom.window);
     vi.stubGlobal('document', dom.window.document);
     Object.defineProperty(document, 'readyState', { configurable: true, get: () => 'complete' });
-    tabState.mnr_exit_navigation = {
-      targetUrl: 'https://example.com/chapter/2',
-      cleanupHostOverlays: true,
-    };
-    const manager = { check: vi.fn(() => ({ shouldEnable: false })) };
+    const manager = { check: vi.fn(() => ({ shouldEnable: false, method: 'manual' })) };
     mockGetAutoEnableManager.mockReturnValue(manager);
+
     await import('@/bootstrap');
+
     await vi.waitFor(() => expect(manager.check).toHaveBeenCalledTimes(1));
-    expect(tabState).not.toHaveProperty('mnr_exit_navigation');
-    expect(mockRemoveOverlays).not.toHaveBeenCalled();
-    expect(GM_getTab).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(mockDeactivateProtection).toHaveBeenCalled());
+    expect(document.getElementById('mnr-entry-root')).toBeNull();
   });
 
   it('auto-bootstraps ambiguous section pages when an explicit rule matches', async () => {
@@ -489,8 +388,6 @@ describe('bootstrap', () => {
     expect(configStore.load).toHaveBeenCalledTimes(1);
     expect(manager.check).toHaveBeenCalledTimes(1);
     expect(manager.execute).toHaveBeenCalledTimes(1);
-    expect(GM_getTab).toHaveBeenCalledTimes(1);
-    expect(GM_saveTab).not.toHaveBeenCalled();
   });
 
   it('mounts reader UI when auto-enable launches', async () => {
@@ -568,7 +465,12 @@ describe('bootstrap', () => {
     vi.stubGlobal('sessionStorage', dom.window.sessionStorage);
 
     const manager = {
-      check: vi.fn(() => ({ shouldEnable: true, method: 'detection', confidence: 0.7 })),
+      check: vi.fn(() => ({
+        shouldEnable: true,
+        method: 'detection',
+        confidence: 0.7,
+        showManualEntry: true,
+      })),
       setLaunchCallback: vi.fn(),
       // Below the auto-launch threshold, execute() declines to launch.
       execute: vi.fn(async () => {}),
@@ -795,7 +697,7 @@ describe('bootstrap', () => {
     expect(document.querySelectorAll('#mnr-reader-root')).toHaveLength(1);
   });
 
-  it('closeReader restores page without changing the site auto-enable preference', async () => {
+  it('closeReader restores the page and disables auto-entry for the site', async () => {
     // Import the module on a non-chapter page to avoid auto-bootstrap side effects.
     const domInit = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
       url: 'https://example.com/index.html',
@@ -847,7 +749,11 @@ describe('bootstrap', () => {
 
     bootstrap.closeReader();
 
-    expect(mockSetSitePreference).not.toHaveBeenCalled();
+    expect(mockSetSitePreference).toHaveBeenCalledTimes(1);
+    expect(mockSetSitePreference).toHaveBeenCalledWith('example.com', {
+      enabled: false,
+      timestamp: expect.any(Number),
+    });
     expect(readerStore.deactivate).toHaveBeenCalledTimes(1);
     expect(mockDeactivateProtection).toHaveBeenCalled();
     expect(document.getElementById('mnr-reader-root')).toBeNull();
@@ -901,7 +807,6 @@ describe('bootstrap', () => {
 
     bootstrap.closeReader();
 
-    expect(tabState).not.toHaveProperty('mnr_exit_navigation');
     expect(window.location.href).toBe('https://example.com/chapter/1#comments');
     expect(document.title).toBe('Original Chapter Title');
     expect(document.getElementById('mnr-entry-root')).not.toBeNull();
@@ -958,13 +863,51 @@ describe('bootstrap', () => {
 
     bootstrap.closeReader();
 
+    expect(mockSetSitePreference).toHaveBeenCalledWith('www.deqixs.org', {
+      enabled: false,
+      timestamp: expect.any(Number),
+    });
+    expect(document.getElementById('mnr-entry-root')).not.toBeNull();
+  });
+
+  it('closeReader keeps an existing opt-out without rewriting it', async () => {
+    const domInit = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
+      url: 'https://example.com/index.html',
+    });
+    vi.stubGlobal('window', domInit.window);
+    vi.stubGlobal('document', domInit.window.document);
+    const bootstrap = await import('@/bootstrap');
+
+    const domChapter = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
+      url: 'https://example.com/chapter/1',
+      pretendToBeVisual: true,
+    });
+    vi.stubGlobal('window', domChapter.window);
+    vi.stubGlobal('document', domChapter.window.document);
+    vi.stubGlobal('sessionStorage', domChapter.window.sessionStorage);
+    mockGetSitePreference.mockReturnValue({ enabled: false, timestamp: 1 });
+    const chapter = { title: 't', content: 'c', rawContent: 'c', url: window.location.href };
+    let launchCb: ((c: unknown) => void) | null = null;
+    mockGetAutoEnableManager.mockReturnValue({
+      setLaunchCallback: vi.fn((cb: (c: unknown) => void) => {
+        launchCb = cb;
+      }),
+      manualEnable: vi.fn(async () => {
+        launchCb?.(completeEvent(chapter));
+      }),
+    });
+
+    await bootstrap.manualEnable();
+    expect(bootstrap.isActive()).toBe(true);
+    bootstrap.closeReader();
+
     expect(mockSetSitePreference).not.toHaveBeenCalled();
     expect(document.getElementById('mnr-entry-root')).not.toBeNull();
   });
 
   it('manual entry owns its lifecycle while manualEnable runs', async () => {
     dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
-      url: 'https://example.com/index.html',
+      url: 'https://example.com/chapter/1',
       pretendToBeVisual: true,
     });
 
@@ -976,15 +919,15 @@ describe('bootstrap', () => {
       check: vi.fn(() => ({ shouldEnable: false })),
       setLaunchCallback: vi.fn(),
       execute: vi.fn(async () => {}),
-      manualEnable: vi.fn(async () => {}),
+      manualEnable: vi.fn(() => pendingLaunch),
     };
+    let finishLaunch = () => {};
+    const pendingLaunch = new Promise<void>(resolve => {
+      finishLaunch = resolve;
+    });
     mockGetAutoEnableManager.mockReturnValue(manager);
 
-    tabState.mnr_exit_navigation = {
-      targetUrl: window.location.href,
-      cleanupHostOverlays: false,
-    };
-    await loadExitDestination();
+    await loadDisabledSiteChapter();
 
     const entryHost = document.getElementById('mnr-entry-root');
     const entryButton = entryHost?.shadowRoot?.querySelector(
@@ -995,7 +938,10 @@ describe('bootstrap', () => {
 
     await vi.waitFor(() => expect(manager.manualEnable).toHaveBeenCalledTimes(1));
     expect(document.getElementById('mnr-entry-root')).toBeNull();
-    expect(GM_getTab).toHaveBeenCalledTimes(1);
+
+    // A launch that leaves the reader closed hands the chapter page its entry back.
+    finishLaunch();
+    await vi.waitFor(() => expect(document.getElementById('mnr-entry-root')).not.toBeNull());
   });
 
   it('restores manual entry when reader launch fails on a chapter page', async () => {
@@ -1020,11 +966,7 @@ describe('bootstrap', () => {
     mockGetAutoEnableManager.mockReturnValue(manager);
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    tabState.mnr_exit_navigation = {
-      targetUrl: window.location.href,
-      cleanupHostOverlays: false,
-    };
-    await loadExitDestination();
+    await loadDisabledSiteChapter();
 
     const entryButton = document
       .getElementById('mnr-entry-root')
