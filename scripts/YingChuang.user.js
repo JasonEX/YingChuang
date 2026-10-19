@@ -3,7 +3,7 @@
 // @name:zh-CN         萤窗
 // @name:zh-TW         螢窗
 // @namespace          https://github.com/JasonEX
-// @version            1.0.18
+// @version            1.0.19
 // @author             Yuqian
 // @description        萤窗：小说阅读脚本，智能正文识别、连续阅读、阅读位置恢复、简繁转换
 // @description:zh-CN  萤窗：小说阅读脚本，智能正文识别、连续阅读、阅读位置恢复、简繁转换
@@ -9376,8 +9376,8 @@
 		else if (options) managerInstance.updateOptions(options);
 		return managerInstance;
 	}
-	var VERSION = "1.0.18";
-	var BUILD_DATE = "2026-10-15";
+	var VERSION = "1.0.19";
+	var BUILD_DATE = "2026-10-18";
 	function buildDiagnosticInfo(options = {}) {
 		return {
 			schema: "mnr-debug-v1",
