@@ -36,6 +36,7 @@
     <!-- Floating toolbar -->
     <FloatingToolbar
       :visible="showControls"
+      :chapter-title="readerStore.chapter?.title"
       @toggle-drawer="toggleDrawer"
       @open-settings="openSettings"
     />
@@ -44,6 +45,7 @@
     <ChapterDrawer
       :is-open="drawerOpen"
       :book-title="readerStore.bookTitle"
+      :index-url="readerStore.chapter?.indexUrl"
       :chapters="readerStore.tocWithStatus"
       :loading="readerStore.tocLoading"
       :cache-progress="readerStore.cacheProgress"
@@ -528,8 +530,8 @@ onUnmounted(() => {
   right: 0;
   bottom: 0;
   z-index: 2147483647;
-  background: var(--mnr-bg, #ffffff);
-  color: var(--mnr-text, #1a1a1a);
+  background: var(--mnr-bg);
+  color: var(--mnr-text);
   overflow: hidden;
   overscroll-behavior: none;
   display: flex;
@@ -556,8 +558,8 @@ onUnmounted(() => {
   max-width: calc(100vw - 32px);
   padding: 8px 14px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--mnr-text, #1a1a1a) 86%, transparent);
-  color: var(--mnr-bg, #ffffff);
+  background: var(--mnr-inverse-bg);
+  color: var(--mnr-bg);
   font-size: 14px;
   line-height: 1.4;
   white-space: nowrap;
@@ -573,24 +575,17 @@ onUnmounted(() => {
 }
 
 .mnr-reader-content {
-  max-width: var(--mnr-max-width, 800px);
+  max-width: var(--mnr-max-width);
   margin: 0 auto;
-  padding: var(--mnr-padding, 20px);
-  font-family: var(
-    --mnr-font-family,
-    'Microsoft YaHei',
-    'PingFang SC',
-    'Noto Sans CJK SC',
-    system-ui,
-    sans-serif
-  );
-  font-size: var(--mnr-font-size, 18px);
-  line-height: var(--mnr-line-height, 1.8);
-  letter-spacing: var(--mnr-letter-spacing, 0em);
+  padding: var(--mnr-padding);
+  font-family: var(--mnr-font-family);
+  font-size: var(--mnr-font-size);
+  line-height: var(--mnr-line-height);
+  letter-spacing: var(--mnr-letter-spacing);
 }
 
 .mnr-reader-content :deep(p) {
-  text-indent: var(--mnr-paragraph-indent, 2em);
+  text-indent: var(--mnr-paragraph-indent);
   margin: 0 0 1em 0;
 }
 
@@ -602,11 +597,11 @@ onUnmounted(() => {
 }
 
 .mnr-reader-content :deep(a) {
-  color: var(--mnr-link, #1976d2);
+  color: var(--mnr-link);
 }
 
 .mnr-reader-main:focus-visible {
-  outline: 3px solid color-mix(in srgb, var(--mnr-link, #1976d2) 55%, transparent);
+  outline: 3px solid var(--mnr-focus);
   outline-offset: 2px;
 }
 
@@ -614,22 +609,21 @@ onUnmounted(() => {
   font-size: 1.5em;
   font-weight: bold;
   margin: 0 0 1em 0;
-  color: var(--mnr-text, #1a1a1a);
+  color: var(--mnr-text);
   line-height: 1.4;
   text-align: center;
 }
 
 /* Chapter end */
 .mnr-chapter-end {
-  max-width: var(--mnr-max-width, 800px);
+  max-width: var(--mnr-max-width);
   margin: 0 auto;
   padding: 40px 20px;
   text-align: center;
 }
 
 .mnr-chapter-end-text {
-  color: var(--mnr-text, #666);
-  opacity: 0.7;
+  color: var(--mnr-muted);
   margin-bottom: 16px;
 }
 
@@ -642,15 +636,15 @@ onUnmounted(() => {
 
 .mnr-chapter-link {
   padding: 12px 24px;
-  color: var(--mnr-link, #1976d2);
+  color: var(--mnr-link);
   text-decoration: none;
-  border: 1px solid var(--mnr-border, #e0e0e0);
+  border: 1px solid var(--mnr-border);
   border-radius: 8px;
   transition: all 0.2s ease;
 }
 
 .mnr-chapter-link:hover {
-  background: var(--mnr-border, #f0f0f0);
+  background: var(--mnr-border);
 }
 
 /* Sentinel elements for IntersectionObserver */
@@ -669,20 +663,7 @@ onUnmounted(() => {
   justify-content: center;
   gap: 12px;
   padding: 24px;
-  color: var(--mnr-text, #666);
-}
-
-/* Mobile first - base styles are mobile */
-@media (min-width: 768px) {
-  .mnr-reader-content {
-    padding: var(--mnr-padding, 30px);
-  }
-}
-
-@media (min-width: 1024px) {
-  .mnr-reader-content {
-    padding: var(--mnr-padding, 40px);
-  }
+  color: var(--mnr-muted);
 }
 
 @media (prefers-reduced-motion: reduce) {

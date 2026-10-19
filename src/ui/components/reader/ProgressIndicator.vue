@@ -9,7 +9,6 @@
     :aria-valuenow="percent"
   >
     <div class="mnr-progress-bar" :style="{ width: `${percent}%` }"></div>
-    <span v-if="showText" class="mnr-progress-text">{{ percent }}%</span>
   </div>
 </template>
 
@@ -20,8 +19,6 @@ const props = withDefaults(
   defineProps<{
     /** Progress percent (0-100). */
     percent?: number;
-    /** Show percentage text */
-    showText?: boolean;
     /** Auto-hide when not scrolling */
     autoHide?: boolean;
     /** Hide delay in ms */
@@ -29,7 +26,6 @@ const props = withDefaults(
   }>(),
   {
     percent: 0,
-    showText: false,
     autoHide: true,
     hideDelay: 2000,
   }
@@ -91,19 +87,8 @@ onUnmounted(() => {
 
 .mnr-progress-bar {
   height: 100%;
-  background: var(--mnr-link, #1976d2);
+  background: var(--mnr-link);
   transition: width 0.1s ease-out;
-}
-
-.mnr-progress-text {
-  position: absolute;
-  right: 8px;
-  top: 8px;
-  background: rgba(0, 0, 0, 0.7);
-  color: #fff;
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 12px;
 }
 
 @media (prefers-reduced-motion: reduce) {

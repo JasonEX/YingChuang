@@ -94,6 +94,23 @@ describe('ConfigStore (extra coverage)', () => {
     expect(store.themeId).toBe('system');
   });
 
+  it('keeps the default theme when the stored theme no longer exists', async () => {
+    vi.stubGlobal(
+      'GM_getValue',
+      vi.fn(async () => ({ themeId: 'blue', reading: { fontSize: 20 } }))
+    );
+    vi.stubGlobal(
+      'GM_setValue',
+      vi.fn(async () => {})
+    );
+
+    const store = useConfigStore();
+    await store.load();
+
+    expect(store.themeId).toBe('system');
+    expect(store.reading.fontSize).toBe(20);
+  });
+
   it('handles null config data gracefully', async () => {
     const gmGetValue = vi.fn(async () => null);
     const gmSetValue = vi.fn(async () => {});

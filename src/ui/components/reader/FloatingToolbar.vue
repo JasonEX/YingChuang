@@ -12,6 +12,9 @@
         </svg>
       </button>
 
+      <!-- Where the reader is, shown only when the controls are summoned -->
+      <p v-if="chapterTitle" class="mnr-toolbar-title">{{ chapterTitle }}</p>
+
       <button
         class="mnr-fab"
         title="设置 (S)"
@@ -30,7 +33,10 @@
 </template>
 
 <script setup lang="ts">
-withDefaults(defineProps<{ visible?: boolean }>(), { visible: true });
+withDefaults(defineProps<{ visible?: boolean; chapterTitle?: string }>(), {
+  visible: true,
+  chapterTitle: '',
+});
 
 defineEmits<{
   toggleDrawer: [];
@@ -45,9 +51,26 @@ defineEmits<{
   left: max(12px, env(safe-area-inset-left));
   right: max(12px, env(safe-area-inset-right));
   display: flex;
+  align-items: center;
   justify-content: space-between;
+  gap: 12px;
   pointer-events: none;
   z-index: 100;
+}
+
+.mnr-toolbar-title {
+  min-width: 0;
+  margin: 0;
+  padding: 6px 14px;
+  overflow: hidden;
+  border: 1px solid var(--mnr-border);
+  border-radius: 999px;
+  background: var(--mnr-surface);
+  color: var(--mnr-muted);
+  font-size: 13px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .mnr-fab {
@@ -56,13 +79,13 @@ defineEmits<{
   height: 44px;
   padding: 0;
   border-radius: 50%;
-  background: var(--mnr-bg, #fff);
-  color: var(--mnr-text, #333);
-  border: 1px solid var(--mnr-border, #e5e5e5);
+  flex: 0 0 auto;
+  background: var(--mnr-surface);
+  color: var(--mnr-text);
+  border: 1px solid var(--mnr-border);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   cursor: pointer;
   position: relative;
-  font-size: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -71,20 +94,13 @@ defineEmits<{
 }
 
 .mnr-fab:hover {
-  background: var(--mnr-border, #f0f0f0);
+  background: var(--mnr-border);
   transform: translateY(-2px);
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
 }
 
 .mnr-fab:active {
   transform: scale(0.95);
-}
-
-.mnr-fab:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-  transform: none;
-  box-shadow: none;
 }
 
 .mnr-icon {
@@ -100,7 +116,7 @@ defineEmits<{
 }
 
 .mnr-fab:focus-visible {
-  outline: 3px solid color-mix(in srgb, var(--mnr-link, #1976d2) 55%, transparent);
+  outline: 3px solid var(--mnr-focus);
   outline-offset: 2px;
 }
 
