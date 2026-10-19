@@ -15,7 +15,16 @@
   >
     <header class="mnr-drawer-header">
       <div class="mnr-drawer-heading">
-        <h3 id="mnr-drawer-title" class="mnr-drawer-title">{{ bookTitle || '目录' }}</h3>
+        <h3 id="mnr-drawer-title" class="mnr-drawer-title">
+          <!-- The site's own catalog page, which most sites also use as the book page -->
+          <a v-if="indexUrl" :href="indexUrl" class="mnr-drawer-title-link" title="打开原站目录">
+            {{ bookTitle || '目录'
+            }}<svg class="mnr-drawer-title-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M7 17 17 7M8 7h9v9" />
+            </svg>
+          </a>
+          <template v-else>{{ bookTitle || '目录' }}</template>
+        </h3>
         <span v-if="currentChapterNumber" class="mnr-drawer-position">
           第 {{ currentChapterNumber }} / {{ chapters.length }} 章
         </span>
@@ -159,6 +168,7 @@ import { getDeepActiveElement } from '@/ui/focus';
 const props = defineProps<{
   isOpen: boolean;
   bookTitle?: string;
+  indexUrl?: string;
   chapters: TocEntryWithStatus[];
   loading: boolean;
   cacheProgress: CacheProgressState;
@@ -279,7 +289,7 @@ function trapFocus(event: globalThis.KeyboardEvent) {
   if (!drawer) return;
   const focusable = Array.from(
     drawer.querySelectorAll<globalThis.HTMLElement>(
-      'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
     )
   ).filter(element => element.offsetParent !== null || element === getDeepActiveElement());
   if (focusable.length === 0) return;
@@ -349,8 +359,8 @@ watch(
   width: min(88%, 340px);
   flex-direction: column;
   padding-left: env(safe-area-inset-left);
-  background: var(--mnr-bg, #fff);
-  color: var(--mnr-text, #333);
+  background: var(--mnr-surface);
+  color: var(--mnr-text);
   box-shadow: 4px 0 20px rgba(0, 0, 0, 0.15);
   transform: translateX(-105%);
   transition: transform 0.24s ease;
@@ -374,7 +384,7 @@ watch(
   justify-content: space-between;
   gap: 12px;
   padding: max(16px, env(safe-area-inset-top)) 16px 14px;
-  border-bottom: 1px solid var(--mnr-border, #e5e5e5);
+  border-bottom: 1px solid var(--mnr-border);
 }
 
 .mnr-drawer-heading {
@@ -393,12 +403,34 @@ watch(
   -webkit-line-clamp: 2;
 }
 
+.mnr-drawer-title-link {
+  border-radius: 4px;
+  color: inherit;
+}
+
+.mnr-drawer-title-icon {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-left: 4px;
+  vertical-align: -1px;
+  fill: none;
+  stroke: var(--mnr-muted);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.mnr-drawer-title-link:focus-visible {
+  outline: 3px solid var(--mnr-focus);
+  outline-offset: 2px;
+}
+
 .mnr-drawer-position {
   display: block;
   margin-top: 3px;
-  color: var(--mnr-text, #666);
+  color: var(--mnr-muted);
   font-size: 12px;
-  opacity: 0.72;
 }
 
 .mnr-drawer-close {
@@ -432,17 +464,17 @@ watch(
 .mnr-drawer-search input {
   width: 100%;
   padding: 9px 12px;
-  border: 1px solid var(--mnr-border, #ddd);
+  border: 1px solid var(--mnr-border);
   border-radius: 8px;
-  background: var(--mnr-bg, #fff);
-  color: var(--mnr-text, #333);
+  background: var(--mnr-bg);
+  color: var(--mnr-text);
   font-size: 14px;
 }
 
 .mnr-offline-section {
   flex-shrink: 0;
   padding: 10px 12px 12px;
-  border-bottom: 1px solid var(--mnr-border, #e5e5e5);
+  border-bottom: 1px solid var(--mnr-border);
 }
 
 .mnr-offline-main {
@@ -468,18 +500,17 @@ watch(
 
 .mnr-offline-copy span {
   margin-top: 2px;
-  color: var(--mnr-text, #666);
+  color: var(--mnr-muted);
   font-size: 12px;
-  opacity: 0.7;
 }
 
 .mnr-offline-action {
   min-height: 36px;
   padding: 6px 11px;
-  border: 1px solid var(--mnr-border, #ddd);
+  border: 1px solid var(--mnr-border);
   border-radius: 8px;
   background: transparent;
-  color: var(--mnr-link, #1976d2);
+  color: var(--mnr-link);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
@@ -492,13 +523,13 @@ watch(
 
 .mnr-offline-action.primary {
   flex: 0 0 auto;
-  border-color: var(--mnr-link, #1976d2);
-  background: var(--mnr-link, #1976d2);
-  color: var(--mnr-on-link, #fff);
+  border-color: var(--mnr-link);
+  background: var(--mnr-link);
+  color: var(--mnr-on-link);
 }
 
 .mnr-offline-action.danger {
-  color: var(--mnr-text, #555);
+  color: var(--mnr-text);
 }
 
 .mnr-offline-secondary {
@@ -516,7 +547,7 @@ watch(
   gap: 10px;
   padding: 40px 20px;
   /* Dim the text only, so the retry button keeps its full contrast. */
-  color: color-mix(in srgb, var(--mnr-text, #666) 78%, transparent);
+  color: var(--mnr-muted);
   text-align: center;
 }
 
@@ -533,12 +564,12 @@ watch(
   margin-top: 10px;
   overflow: hidden;
   border-radius: 2px;
-  background: var(--mnr-border, #e0e0e0);
+  background: var(--mnr-border);
 }
 
 .mnr-cache-progress-fill {
   height: 100%;
-  background: var(--mnr-link, #1976d2);
+  background: var(--mnr-link);
   transition: width 0.2s ease;
 }
 
@@ -577,9 +608,9 @@ watch(
 }
 
 .mnr-chapter-button.active {
-  border-left-color: var(--mnr-link, #1976d2);
-  background: color-mix(in srgb, var(--mnr-link, #1976d2) 10%, transparent);
-  color: var(--mnr-link, #1976d2);
+  border-left-color: var(--mnr-link);
+  background: color-mix(in srgb, var(--mnr-link) 10%, transparent);
+  color: var(--mnr-link);
   font-weight: 600;
 }
 
@@ -591,11 +622,11 @@ watch(
 
 /* Only the icon carries the cached color; titles keep the readable text color. */
 .mnr-cache-mark {
-  color: #388e3c;
+  color: var(--mnr-link);
 }
 
 .mnr-lock-mark {
-  opacity: 0.6;
+  color: var(--mnr-muted);
 }
 
 .mnr-chapter-mark svg {
@@ -613,11 +644,11 @@ watch(
   .mnr-drawer-close:hover,
   .mnr-chapter-button:not(.active):hover,
   .mnr-offline-action:enabled:hover {
-    background: var(--mnr-border, #f0f0f0);
+    background: var(--mnr-border);
   }
 
   .mnr-offline-action.primary:enabled:hover {
-    background: var(--mnr-link, #1976d2);
+    background: var(--mnr-link);
     filter: brightness(0.94);
   }
 }
@@ -626,7 +657,7 @@ watch(
 .mnr-drawer-search input:focus-visible,
 .mnr-offline-action:focus-visible,
 .mnr-chapter-button:focus-visible {
-  outline: 3px solid color-mix(in srgb, var(--mnr-link, #1976d2) 55%, transparent);
+  outline: 3px solid var(--mnr-focus);
   outline-offset: -3px;
 }
 

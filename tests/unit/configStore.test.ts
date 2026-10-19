@@ -38,7 +38,7 @@ describe('ConfigStore', () => {
     const store = useConfigStore();
     await store.load();
 
-    expect(host.style.getPropertyValue('--mnr-bg')).toBe('#ffffff');
+    expect(host.style.getPropertyValue('--mnr-bg')).toBe('#f6f4ef');
     expect(shadowRoot.querySelector('#mnr-custom-css')).toBeNull();
     expect(dom.window.document.documentElement.style.getPropertyValue('--mnr-bg')).toBe('');
     expect(dom.window.document.getElementById('mnr-custom-css')).toBeNull();

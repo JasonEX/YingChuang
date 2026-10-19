@@ -84,10 +84,10 @@ describe('UI component smoke', () => {
     expect(document.querySelectorAll('.mnr-theme-btn')).toHaveLength(THEMES.length);
     expect(
       Array.from(document.querySelectorAll('.mnr-theme-btn'), button => button.textContent?.trim())
-    ).toEqual(['跟随系统', '明亮', '米黄', '绿色', '蓝色', '深色']);
+    ).toEqual(['自动', '纸白', '米黄', '豆沙绿', '夜间']);
     expect(
       window.getComputedStyle(document.querySelector('.mnr-theme-grid')!).gridTemplateColumns
-    ).toContain('repeat(3');
+    ).toContain('repeat(5');
     const sliderIds = [
       'mnr-font-size',
       'mnr-line-height',
@@ -359,11 +359,9 @@ describe('UI component smoke', () => {
     expect(rows[0].querySelector('.mnr-cache-mark')?.getAttribute('aria-label')).toBe('已离线缓存');
     expect(rows[2].querySelector('.mnr-lock-mark')?.getAttribute('aria-label')).toBe('付费章节');
     // Only the mark is tinted; a cached title keeps the readable text color.
-    const cachedGreen = 'rgb(56, 142, 60)';
-    expect(window.getComputedStyle(rows[0].querySelector('.mnr-cache-mark')!).color).toBe(
-      cachedGreen
-    );
-    expect(window.getComputedStyle(rows[0]).color).not.toBe(cachedGreen);
+    const cachedTint = window.getComputedStyle(rows[0].querySelector('.mnr-cache-mark')!).color;
+    expect(cachedTint).toContain('--mnr-link');
+    expect(window.getComputedStyle(rows[0]).color).not.toBe(cachedTint);
 
     // One free chapter is still unsaved, so cache-all states its cost before requesting.
     cacheButton?.click();

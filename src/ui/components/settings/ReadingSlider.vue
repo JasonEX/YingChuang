@@ -61,15 +61,14 @@ function handleInput(event: Event) {
 }
 
 .mnr-reading-control-header label {
-  color: var(--mnr-text, #333);
+  color: var(--mnr-text);
   font-size: 14px;
   font-weight: 600;
 }
 
 .mnr-reading-control-header output {
-  color: var(--mnr-text, #666);
+  color: var(--mnr-muted);
   font-size: 13px;
-  opacity: 0.78;
 }
 
 .mnr-reading-slider-row {
@@ -80,7 +79,7 @@ function handleInput(event: Event) {
 
 .mnr-reading-slider-row span {
   flex: 0 0 24px;
-  color: var(--mnr-text, #666);
+  color: var(--mnr-muted);
   font-size: 13px;
   text-align: center;
 }
@@ -99,7 +98,7 @@ function handleInput(event: Event) {
 .mnr-reading-slider-row input::-webkit-slider-runnable-track {
   height: 4px;
   border-radius: 2px;
-  background: var(--mnr-border, #e0e0e0);
+  background: var(--mnr-border);
 }
 
 .mnr-reading-slider-row input::-webkit-slider-thumb {
@@ -109,13 +108,13 @@ function handleInput(event: Event) {
   appearance: none;
   border: 0;
   border-radius: 50%;
-  background: var(--mnr-link, #1976d2);
+  background: var(--mnr-link);
 }
 
 .mnr-reading-slider-row input::-moz-range-track {
   height: 4px;
   border-radius: 2px;
-  background: var(--mnr-border, #e0e0e0);
+  background: var(--mnr-border);
 }
 
 .mnr-reading-slider-row input::-moz-range-thumb {
@@ -123,11 +122,11 @@ function handleInput(event: Event) {
   height: 24px;
   border: 0;
   border-radius: 50%;
-  background: var(--mnr-link, #1976d2);
+  background: var(--mnr-link);
 }
 
 .mnr-reading-slider-row input:focus-visible {
-  outline: 3px solid color-mix(in srgb, var(--mnr-link, #1976d2) 55%, transparent);
+  outline: 3px solid var(--mnr-focus);
   outline-offset: 2px;
 }
 </style>

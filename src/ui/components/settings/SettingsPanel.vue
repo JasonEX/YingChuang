@@ -29,10 +29,9 @@
                 :class="{ active: configStore.themeId === theme.id }"
                 :aria-pressed="configStore.themeId === theme.id"
                 :style="{
-                  background: theme.background,
+                  background: themeSwatch(theme),
                   color: theme.text,
-                  borderColor:
-                    configStore.themeId === theme.id ? 'var(--mnr-link, #1976d2)' : theme.border,
+                  borderColor: configStore.themeId === theme.id ? 'var(--mnr-link)' : theme.border,
                 }"
                 @click="configStore.setTheme(theme.id)"
               >
@@ -355,8 +354,11 @@ import { useEventListener } from '@/ui/composables/useEventListener';
 import { useTwoStepConfirm } from '@/ui/composables/useTwoStepConfirm';
 import { getDeepActiveElement } from '@/ui/focus';
 import {
+  NIGHT_THEME,
+  PAPER_THEME,
   THEMES,
   type BehaviorSettings,
+  type Theme,
   type ReadingSettings,
   useConfigStore,
 } from '@/ui/stores/config';
@@ -405,6 +407,12 @@ const customCleanupErrorMessage = computed(() =>
 );
 
 const themes = THEMES;
+/** "Follow system" switches between paper and night, so its swatch shows both corners. */
+function themeSwatch(theme: Theme): string {
+  return theme.id === 'system'
+    ? `linear-gradient(135deg, ${PAPER_THEME.background} 75%, ${NIGHT_THEME.background} 75%)`
+    : theme.background;
+}
 const conversionOptions = [
   { label: '原文', value: 'none' },
   { label: '简体', value: 'sc' },
@@ -563,9 +571,9 @@ watch(
   height: 100%;
   flex-direction: column;
   padding-right: env(safe-area-inset-right);
-  background: var(--mnr-bg, #fff);
-  color: var(--mnr-text, #333);
-  border-left: 1px solid var(--mnr-border, #e0e0e0);
+  background: var(--mnr-surface);
+  color: var(--mnr-text);
+  border-left: 1px solid var(--mnr-border);
   box-shadow: -4px 0 20px rgba(0, 0, 0, 0.15);
 }
 
@@ -575,14 +583,14 @@ watch(
   align-items: center;
   justify-content: space-between;
   padding: max(16px, env(safe-area-inset-top)) 16px 16px;
-  border-bottom: 1px solid var(--mnr-border, #e0e0e0);
+  border-bottom: 1px solid var(--mnr-border);
 }
 
 .mnr-settings-header h3,
 .mnr-settings-section h4,
 .mnr-field-label {
   margin: 0;
-  color: var(--mnr-text, #333);
+  color: var(--mnr-text);
 }
 
 .mnr-settings-header h3 {
@@ -630,7 +638,7 @@ watch(
 
 .mnr-theme-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 8px;
 }
 
@@ -648,26 +656,26 @@ watch(
   display: none;
   margin-top: 16px;
   padding: 12px 14px;
-  border: 1px solid var(--mnr-border, #ddd);
+  border: 1px solid var(--mnr-border);
   border-radius: 8px;
-  background: var(--mnr-bg, #fff);
-  color: var(--mnr-text, #333);
+  background: var(--mnr-bg);
+  color: var(--mnr-text);
 }
 
 .mnr-reading-preview span {
   display: block;
   margin-bottom: 4px;
+  color: var(--mnr-muted);
   font-size: 12px;
-  opacity: 0.65;
 }
 
 .mnr-reading-preview p {
   margin: 0;
-  font-family: var(--mnr-font-family, system-ui, sans-serif);
-  font-size: var(--mnr-font-size, 18px);
-  line-height: var(--mnr-line-height, 1.8);
-  letter-spacing: var(--mnr-letter-spacing, 0);
-  text-indent: var(--mnr-paragraph-indent, 2em);
+  font-family: var(--mnr-font-family);
+  font-size: var(--mnr-font-size);
+  line-height: var(--mnr-line-height);
+  letter-spacing: var(--mnr-letter-spacing);
+  text-indent: var(--mnr-paragraph-indent);
 }
 
 .mnr-field-label {
@@ -678,10 +686,10 @@ watch(
   width: 100%;
   min-height: 42px;
   padding: 9px 12px;
-  border: 1px solid var(--mnr-border, #ddd);
+  border: 1px solid var(--mnr-border);
   border-radius: 8px;
-  background: var(--mnr-bg, #fff);
-  color: var(--mnr-text, #333);
+  background: var(--mnr-bg);
+  color: var(--mnr-text);
   font-size: 14px;
 }
 
@@ -695,7 +703,7 @@ watch(
 .mnr-segmented-control {
   display: flex;
   overflow: hidden;
-  border: 1px solid var(--mnr-border, #ddd);
+  border: 1px solid var(--mnr-border);
   border-radius: 8px;
 }
 
@@ -704,9 +712,9 @@ watch(
   flex: 1;
   padding: 9px 12px;
   border: 0;
-  border-right: 1px solid var(--mnr-border, #ddd);
-  background: var(--mnr-bg, #fff);
-  color: var(--mnr-text, #666);
+  border-right: 1px solid var(--mnr-border);
+  background: var(--mnr-bg);
+  color: var(--mnr-text);
   font-size: 14px;
   cursor: pointer;
 }
@@ -716,8 +724,8 @@ watch(
 }
 
 .mnr-segment.active {
-  background: var(--mnr-link, #1976d2);
-  color: var(--mnr-on-link, #fff);
+  background: var(--mnr-link);
+  color: var(--mnr-on-link);
 }
 
 .mnr-secondary-action {
@@ -725,23 +733,23 @@ watch(
   min-height: 42px;
   margin-top: 16px;
   padding: 9px 12px;
-  border: 1px solid var(--mnr-border, #ddd);
+  border: 1px solid var(--mnr-border);
   border-radius: 8px;
   background: transparent;
-  color: var(--mnr-text, #333);
+  color: var(--mnr-text);
   font-size: 14px;
   cursor: pointer;
 }
 
 .mnr-settings-group {
   margin-top: 18px;
-  border-top: 1px solid var(--mnr-border, #ddd);
+  border-top: 1px solid var(--mnr-border);
 }
 
 .mnr-settings-group summary {
   min-height: 48px;
   padding: 14px 0;
-  color: var(--mnr-text, #333);
+  color: var(--mnr-text);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
@@ -761,7 +769,7 @@ watch(
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  color: var(--mnr-text, #333);
+  color: var(--mnr-text);
   cursor: pointer;
 }
 
@@ -769,7 +777,7 @@ watch(
   width: 22px;
   height: 22px;
   flex: 0 0 auto;
-  accent-color: var(--mnr-link, #1976d2);
+  accent-color: var(--mnr-link);
 }
 
 .mnr-custom-css {
@@ -778,10 +786,10 @@ watch(
   min-height: 110px;
   resize: vertical;
   padding: 10px 12px;
-  border: 1px solid var(--mnr-border, #ddd);
+  border: 1px solid var(--mnr-border);
   border-radius: 8px;
-  background: var(--mnr-bg, #fff);
-  color: var(--mnr-text, #333);
+  background: var(--mnr-bg);
+  color: var(--mnr-text);
   font:
     12px/1.5 ui-monospace,
     SFMono-Regular,
@@ -808,12 +816,12 @@ watch(
 }
 
 .mnr-cleanup-guide {
-  color: var(--mnr-text, #333);
+  color: var(--mnr-text);
 }
 
 .mnr-cleanup-guide summary {
+  color: var(--mnr-muted);
   cursor: pointer;
-  opacity: 0.72;
 }
 
 .mnr-cleanup-guide p {
@@ -835,10 +843,10 @@ watch(
   min-width: 0;
   min-height: 42px;
   padding: 9px 12px;
-  border: 1px solid var(--mnr-border, #ddd);
+  border: 1px solid var(--mnr-border);
   border-radius: 8px;
-  background: var(--mnr-bg, #fff);
-  color: var(--mnr-text, #333);
+  background: var(--mnr-bg);
+  color: var(--mnr-text);
   font:
     12px/1.5 ui-monospace,
     SFMono-Regular,
@@ -869,7 +877,7 @@ watch(
 }
 
 .mnr-field-help {
-  opacity: 0.72;
+  color: var(--mnr-muted);
 }
 
 .mnr-protection-help {
@@ -878,24 +886,24 @@ watch(
 
 .mnr-field-error {
   margin-top: 6px;
-  color: var(--mnr-danger, #b3261e);
+  color: var(--mnr-danger);
 }
 
 .mnr-settings-footer {
   flex-shrink: 0;
   padding: 10px 16px max(12px, env(safe-area-inset-bottom));
-  border-top: 1px solid var(--mnr-border, #ddd);
-  background: var(--mnr-bg, #fff);
+  border-top: 1px solid var(--mnr-border);
+  background: var(--mnr-surface);
 }
 
 .mnr-exit-btn {
   width: 100%;
   min-height: 42px;
   padding: 9px 12px;
-  border: 1px solid var(--mnr-danger, #b3261e);
+  border: 1px solid var(--mnr-danger);
   border-radius: 8px;
   background: transparent;
-  color: var(--mnr-danger, #b3261e);
+  color: var(--mnr-danger);
   font-size: 14px;
   cursor: pointer;
 }
@@ -905,7 +913,7 @@ watch(
   .mnr-secondary-action:enabled:hover,
   .mnr-segment:not(.active):hover,
   .mnr-exit-btn:hover {
-    background: var(--mnr-border, #f0f0f0);
+    background: var(--mnr-border);
   }
 }
 
@@ -921,7 +929,7 @@ watch(
 .mnr-cleanup-input:focus-visible,
 .mnr-custom-css:focus-visible,
 .mnr-exit-btn:focus-visible {
-  outline: 3px solid color-mix(in srgb, var(--mnr-link, #1976d2) 55%, transparent);
+  outline: 3px solid var(--mnr-focus);
   outline-offset: 2px;
 }
 

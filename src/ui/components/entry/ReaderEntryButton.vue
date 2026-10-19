@@ -40,8 +40,8 @@ const emit = defineEmits<{
   padding: 0 16px;
   border: 0;
   border-radius: 24px;
-  background: var(--mnr-link, #1976d2);
-  color: var(--mnr-on-link, #fff);
+  background: var(--mnr-link);
+  color: var(--mnr-on-link);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2);
   font-size: 14px;
   font-weight: 600;
@@ -79,7 +79,7 @@ const emit = defineEmits<{
 
 .mnr-reader-entry:focus-visible {
   opacity: 1;
-  outline: 3px solid color-mix(in srgb, var(--mnr-link, #1976d2) 48%, #fff);
+  outline: 3px solid color-mix(in srgb, var(--mnr-link) 48%, #fff);
   outline-offset: 3px;
 }
 

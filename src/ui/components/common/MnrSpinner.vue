@@ -20,8 +20,8 @@ withDefaults(
 .mnr-spinner.small {
   width: 24px;
   height: 24px;
-  border: 2px solid var(--mnr-border, #e0e0e0);
-  border-top-color: var(--mnr-link, #1976d2);
+  border: 2px solid var(--mnr-border);
+  border-top-color: var(--mnr-link);
   animation-duration: 1s;
   animation-timing-function: linear;
 }
@@ -29,15 +29,15 @@ withDefaults(
 .mnr-spinner.medium {
   width: 48px;
   height: 48px;
-  border: 4px solid var(--mnr-border, #e0e0e0);
-  border-top-color: var(--mnr-link, #1976d2);
+  border: 4px solid var(--mnr-border);
+  border-top-color: var(--mnr-link);
 }
 
 .mnr-spinner.large {
   width: 64px;
   height: 64px;
-  border: 4px solid var(--mnr-border, #e0e0e0);
-  border-top-color: var(--mnr-link, #1976d2);
+  border: 4px solid var(--mnr-border);
+  border-top-color: var(--mnr-link);
 }
 
 @keyframes mnr-spin {

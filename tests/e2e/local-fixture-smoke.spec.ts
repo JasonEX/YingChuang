@@ -1470,7 +1470,7 @@ test('runs the built userscript and restores the host page after exit', async ({
   const readerEntry = page.locator('#mnr-entry-root').locator('#mnr-entry-button');
   await expect(readerEntry).toBeVisible();
   await expect(readerEntry).toHaveText('进入阅读模式');
-  await expect(readerEntry).toHaveCSS('background-color', 'rgb(0, 102, 204)');
+  await expect(readerEntry).toHaveCSS('background-color', 'rgb(43, 95, 158)');
   await expect(readerEntry).toHaveCSS('box-shadow', 'rgba(0, 0, 0, 0.2) 0px 6px 18px 0px');
   const entryAlignment = await readerEntry.evaluate(button => {
     const icon = button.querySelector('svg');
@@ -3591,7 +3591,7 @@ for (const touch of [false, true]) {
       const panel = root.locator('.mnr-settings-panel');
       const conversion = panel.locator('fieldset').filter({ hasText: '简繁转换' });
       const simplified = conversion.getByRole('button', { name: '简体', exact: true });
-      for (const theme of ['跟随系统', '明亮', '米黄', '绿色', '蓝色', '深色']) {
+      for (const theme of ['自动', '纸白', '米黄', '豆沙绿', '夜间']) {
         await activate(panel.getByRole('button', { name: theme, exact: true }));
         await activate(simplified);
         await expect(simplified).toHaveAttribute('aria-pressed', 'true');
@@ -3605,7 +3605,7 @@ for (const touch of [false, true]) {
         await expect(simplified).toHaveCSS('background-color', selectedColor);
         await expect(simplified).toHaveCSS(
           'color',
-          theme === '深色' ? 'rgb(17, 17, 17)' : 'rgb(255, 255, 255)'
+          theme === '夜间' ? 'rgb(17, 17, 17)' : 'rgb(255, 255, 255)'
         );
       }
       await panel.locator('summary').filter({ hasText: '本站与高级' }).click();
