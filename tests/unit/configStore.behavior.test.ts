@@ -63,6 +63,24 @@ describe('ConfigStore - behavior', () => {
     expect(document.documentElement.style.getPropertyValue('--mnr-bg')).toBe('');
   });
 
+  it('applies default theme variables when reading storage fails', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.stubGlobal(
+      'GM_getValue',
+      vi.fn(async () => {
+        throw new Error('storage unavailable');
+      })
+    );
+
+    const store = useConfigStore();
+    await store.load();
+    const { host } = createShadowMount('mnr-config-load-failure-root');
+
+    expect(store.themeId).toBe('system');
+    expect(host.style.getPropertyValue('--mnr-link')).not.toBe('');
+    expect(host.style.getPropertyValue('--mnr-font-size')).toBe('18px');
+  });
+
   it('keeps built-in theme colors readable for long-form reading and accent controls', () => {
     for (const theme of THEMES) {
       expect(contrastRatio(theme.background, theme.text), theme.id).toBeGreaterThanOrEqual(7);

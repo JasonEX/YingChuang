@@ -70,68 +70,55 @@ export interface ProtectionSettings {
   blockPopups: boolean;
 }
 
-// Default themes - improved for better readability
+// Built-in reading themes. Long-form text keeps >= 8:1 contrast without the glare of pure
+// black on pure white; muted UI text is derived in CSS (see shadowMount).
+export const PAPER_THEME: Theme = {
+  id: 'light',
+  name: '纸白',
+  background: '#f6f4ef',
+  text: '#2e2c29',
+  link: '#2b5f9e',
+  onLink: '#ffffff',
+  border: '#e2ddd3',
+  danger: '#b3261e',
+};
+
+export const NIGHT_THEME: Theme = {
+  id: 'dark',
+  name: '夜间',
+  background: '#1c1c1e',
+  text: '#b8b4ab',
+  link: '#8ab4d8',
+  onLink: '#111111',
+  border: '#34332f',
+  danger: '#f28b82',
+};
+
 export const THEMES: Theme[] = [
-  {
-    id: 'system',
-    name: '跟随系统',
-    background: '#f5f5f5',
-    text: '#242424',
-    link: '#2563a8',
-    onLink: '#ffffff',
-    border: '#d8d8d8',
-    danger: '#b3261e',
-  },
-  {
-    id: 'light',
-    name: '明亮',
-    background: '#ffffff',
-    text: '#1a1a1a',
-    link: '#0066cc',
-    onLink: '#ffffff',
-    border: '#e5e5e5',
-    danger: '#b3261e',
-  },
+  // Never applied itself: resolves to paper or night. Its colors only back the swatch.
+  { ...PAPER_THEME, id: 'system', name: '自动' },
+  PAPER_THEME,
   {
     id: 'sepia',
     name: '米黄',
-    background: '#f8f1e3',
-    text: '#4a4137',
-    link: '#7a4f26',
+    background: '#f3e9d2',
+    text: '#433526',
+    link: '#7a4a1e',
     onLink: '#ffffff',
-    border: '#e8dcc8',
-    danger: '#b3261e',
+    border: '#e0d3b8',
+    danger: '#a8261b',
   },
   {
     id: 'green',
-    name: '绿色',
-    background: '#edf6ed',
-    text: '#243429',
-    link: '#2f6f3d',
+    name: '豆沙绿',
+    background: '#d6e8d0',
+    text: '#26342a',
+    link: '#2c5f36',
     onLink: '#ffffff',
-    border: '#c9ddc9',
-    danger: '#b3261e',
+    border: '#bcd3b5',
+    danger: '#9c2218',
   },
-  {
-    id: 'blue',
-    name: '蓝色',
-    background: '#eaf3fb',
-    text: '#263746',
-    link: '#2563a8',
-    onLink: '#ffffff',
-    border: '#c7d8e8',
-    danger: '#b3261e',
-  },
-  {
-    id: 'dark',
-    name: '深色',
-    background: '#1e1e1e',
-    text: '#c8c8c8',
-    link: '#78bdf2',
-    onLink: '#111111',
-    border: '#3a3a3a',
-    danger: '#f28b82',
-  },
+  NIGHT_THEME,
 ];
 
 // Default settings
@@ -203,9 +190,9 @@ export const useConfigStore = defineStore('config', () => {
         typeof window !== 'undefined' &&
         typeof window.matchMedia === 'function' &&
         window.matchMedia('(prefers-color-scheme: dark)').matches;
-      return THEMES.find(t => t.id === (prefersDark ? 'dark' : 'light')) || THEMES[1];
+      return prefersDark ? NIGHT_THEME : PAPER_THEME;
     }
-    return THEMES.find(t => t.id === themeId.value) || THEMES[1];
+    return THEMES.find(t => t.id === themeId.value) || PAPER_THEME;
   };
 
   // Actions
@@ -325,8 +312,8 @@ export const useConfigStore = defineStore('config', () => {
           const config = parsed as Record<string, unknown>;
 
           // Validate and apply each field with type checking
-          if (typeof config.themeId === 'string') {
-            themeId.value = config.themeId;
+          if (THEMES.some(t => t.id === config.themeId)) {
+            themeId.value = config.themeId as string;
           }
           if (config.reading && typeof config.reading === 'object') {
             reading.value = {
@@ -355,8 +342,6 @@ export const useConfigStore = defineStore('config', () => {
         }
       }
 
-      applyAll();
-
       // Repair corrupted data so users aren't stuck with repeated parse failures.
       if (hasInvalidData) {
         console.warn('[ConfigStore] Corrupted config detected; resetting to defaults');
@@ -365,6 +350,8 @@ export const useConfigStore = defineStore('config', () => {
     } catch (e) {
       console.error('[ConfigStore] Load error:', e);
     } finally {
+      // Shadow roots rely on these variables, so apply them (defaults if storage failed).
+      applyAll();
       isHydrating = false;
     }
   }
